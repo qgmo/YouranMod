@@ -87,7 +87,7 @@ public final class CannerReactions {
         }
         builtinsRegistered = true;
         TABLE.add(smallMagnetite());
-        int meta = AlchemistryCompat.compoundMeta();
+        int meta = AlchemistryCompat.meta(AlchemistryCompat.TRIIRON_TETROXIDE);
         if (meta >= 0) {
             for (FluidItemReaction<ItemStack, ReactionItem> r : alchemistry(meta)) {
                 TABLE.add(r);
