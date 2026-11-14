@@ -6,14 +6,27 @@ import net.minecraftforge.event.world.WorldEvent;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.PlayerEvent;
 
-/** 主线程上的事件：区块加载与卸载、维度卸载、玩家退出 → 更新设备表 */
+/** 主线程上的事件：区块加载与卸载、维度卸载、玩家退出 → 更新设备表；玩家上线、下线 → 分、收回临时地址 */
 final class NetworkEvents {
     private final DeviceTable devices;
     private final TestDevices testDevices;
+    /** 玩家临时地址：上线分、下线收回（没开时为 null） */
+    private final java.util.function.Consumer<net.minecraft.entity.player.EntityPlayerMP> onLogin;
+    private final java.util.function.Consumer<java.util.UUID> onLogoutPlayer;
 
-    NetworkEvents(DeviceTable devices, TestDevices testDevices) {
+    NetworkEvents(DeviceTable devices, TestDevices testDevices, java.util.function.Consumer<net.minecraft.entity.player.EntityPlayerMP> onLogin,
+                  java.util.function.Consumer<java.util.UUID> onLogoutPlayer) {
         this.devices = devices;
         this.testDevices = testDevices;
+        this.onLogin = onLogin;
+        this.onLogoutPlayer = onLogoutPlayer;
+    }
+
+    @SubscribeEvent
+    public void onLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.player instanceof net.minecraft.entity.player.EntityPlayerMP) {
+            onLogin.accept((net.minecraft.entity.player.EntityPlayerMP) event.player);
+        }
     }
 
     @SubscribeEvent
@@ -43,5 +56,6 @@ final class NetworkEvents {
     public void onLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         devices.onPlayerLeft(event.player.getUniqueID());
         testDevices.onPlayerLeft(event.player.getUniqueID());
+        onLogoutPlayer.accept(event.player.getUniqueID());
     }
 }

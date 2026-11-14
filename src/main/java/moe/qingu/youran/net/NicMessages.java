@@ -10,14 +10,21 @@ import moe.qingu.youran.api.network.packet.Ipv6Packet;
  *   0x01 PACKET  双向   [原始 IPv6 包，40–1280 字节]
  *   0x02 ATTACH  服→客  [代号 int][设备地址 16][递归解析器地址 16][NTP 地址 16]   网卡接上了这台设备
  *   0x03 DETACH  服→客  [代号 int]                                         网卡断开
+ *   0x11 PLAYER_PACKET  双向   [原始 IPv6 包，40–1280 字节]                   玩家临时地址的包
+ *   0x12 PLAYER_ATTACH  服→客  [代号 int][玩家临时地址 16][递归解析器地址 16]   上线时分到了临时地址
+ *   0x13 PLAYER_DETACH  服→客  [代号 int]                                   临时地址收回了
  * </pre>
- * 代号每次接上时加一，客户端用它丢掉过时的 DETACH。
+ * 代号每次接上时加一，客户端用它丢掉过时的 DETACH。设备网卡（0x01–0x03）与玩家临时地址（0x11–0x13）是两块网卡，互不相干：
+ * 同一个玩家可以既操作一台电脑、又有自己的临时地址。
  */
 public final class NicMessages {
     public static final String CHANNEL = "youranmod_net";
     public static final int PACKET = 1;
     public static final int ATTACH = 2;
     public static final int DETACH = 3;
+    public static final int PLAYER_PACKET = 0x11;
+    public static final int PLAYER_ATTACH = 0x12;
+    public static final int PLAYER_DETACH = 0x13;
     /** 消息最长：PACKET 的 1 + 1280 */
     public static final int MAX_MESSAGE = 1 + Ipv6Packet.MAX_PACKET;
 
@@ -25,9 +32,33 @@ public final class NicMessages {
     }
 
     public static byte[] packet(byte[] raw) {
+        return packet(PACKET, raw);
+    }
+
+    public static byte[] playerPacket(byte[] raw) {
+        return packet(PLAYER_PACKET, raw);
+    }
+
+    private static byte[] packet(int type, byte[] raw) {
         byte[] b = new byte[1 + raw.length];
-        b[0] = PACKET;
+        b[0] = (byte) type;
         System.arraycopy(raw, 0, b, 1, raw.length);
+        return b;
+    }
+
+    public static byte[] playerAttach(int generation, Ipv6Address address, Ipv6Address resolver) {
+        byte[] b = new byte[1 + 4 + 32];
+        b[0] = PLAYER_ATTACH;
+        putInt(b, 1, generation);
+        address.write(b, 5);
+        (resolver != null ? resolver : Ipv6Address.UNSPECIFIED).write(b, 21);
+        return b;
+    }
+
+    public static byte[] playerDetach(int generation) {
+        byte[] b = new byte[5];
+        b[0] = PLAYER_DETACH;
+        putInt(b, 1, generation);
         return b;
     }
 

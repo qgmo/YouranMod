@@ -31,6 +31,8 @@ public final class ClientNetwork {
     private static ExecutorEventLoop loop;
     /** 只在 loop 线程上改 */
     private static SessionImpl session;
+    /** 玩家临时地址的网卡（只在 loop 线程上改） */
+    private static SessionImpl playerSession;
 
     private ClientNetwork() {
     }
@@ -55,6 +57,7 @@ public final class ClientNetwork {
         }
         if (l != null) {
             l.execute(ClientNetwork::detachInLoop);
+            l.execute(ClientNetwork::detachPlayerInLoop);
             if (l.shutdown(2000)) {
                 YouranMod.LOG.info("已断开服务器，客户端网络线程已结束");
             } else {
@@ -83,6 +86,46 @@ public final class ClientNetwork {
                     l.execute(() -> {
                         if (session != null) {
                             session.stack.receive(raw);
+                        }
+                    });
+                }
+                break;
+            }
+            case NicMessages.PLAYER_PACKET: {
+                if (b.length < 1 + Ipv6Packet.HEADER) {
+                    return;
+                }
+                byte[] raw = Arrays.copyOfRange(b, 1, b.length);
+                ExecutorEventLoop l = currentLoop();
+                if (l != null) {
+                    l.execute(() -> {
+                        if (playerSession != null) {
+                            playerSession.stack.receive(raw);
+                        }
+                    });
+                }
+                break;
+            }
+            case NicMessages.PLAYER_ATTACH: {
+                if (b.length < 37) {
+                    return;
+                }
+                int gen = NicMessages.getInt(b, 1);
+                Ipv6Address address = Ipv6Address.read(b, 5);
+                Ipv6Address resolver = Ipv6Address.read(b, 21);
+                loop().execute(() -> attachPlayerInLoop(gen, address, resolver));
+                break;
+            }
+            case NicMessages.PLAYER_DETACH: {
+                if (b.length < 5) {
+                    return;
+                }
+                int gen = NicMessages.getInt(b, 1);
+                ExecutorEventLoop l = currentLoop();
+                if (l != null) {
+                    l.execute(() -> {
+                        if (playerSession != null && playerSession.generation == gen) {
+                            detachPlayerInLoop();
                         }
                     });
                 }
@@ -150,6 +193,31 @@ public final class ClientNetwork {
 
     private static void sendToServer(byte[] packet) {
         NicChannel.sendToServer(connection, NicMessages.packet(packet));
+    }
+
+    private static void attachPlayerInLoop(int gen, Ipv6Address address, Ipv6Address resolver) {
+        detachPlayerInLoop();
+        ExecutorEventLoop l = currentLoop();
+        if (l == null) {
+            return;
+        }
+        NetStack stack = new NetStack(l, p -> NicChannel.sendToServer(connection, NicMessages.playerPacket(p)), new SecureRandom());
+        stack.addAddress(address);
+        playerSession = new SessionImpl(gen, address, resolver, null, stack);
+        YouranMod.LOG.info("游戏内网络：分到了玩家临时地址 {}（受限：只能连 DNS 和服务器放行的主机）", address);
+        ClientNicState.setPlayer(playerSession);
+    }
+
+    private static void detachPlayerInLoop() {
+        SessionImpl s = playerSession;
+        if (s == null) {
+            return;
+        }
+        playerSession = null;
+        s.closed = true;
+        s.stack.close();
+        ClientNicState.setPlayer(null);
+        YouranMod.LOG.info("游戏内网络：玩家临时地址 {} 收回了", s.address);
     }
 
     private static final class SessionImpl implements ClientNic.Session {

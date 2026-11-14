@@ -46,10 +46,15 @@ public final class ClientNetCommand extends CommandBase {
 
     @Override
     public void execute(MinecraftServer server, ICommandSender sender, String[] args) throws CommandException {
-        ClientNic.Session s = ClientNic.current();
+        // /ynetc player ...：用玩家临时地址那块（受限的）网卡
+        boolean player = args.length > 0 && args[0].equals("player");
+        if (player) {
+            args = java.util.Arrays.copyOfRange(args, 1, args.length);
+        }
+        ClientNic.Session s = player ? ClientNic.player() : ClientNic.current();
         String sub = args.length > 0 ? args[0] : "status";
         if (s == null) {
-            say("youranmod.net.client.detached");
+            say(player ? "youranmod.net.client.no_player_address" : "youranmod.net.client.detached");
             return;
         }
         switch (sub) {
@@ -104,6 +109,10 @@ public final class ClientNetCommand extends CommandBase {
                 break;
             }
             case "ntp":
+                if (s.ntpAddress() == null) {
+                    say("youranmod.net.client.failed", "NTP");
+                    break;
+                }
                 NtpClient.query(s.stack(), s.ntpAddress()).whenComplete((r, err) -> {
                     if (err != null) {
                         say("youranmod.net.client.failed", message(err));

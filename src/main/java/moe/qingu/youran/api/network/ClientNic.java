@@ -42,6 +42,15 @@ public final class ClientNic {
         return ClientNicState.current();
     }
 
+    /**
+     * 玩家自己的临时地址（{@link PlayerAddresses}）这块网卡的会话：上线时服务器分到地址后接上，下线断开。没有为 null。
+     * 这块网卡受服务器控制：只能问递归解析器、连服务器按用途放行的主机的 TCP 80 / 443（如家具电脑旁观时页面所在的网站），
+     * 别的都会收到“目标不可达”。{@link Session#ntpAddress()} 为 null（不许连 NTP）。和 {@link #current()}（操作的设备的网卡）互不相干。
+     */
+    public static Session player() {
+        return ClientNicState.player();
+    }
+
     public static void addListener(Listener listener) {
         ClientNicState.addListener(listener);
     }

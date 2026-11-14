@@ -11,6 +11,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class ClientNicState {
     private static final Logger LOG = LogManager.getLogger("YouranMod");
     private static volatile ClientNic.Session current;
+    private static volatile ClientNic.Session player;
     private static final List<ClientNic.Listener> listeners = new CopyOnWriteArrayList<>();
 
     private ClientNicState() {
@@ -18,6 +19,15 @@ public final class ClientNicState {
 
     public static ClientNic.Session current() {
         return current;
+    }
+
+    public static ClientNic.Session player() {
+        return player;
+    }
+
+    /** 玩家临时地址的网卡接上 / 断开（客户端网络线程上） */
+    public static void setPlayer(ClientNic.Session s) {
+        player = s;
     }
 
     public static void addListener(ClientNic.Listener l) {

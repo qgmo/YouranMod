@@ -36,6 +36,31 @@ public final class NetworkConfig {
     @Config.RequiresMcRestart
     public static int hostMaxTcpConnections = 256;
 
+    @Config.Comment({"玩家临时地址：玩家上线时在玩法 /64 的最后一个 /96 里分一个随机地址，只能连递归解析器的 DNS 和按用途放行的主机（TCP 80 / 443），",
+            "下线收回。用途如家具电脑的旁观者自己下载页面里的图片。默认 true。"})
+    @Config.RequiresMcRestart
+    public static boolean playerAddresses = true;
+
+    @Config.Comment({"玩家临时地址每秒最多发多少个包（玩家 → 服务器）。超过的丢掉并记日志。默认 300。"})
+    @Config.RangeInt(min = 1)
+    @Config.RequiresMcRestart
+    public static int playerPacketsPerSecond = 300;
+
+    @Config.Comment({"玩家临时地址每秒最多发多少字节（按 IPv6 包长算）。默认 49152（48 KiB/s；主要是 TCP 确认）。"})
+    @Config.RangeInt(min = 1280)
+    @Config.RequiresMcRestart
+    public static int playerBytesPerSecond = 49152;
+
+    @Config.Comment({"发给玩家临时地址的包每秒最多多少个（服务器 → 玩家）。超过的丢掉（TCP 会重传）。默认 300。"})
+    @Config.RangeInt(min = 1)
+    @Config.RequiresMcRestart
+    public static int playerInboundPacketsPerSecond = 300;
+
+    @Config.Comment({"发给玩家临时地址的包每秒最多多少字节。默认 393216（384 KiB/s）。"})
+    @Config.RangeInt(min = 1280)
+    @Config.RequiresMcRestart
+    public static int playerInboundBytesPerSecond = 393216;
+
     @Config.Comment({"HTTPS：中间 CA 的证书文件（PEM，由 QinguMoe CA 签发；后面可以接上更上层的中间证书，不用放根证书）。",
             "路径相对服务器根目录，如 config/youranmod-tls/intermediate.crt。和 tlsCaKey 都填了才开 HTTPS（网站的 443 口），空着就只有 HTTP。"})
     @Config.RequiresMcRestart

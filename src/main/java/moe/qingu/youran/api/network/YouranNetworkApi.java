@@ -24,6 +24,8 @@ import java.util.Locale;
 public final class YouranNetworkApi {
     /** YouranMod 自己的机房（玩法 /64 里的第 0 号 /96） */
     public static final String YOURANMOD_DATACENTER = "youranmod:main";
+    /** 玩家临时地址的 /96（玩法 /64 的最后一个，序号 {@link NetworkLayout#PLAYERS_DATACENTER}）；不能在里面登记主机 */
+    public static final String PLAYERS_DATACENTER = "youranmod:players";
 
     private YouranNetworkApi() {
     }
@@ -35,9 +37,9 @@ public final class YouranNetworkApi {
         NetworkRegistry.addDatacenter(checkKey(key), -1);
     }
 
-    /** 登记一个机房，指定序号（0–4294967295；0 是 YouranMod 的） */
+    /** 登记一个机房，指定序号（0–4294967294；0 是 YouranMod 的，最后一个 4294967295 留给玩家临时地址） */
     public static void registerDatacenter(String key, long index) {
-        if (index < 0 || index > 0xFFFFFFFFL) {
+        if (index < 0 || index >= NetworkLayout.PLAYERS_DATACENTER) {
             throw new IllegalArgumentException("机房序号超出范围：" + index);
         }
         NetworkRegistry.addDatacenter(checkKey(key), index);
@@ -47,7 +49,7 @@ public final class YouranNetworkApi {
      * 在机房 {@code datacenter} 里登记一个 /128 主机，按顺序分地址。网络启动时在网络线程上调用 {@code service}。
      */
     public static void registerHost(String key, String datacenter, HostService service) {
-        NetworkRegistry.addHost(checkKey(key), checkKey(datacenter), -1, service);
+        NetworkRegistry.addHost(checkKey(key), checkHostDatacenter(datacenter), -1, service);
     }
 
     /** 同上，指定主机号（/96 里的低 32 位，如 0x53 得到 {@code …::53}；0 不能用） */
@@ -55,7 +57,7 @@ public final class YouranNetworkApi {
         if (hostPart <= 0 || hostPart > 0xFFFFFFFFL) {
             throw new IllegalArgumentException("主机号超出范围：" + hostPart);
         }
-        NetworkRegistry.addHost(checkKey(key), checkKey(datacenter), hostPart, service);
+        NetworkRegistry.addHost(checkKey(key), checkHostDatacenter(datacenter), hostPart, service);
     }
 
     /**
@@ -132,10 +134,33 @@ public final class YouranNetworkApi {
         return b == null ? null : b.serverTls(names);
     }
 
+    /**
+     * 服务端：YouranMod 自己的 {@code .yr} / {@code .com} 区里登记的名字（如 {@code minebay.yr}）的地址，直接查登记表，不走 DNS 报文。
+     * 其他模组顶级域里的名字、不存在的名字、网络没在运行时返回 null。给“按页面里的主机名放行玩家临时地址”这类服务端逻辑用。
+     */
+    public static Ipv6Address addressOfName(String name) {
+        NetworkBackend b = NetworkHooks.backend();
+        if (b == null || name == null) {
+            return null;
+        }
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".")) {
+            n = n.substring(0, n.length() - 1);
+        }
+        return b.localNameAddress(n);
+    }
+
     /** NTP 服务器的地址 */
     public static Ipv6Address ntpAddress() {
         NetworkBackend b = NetworkHooks.backend();
         return b == null ? null : b.ntpAddress();
+    }
+
+    private static String checkHostDatacenter(String datacenter) {
+        if (PLAYERS_DATACENTER.equals(datacenter)) {
+            throw new IllegalArgumentException("玩家临时地址的 /96 里不能登记主机");
+        }
+        return checkKey(datacenter);
     }
 
     private static String checkKey(String key) {

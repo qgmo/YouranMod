@@ -81,6 +81,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private NetworkEvents events;
     private RejectLog rejects;
     private RecursiveResolver resolver;
+    /** 玩家临时地址；没开（配置关掉、序号冲突）时为 null */
+    private PlayerNics players;
+    /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
+    private volatile Map<String, Ipv6Address> nameAddresses = Collections.emptyMap();
     private final Map<String, NetStack> hostStacks = new LinkedHashMap<>();
     private final Set<CompletableFuture<?>> mainThreadTasks = ConcurrentHashMap.newKeySet();
     private final Map<UUID, AtomicInteger> queued = new ConcurrentHashMap<>();
@@ -127,6 +131,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         // 机房：YouranMod 的固定为 0 号
         List<AllocationTable.Request> dcRequests = new ArrayList<>();
         dcRequests.add(new AllocationTable.Request(YouranNetworkApi.YOURANMOD_DATACENTER, 0, null));
+        // 玩家临时地址：最后一个 /96，固定序号（和别的机房冲突时由分配表报出来，玩家临时地址就不开）
+        dcRequests.add(new AllocationTable.Request(YouranNetworkApi.PLAYERS_DATACENTER, NetworkLayout.PLAYERS_DATACENTER, null));
         for (NetworkRegistry.DatacenterDecl d : NetworkRegistry.datacenters()) {
             dcRequests.add(new AllocationTable.Request(d.key, d.fixedIndex, null));
         }
@@ -143,6 +149,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_YR_DNS, PART_YR_DNS, dc));
         hostRequests.add(new AllocationTable.Request(HOST_TEST, -1, dc));
         for (NetworkRegistry.HostDecl h : hostDecls) {
+            if (h.datacenter.equals(YouranNetworkApi.PLAYERS_DATACENTER)) {
+                problems.add("主机 " + h.key + " 不能登记在玩家临时地址的 /96（" + h.datacenter + "）里，拒绝");
+                continue;
+            }
             hostRequests.add(new AllocationTable.Request(h.key, h.fixedHost, h.datacenter));
         }
         Map<String, AllocationTable.Host> activeHosts = table.assignHosts(hostRequests, activeDc.keySet(), problems);
@@ -198,6 +208,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         for (String n : comRecords.keySet()) {
             names.put(n, keyOf(hostAddresses, comRecords.get(n)));
         }
+        Map<String, Ipv6Address> addrs = new LinkedHashMap<>(yrRecords);
+        addrs.putAll(comRecords);
+        addrs.put("ns.yr", hostAddresses.get(HOST_YR_DNS));
+        addrs.put("root.yr", hostAddresses.get(HOST_ROOT_DNS));
+        nameAddresses = Collections.unmodifiableMap(addrs);
 
         hostNames.clear();
         for (Map.Entry<String, String> e : names.entrySet()) {
@@ -212,6 +227,17 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         router = new Router(loop, book, devices, routerAddress);
         nic = new NicGateway(loop, devices, router, rejects, NetworkConfig.devicePacketsPerSecond, NetworkConfig.deviceBytesPerSecond);
         testDevices = new TestDevices(devices, loop, resolverAddress);
+        if (!NetworkConfig.playerAddresses) {
+            LOG.info("游戏内网络：玩家临时地址在配置里关掉了（network.playerAddresses=false）");
+        } else if (!Long.valueOf(NetworkLayout.PLAYERS_DATACENTER).equals(activeDc.get(YouranNetworkApi.PLAYERS_DATACENTER))) {
+            LOG.warn("游戏内网络：玩家临时地址的 /96 没分到（序号 {} 被占了），玩家临时地址不开", Long.toHexString(NetworkLayout.PLAYERS_DATACENTER));
+        } else {
+            players = new PlayerNics(loop, layout, router, rejects, resolverAddress, new SecureRandom(),
+                    NetworkConfig.playerPacketsPerSecond, NetworkConfig.playerBytesPerSecond,
+                    NetworkConfig.playerInboundPacketsPerSecond, NetworkConfig.playerInboundBytesPerSecond);
+            router.setPlayers(players);
+            nic.setPlayers(players);
+        }
         long serial = System.currentTimeMillis() / 1000;
         Map<String, NetworkRegistry.HostDecl> declByKey = new LinkedHashMap<>();
         for (NetworkRegistry.HostDecl h : hostDecls) {
@@ -221,12 +247,40 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         loop.execute(() -> startHosts(hostAddresses, declByKey, tldDecls, yrRecords, comRecords, activeDcCopy, serial));
         loop.execute(this::scheduleOverflowLog);
 
-        events = new NetworkEvents(devices, testDevices);
+        events = new NetworkEvents(devices, testDevices, this::playerLoggedIn, this::playerLoggedOut);
         MinecraftForge.EVENT_BUS.register(events);
         event.registerServerCommand(new NetCommand(this));
         NetworkHooks.setBackend(this);
-        LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机 {} 个；递归解析器 {}，NTP {}",
-                layout.prefix(), dims, activeDc.size(), hostAddresses.size(), resolverAddress, ntpAddress);
+        LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机 {} 个；递归解析器 {}，NTP {}{}",
+                layout.prefix(), dims, activeDc.size(), hostAddresses.size(), resolverAddress, ntpAddress,
+                players == null ? "" : "；玩家临时地址 " + layout.playersPrefix() + "/96");
+    }
+
+    /** 主线程：玩家上线，分临时地址 */
+    private void playerLoggedIn(EntityPlayerMP player) {
+        PlayerNics p = players;
+        if (p == null || player.connection == null) {
+            return;
+        }
+        net.minecraft.network.NetworkManager conn = player.connection.getNetworkManager();
+        p.attach(player.getUniqueID(), player.getName(), new PlayerNics.Link() {
+            @Override
+            public void deliver(byte[] packet) {
+                moe.qingu.youran.net.NicChannel.sendToClient(conn, moe.qingu.youran.net.NicMessages.playerPacket(packet));
+            }
+
+            @Override
+            public void control(byte[] message) {
+                moe.qingu.youran.net.NicChannel.sendToClient(conn, message);
+            }
+        });
+    }
+
+    private void playerLoggedOut(UUID player) {
+        PlayerNics p = players;
+        if (p != null) {
+            p.detach(player);
+        }
     }
 
     /** 读配置里的中间 CA；没配或读不了时返回 null（只有 HTTP） */
@@ -397,6 +451,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (devices != null) {
             devices.clear();
         }
+        if (players != null) {
+            players.clear();
+        }
         for (CompletableFuture<?> f : mainThreadTasks) {
             f.completeExceptionally(new IllegalStateException("服务器正在关"));
         }
@@ -419,6 +476,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostStacks.clear();
         router = null;
         nic = null;
+        players = null;
+        nameAddresses = Collections.emptyMap();
         devices = null;
         testDevices = null;
         resolver = null;
@@ -453,7 +512,32 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     }
 
     @Override
-    public void onClientPacket(EntityPlayerMP player, byte[] packet, int messageLength) {
+    public Ipv6Address playerAddress(UUID player) {
+        PlayerNics p = players;
+        return p == null ? null : p.address(player);
+    }
+
+    @Override
+    public boolean allowPlayer(UUID player, String purpose, Collection<Ipv6Address> hosts, long ttlMillis) {
+        PlayerNics p = players;
+        return p != null && p.allow(player, purpose, hosts, ttlMillis);
+    }
+
+    @Override
+    public void revokePlayer(UUID player, String purpose) {
+        PlayerNics p = players;
+        if (p != null) {
+            p.revoke(player, purpose);
+        }
+    }
+
+    @Override
+    public Ipv6Address localNameAddress(String asciiName) {
+        return asciiName == null ? null : nameAddresses.get(asciiName);
+    }
+
+    @Override
+    public void onClientPacket(EntityPlayerMP player, byte[] packet, int messageLength, boolean playerNic) {
         ExecutorEventLoop l = loop;
         NicGateway g = nic;
         if (l == null || g == null) {
@@ -469,7 +553,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         l.execute(() -> {
             q.decrementAndGet();
-            g.fromPlayer(id, name, packet, messageLength);
+            if (playerNic) {
+                g.fromPlayerNic(id, name, packet);
+            } else {
+                g.fromPlayer(id, name, packet, messageLength);
+            }
         });
     }
 
@@ -513,6 +601,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
 
     NicGateway nic() {
         return nic;
+    }
+
+    PlayerNics players() {
+        return players;
     }
 
     NetStack hostStack(String key) {

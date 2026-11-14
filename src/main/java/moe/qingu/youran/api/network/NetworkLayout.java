@@ -7,7 +7,9 @@ package moe.qingu.youran.api.network;
  *   ├─ 第 0 号 /64：坐标路由
  *   │    └─ 8 位维度序号 → 每个维度一个 /72，剩下 56 位由维度的 {@link DimensionNetwork} 划分
  *   └─ 第 1 号 /64：玩法（“虚拟机房”）
- *        └─ 32 位机房序号 → 每个机房一个 /96，剩下 32 位是机房里的主机（/128）
+ *        ├─ 32 位机房序号 → 每个机房一个 /96，剩下 32 位是机房里的主机（/128）
+ *        └─ 最后一个 /96（机房序号 {@value #PLAYERS_DATACENTER_HEX}）：玩家临时地址。玩家上线时分一个随机的 /128，
+ *           下线收回，不进存档；只能收发服务器放行的数据（见 {@link PlayerAddresses}）
  * </pre>
  * 这个类只做地址的拼与拆，不管分配。
  */
@@ -16,6 +18,9 @@ public final class NetworkLayout {
     public static final int SUBNET_GAMEPLAY = 1;
     /** 维度序号最多 256 个 */
     public static final int MAX_DIMENSIONS = 256;
+    /** 玩家临时地址所在的 /96：玩法 /64 里的最后一个机房序号（服主 11-14：留一个 /96 给玩家） */
+    public static final long PLAYERS_DATACENTER = 0xFFFFFFFFL;
+    static final String PLAYERS_DATACENTER_HEX = "0xFFFFFFFF";
 
     /** /48 前缀的高 48 位（放在 long 的高 48 位，低 16 位为 0） */
     private final long prefixHigh;
@@ -81,5 +86,22 @@ public final class NetworkLayout {
 
     public static long hostPartOf(Ipv6Address a) {
         return a.low() & 0xFFFFFFFFL;
+    }
+
+    // ---- 玩家临时地址 ----
+
+    /** 玩家 /96 的前缀 */
+    public Ipv6Address playersPrefix() {
+        return datacenterPrefix(PLAYERS_DATACENTER);
+    }
+
+    /** 玩家 /96 里的地址（{@code hostPart} 是低 32 位） */
+    public Ipv6Address playerAddress(long hostPart) {
+        return hostAddress(PLAYERS_DATACENTER, hostPart);
+    }
+
+    /** 是不是玩家临时地址（在这个 /48 的玩家 /96 里） */
+    public boolean isPlayerAddress(Ipv6Address a) {
+        return subnetOf(a) == SUBNET_GAMEPLAY && datacenterIndexOf(a) == PLAYERS_DATACENTER;
     }
 }

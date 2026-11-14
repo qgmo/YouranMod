@@ -65,6 +65,7 @@ final class NetCommand extends CommandBase {
             "§e/ynet —— 游戏内网络的测试命令",
             "§6/ynet table §f地址分配表",
             "§6/ynet stats §f路由器与网卡的统计",
+            "§6/ynet players §f在线玩家的临时地址、连接数、放行的用途",
             "§6/ynet device add|remove <x> <y> <z> [维度] §f放、拿服务端测试设备",
             "§6/ynet device list §f列出测试设备",
             "§6/ynet device bind <玩家> <x> <y> <z> [维度] §f把玩家当成这一格上的电脑（协议栈在他的客户端上）",
@@ -91,6 +92,9 @@ final class NetCommand extends CommandBase {
                 break;
             case "stats":
                 stats(sender);
+                break;
+            case "players":
+                players(sender);
                 break;
             case "device":
                 device(server, sender, args);
@@ -165,6 +169,21 @@ final class NetCommand extends CommandBase {
                 + "；测试开关：丢包 " + Math.round(r.lossRate() * 100) + "%（已丢 " + r.simulatedDrops + "），乱序 "
                 + Math.round(r.reorderRate() * 100) + "%（已推迟 " + r.simulatedDelays + "）");
         RecursiveResolverStats.tell(this, sender, net);
+    }
+
+    private void players(ICommandSender sender) {
+        PlayerNics p = net.players();
+        if (p == null) {
+            tell(sender, "§c玩家临时地址没开");
+            return;
+        }
+        tell(sender, "§e玩家临时地址 §f" + net.book().layout.playersPrefix() + "/96，在线 " + p.online()
+                + "；往外收下 " + p.outAccepted + "、丢掉 " + p.outRejected + "，往里交给玩家 " + p.inDelivered + "、丢掉 " + p.inRejected);
+        onLoop(() -> {
+            for (String line : p.describe()) {
+                later(sender, "  " + line);
+            }
+        });
     }
 
     /** 递归解析器的统计要在网络线程上读 */
@@ -587,7 +606,7 @@ final class NetCommand extends CommandBase {
     @Override
     public List<String> getTabCompletions(MinecraftServer server, ICommandSender sender, String[] args, @Nullable BlockPos targetPos) {
         if (args.length == 1) {
-            return getListOfStringsMatchingLastWord(args, "table", "stats", "device", "ping", "dns", "get", "ntp", "sim", "stress", "flush");
+            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "ping", "dns", "get", "ntp", "sim", "stress", "flush");
         }
         if (args.length == 2 && args[0].equals("device")) {
             return getListOfStringsMatchingLastWord(args, "add", "remove", "list", "bind", "unbind", "power");
