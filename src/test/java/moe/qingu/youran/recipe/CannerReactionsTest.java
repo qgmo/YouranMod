@@ -24,6 +24,18 @@ class CannerReactionsTest {
         assertEquals("<youranmod:small_magnetite_dust:0> * 1", r.outputItem().toString());
     }
 
+    /** 匠魂：1 磁粉 + 10 mB 熔融钴 → 1 钴改性磁粉，不出流体 */
+    @Test
+    void cobaltMagnetic() {
+        FluidItemReaction<ItemStack, ReactionItem> r = CannerReactions.cobaltMagnetic();
+        assertEquals("cobalt", r.inputFluid());
+        assertEquals(10, r.inputAmount());
+        assertEquals("<youranmod:magnetite_dust:0> * 1", r.inputItem().toString());
+        assertNull(r.outputFluid());
+        assertEquals(0, r.outputAmount());
+        assertEquals("<youranmod:cobalt_magnetic_dust:0> * 1", r.outputItem().toString());
+    }
+
     /** 炼金化学：6 铁元素 + 5000 过热蒸汽 → 2 四氧化三铁 + 20 氢气；3 铁元素 + 2500 蒸汽 → 1 四氧化三铁 + 10 氢气 */
     @Test
     void alchemistry() {

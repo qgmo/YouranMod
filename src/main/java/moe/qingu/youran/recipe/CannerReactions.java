@@ -7,6 +7,7 @@ import moe.qingu.youran.logic.reaction.ItemIngredient;
 import moe.qingu.youran.logic.reaction.ReactionTable;
 import moe.qingu.youran.logic.reaction.StackFacts;
 import net.minecraft.item.ItemStack;
+import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.oredict.OreDictionary;
 
 import java.util.Arrays;
@@ -25,6 +26,8 @@ public final class CannerReactions {
     public static final String STEAM = "ic2steam";
     /** IC2 氢气 */
     public static final String HYDROGEN = "ic2hydrogen";
+    /** 匠魂的熔融钴 */
+    public static final String MOLTEN_COBALT = "cobalt";
     /** 炼金化学的元素物品、铁元素的元数据、化合物物品 */
     static final String ALCHEMISTRY_ELEMENT = "alchemistry:element";
     static final int ALCHEMISTRY_IRON = 26;
@@ -90,6 +93,9 @@ public final class CannerReactions {
                 TABLE.add(r);
             }
         }
+        if (Loader.isModLoaded("tconstruct")) {
+            TABLE.add(cobaltMagnetic());
+        }
         YouranMod.LOG.info("装罐机反应配方：内置 {} 条", TABLE.reactions().size());
     }
 
@@ -97,6 +103,12 @@ public final class CannerReactions {
     static FluidItemReaction<ItemStack, ReactionItem> smallMagnetite() {
         return new FluidItemReaction<>(SUPERHEATED_STEAM, 5000, ItemIngredient.ore("dustTinyIron", 3),
                 HYDROGEN, 20, new ReactionItem(YouranMod.MODID + ":small_magnetite_dust", 0, 1, null));
+    }
+
+    /** 钴改性磁粉（装了匠魂时）：1 磁粉 + 10 mB 熔融钴 → 1 钴改性磁粉，不出流体 */
+    static FluidItemReaction<ItemStack, ReactionItem> cobaltMagnetic() {
+        return new FluidItemReaction<>(MOLTEN_COBALT, 10, ItemIngredient.item(YouranMod.MODID + ":magnetite_dust", 0, 1),
+                null, 0, new ReactionItem(YouranMod.MODID + ":cobalt_magnetic_dust", 0, 1, null));
     }
 
     /**

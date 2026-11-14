@@ -76,13 +76,16 @@ public final class YouranMod {
     }
 
     /**
-     * 后初始化：加进别的模组机器的配方（两端）。IC2 热能离心机；炼金化学的化合机（在它载入完成时应用 CraftTweaker 的删改之前）。
+     * 后初始化：加进别的模组机器的配方（两端）。IC2 热能离心机；沉浸工程灌装机（还要装了匠魂）；炼金化学的化合机（在它载入完成时应用 CraftTweaker 的删改之前）。
      * 装罐机反应配方与炼金化学的化合物见 {@code recipe.BuiltinRecipes}。
      */
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
         if (Loader.isModLoaded("ic2")) {
             moe.qingu.youran.compat.ic2.Ic2Recipes.register();
+        }
+        if (Loader.isModLoaded("immersiveengineering") && Loader.isModLoaded("tconstruct")) {
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.register();
         }
         AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
     }

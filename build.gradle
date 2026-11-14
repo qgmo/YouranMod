@@ -50,6 +50,7 @@ repositories {
         url 'https://maven.blamejared.com/'
         mavenContent {
             includeGroup 'CraftTweaker2'
+            includeGroup 'blusunrize'
         }
     }
     mavenCentral()
@@ -70,6 +71,9 @@ dependencies {
     compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-MC1120-Main:1.12-4.1.20.662')
     compileOnly 'CraftTweaker2:CraftTweaker2-API:4.1.20.662'
     compileOnly 'CraftTweaker2:ZenScript:4.1.20.662'
+    // 沉浸工程（只编译、不打包）：整合包是 0.12-98，Maven 上最新只有 0.12-92（取开发版 deobf，不用反混淆）；用到的灌装机接口
+    // BottlingMachineRecipe.addRecipe / findRecipe 与 output 字段两版相同。只有 compat.immersiveengineering 引用，没装时不加载
+    compileOnly('blusunrize:ImmersiveEngineering:0.12-92-559:deobf') { transitive = false }
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
