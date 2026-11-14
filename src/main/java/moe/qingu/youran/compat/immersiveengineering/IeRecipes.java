@@ -4,6 +4,7 @@ import blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe;
 import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
 import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.YouranMod;
+import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
 import moe.qingu.youran.registry.ModItems;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidRegistry;
@@ -56,6 +57,27 @@ public final class IeRecipes {
             YouranMod.LOG.error("沉浸工程灌装机的钴改性磁粉配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
         } else {
             YouranMod.LOG.info("已加沉浸工程灌装机配方：磁粉 + 10 mB {} → 钴改性磁粉", MOLTEN_COBALT);
+        }
+    }
+
+    /**
+     * 灌装机：1 纤维素 + 188 mB 乙酸 → 1 醋酸纤维素（装了炼金化学时）。装罐机里是 375 mB + 2 → 2，
+     * 但灌装机一次只放一个物品进去，按一个算是 187.5 mB，取整为 188（不比装罐机便宜）。
+     */
+    public static void registerCelluloseAcetate() {
+        ItemStack cellulose = AlchemistryCompat.stack(AlchemistryCompat.CELLULOSE, 1);
+        ItemStack acetate = AlchemistryCompat.stack(AlchemistryCompat.CELLULOSE_ACETATE, 1);
+        if (cellulose.isEmpty() || acetate.isEmpty()) {
+            YouranMod.LOG.info("炼金化学里没有纤维素或醋酸纤维素，不加沉浸工程灌装机的醋酸纤维素配方");
+            return;
+        }
+        FluidStack acid = new FluidStack(ModFluids.aceticAcid, 188);
+        BottlingMachineRecipe.addRecipe(acetate, cellulose, acid);
+        BottlingMachineRecipe found = BottlingMachineRecipe.findRecipe(cellulose, acid);
+        if (found == null || !ItemStack.areItemsEqual(found.output, acetate)) {
+            YouranMod.LOG.error("沉浸工程灌装机的醋酸纤维素配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
+        } else {
+            YouranMod.LOG.info("已加沉浸工程灌装机配方：纤维素 + 188 mB 乙酸 → 醋酸纤维素");
         }
     }
 }

@@ -36,6 +36,17 @@ class CannerReactionsTest {
         assertEquals("<youranmod:cobalt_magnetic_dust:0> * 1", r.outputItem().toString());
     }
 
+    /** 醋酸纤维素：375 mB 乙酸 + 2 纤维素 → 2 醋酸纤维素，不出流体 */
+    @Test
+    void celluloseAcetate() {
+        FluidItemReaction<ItemStack, ReactionItem> r = CannerReactions.celluloseAcetate(0, 602);
+        assertEquals("acetic_acid", r.inputFluid());
+        assertEquals(375, r.inputAmount());
+        assertEquals("<alchemistry:compound:0> * 2", r.inputItem().toString());
+        assertNull(r.outputFluid());
+        assertEquals("<alchemistry:compound:602> * 2", r.outputItem().toString());
+    }
+
     /** 炼金化学：6 铁元素 + 5000 过热蒸汽 → 2 四氧化三铁 + 20 氢气；3 铁元素 + 2500 蒸汽 → 1 四氧化三铁 + 10 氢气 */
     @Test
     void alchemistry() {

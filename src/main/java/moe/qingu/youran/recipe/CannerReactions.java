@@ -26,6 +26,8 @@ public final class CannerReactions {
     public static final String STEAM = "ic2steam";
     /** IC2 氢气 */
     public static final String HYDROGEN = "ic2hydrogen";
+    /** 本模组的乙酸 */
+    public static final String ACETIC_ACID = "acetic_acid";
     /** 匠魂的熔融钴 */
     public static final String MOLTEN_COBALT = "cobalt";
     /** 炼金化学的元素物品、铁元素的元数据、化合物物品 */
@@ -93,6 +95,11 @@ public final class CannerReactions {
                 TABLE.add(r);
             }
         }
+        int cellulose = AlchemistryCompat.meta(AlchemistryCompat.CELLULOSE);
+        int acetate = AlchemistryCompat.meta(AlchemistryCompat.CELLULOSE_ACETATE);
+        if (cellulose >= 0 && acetate >= 0) {
+            TABLE.add(celluloseAcetate(cellulose, acetate));
+        }
         if (Loader.isModLoaded("tconstruct")) {
             TABLE.add(cobaltMagnetic());
         }
@@ -103,6 +110,12 @@ public final class CannerReactions {
     static FluidItemReaction<ItemStack, ReactionItem> smallMagnetite() {
         return new FluidItemReaction<>(SUPERHEATED_STEAM, 5000, ItemIngredient.ore("dustTinyIron", 3),
                 HYDROGEN, 20, new ReactionItem(YouranMod.MODID + ":small_magnetite_dust", 0, 1, null));
+    }
+
+    /** 醋酸纤维素（装了炼金化学时）：375 mB 乙酸 + 2 纤维素 → 2 醋酸纤维素，不出流体 */
+    static FluidItemReaction<ItemStack, ReactionItem> celluloseAcetate(int celluloseMeta, int acetateMeta) {
+        return new FluidItemReaction<>(ACETIC_ACID, 375, ItemIngredient.item(ALCHEMISTRY_COMPOUND, celluloseMeta, 2),
+                null, 0, new ReactionItem(ALCHEMISTRY_COMPOUND, acetateMeta, 2, null));
     }
 
     /** 钴改性磁粉（装了匠魂时）：1 磁粉 + 10 mB 熔融钴 → 1 钴改性磁粉，不出流体 */

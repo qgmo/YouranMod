@@ -24,6 +24,9 @@ public final class CompatRecipes {
         if (ie && tic) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCobaltMagnetic();
         }
+        if (ie && Loader.isModLoaded(AlchemistryCompat.MODID)) {
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCelluloseAcetate();
+        }
         // 乙醇（沉浸工程）氧化成乙酸，氧气是 IC2 的
         if (ie && ic2) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerRefinery();
