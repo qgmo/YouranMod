@@ -26,6 +26,8 @@ public final class CannerReactions {
     public static final String STEAM = "ic2steam";
     /** IC2 氢气 */
     public static final String HYDROGEN = "ic2hydrogen";
+    /** 本模组的氯气 */
+    public static final String CHLORINE = "chlorine_youran";
     /** 本模组的乙酸 */
     public static final String ACETIC_ACID = "acetic_acid";
     /** 匠魂的熔融钴 */
@@ -89,6 +91,7 @@ public final class CannerReactions {
         }
         builtinsRegistered = true;
         TABLE.add(smallMagnetite());
+        TABLE.add(pvcFromPolyethylene());
         int meta = AlchemistryCompat.meta(AlchemistryCompat.TRIIRON_TETROXIDE);
         if (meta >= 0) {
             for (FluidItemReaction<ItemStack, ReactionItem> r : alchemistry(meta)) {
@@ -110,6 +113,12 @@ public final class CannerReactions {
     static FluidItemReaction<ItemStack, ReactionItem> smallMagnetite() {
         return new FluidItemReaction<>(SUPERHEATED_STEAM, 5000, ItemIngredient.ore("dustTinyIron", 3),
                 HYDROGEN, 20, new ReactionItem(YouranMod.MODID + ":small_magnetite_dust", 0, 1, null));
+    }
+
+    /** 聚氯乙烯：1 聚乙烯团 + 125 mB 氯气 → 1 聚氯乙烯团，不出流体 */
+    static FluidItemReaction<ItemStack, ReactionItem> pvcFromPolyethylene() {
+        return new FluidItemReaction<>(CHLORINE, 125, ItemIngredient.item(YouranMod.MODID + ":polyethylene_lump", 0, 1),
+                null, 0, new ReactionItem(YouranMod.MODID + ":pvc_lump", 0, 1, null));
     }
 
     /** 醋酸纤维素（装了炼金化学时）：375 mB 乙酸 + 2 纤维素 → 2 醋酸纤维素，不出流体 */

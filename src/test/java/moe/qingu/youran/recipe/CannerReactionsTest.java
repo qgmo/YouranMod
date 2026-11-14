@@ -36,6 +36,17 @@ class CannerReactionsTest {
         assertEquals("<youranmod:cobalt_magnetic_dust:0> * 1", r.outputItem().toString());
     }
 
+    /** 聚氯乙烯：1 聚乙烯团 + 125 mB 氯气 → 1 聚氯乙烯团，不出流体 */
+    @Test
+    void pvcFromPolyethylene() {
+        FluidItemReaction<ItemStack, ReactionItem> r = CannerReactions.pvcFromPolyethylene();
+        assertEquals("chlorine_youran", r.inputFluid());
+        assertEquals(125, r.inputAmount());
+        assertEquals("<youranmod:polyethylene_lump:0> * 1", r.inputItem().toString());
+        assertNull(r.outputFluid());
+        assertEquals("<youranmod:pvc_lump:0> * 1", r.outputItem().toString());
+    }
+
     /** 醋酸纤维素：375 mB 乙酸 + 2 纤维素 → 2 醋酸纤维素，不出流体 */
     @Test
     void celluloseAcetate() {

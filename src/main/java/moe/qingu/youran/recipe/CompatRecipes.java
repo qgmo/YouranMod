@@ -23,6 +23,7 @@ public final class CompatRecipes {
         }
         if (ie) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerMetalPress();
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerPvc();
         }
         if (ie && tic) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCobaltMagnetic();

@@ -105,4 +105,15 @@ public final class IeRecipes {
             YouranMod.LOG.error("沉浸工程金属冲压机配方（{} → {}）没生效", input.getItem().getRegistryName(), output.getItem().getRegistryName());
         }
     }
+
+    /** 灌装机：1 聚乙烯团 + 125 mB 氯气 → 1 聚氯乙烯团（同装罐机富集模式的那条） */
+    public static void registerPvc() {
+        ItemStack input = new ItemStack(ModItems.polyethyleneLump);
+        FluidStack chlorine = new FluidStack(ModFluids.chlorine, 125);
+        BottlingMachineRecipe.addRecipe(new ItemStack(ModItems.pvcLump), input, chlorine);
+        BottlingMachineRecipe found = BottlingMachineRecipe.findRecipe(input, chlorine);
+        if (found == null || found.output.getItem() != ModItems.pvcLump) {
+            YouranMod.LOG.error("沉浸工程灌装机的聚氯乙烯配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
+        }
+    }
 }
