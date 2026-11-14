@@ -1,5 +1,6 @@
 package moe.qingu.youran;
 
+import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
 import moe.qingu.youran.net.NicChannel;
 import moe.qingu.youran.net.YouranNetwork;
 import moe.qingu.youran.config.ServerConfig;
@@ -15,6 +16,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLServerAboutToStartEvent;
 import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
@@ -70,6 +72,15 @@ public final class YouranMod {
         if (event.getSide().isClient()) {
             moe.qingu.youran.client.network.ClientNetwork.init();
         }
+    }
+
+    /**
+     * 后初始化：加进别的模组机器的配方（两端）：炼金化学的化合机（在它载入完成时应用 CraftTweaker 的删改之前）。
+     * 装罐机反应配方与炼金化学的化合物见 {@code recipe.BuiltinRecipes}。
+     */
+    @Mod.EventHandler
+    public void postInit(FMLPostInitializationEvent event) {
+        AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
     }
 
     /** 服务端（独立服务端或进单人世界时的内置服务端）启动前：读配置、登记 tick 处理 */
