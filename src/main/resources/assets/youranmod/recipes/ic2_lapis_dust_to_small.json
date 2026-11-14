@@ -1,0 +1,21 @@
+{
+  "conditions": [
+    {
+      "type": "forge:mod_loaded",
+      "modid": "ic2"
+    }
+  ],
+  "group": "youranmod",
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustLapis"
+    }
+  ],
+  "result": {
+    "item": "ic2:dust",
+    "data": 22,
+    "count": 9
+  }
+}

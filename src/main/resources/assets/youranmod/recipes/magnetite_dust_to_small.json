@@ -1,0 +1,13 @@
+{
+  "group": "youranmod",
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    {
+      "item": "youranmod:magnetite_dust"
+    }
+  ],
+  "result": {
+    "item": "youranmod:small_magnetite_dust",
+    "count": 9
+  }
+}
