@@ -42,6 +42,8 @@ public final class ModItems {
     public static Item mineralWater;
     public static Item mineralWaterBottle;
     public static Item drinkingWater;
+    /** 磁粉（四氧化三铁粉，Fe3O4），2.0.0 起；矿物词典 dustMagnetite */
+    public static Item magnetiteDust;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -83,6 +85,8 @@ public final class ModItems {
         add(registry, itemBlock(ModBlocks.hydrargyrum));
         add(registry, itemBlock(ModBlocks.gallium));
         add(registry, itemBlock(ModBlocks.chlorine));
+        // 2.0.0 新加的放在最后，不改已有物品在新世界里的数字 ID
+        magnetiteDust = add(registry, new ItemWithTooltip("magnetite_dust", 64, "四氧化三铁（Fe3O4），有磁性"));
     }
 
     private static Item itemBlock(Block block) {

@@ -65,6 +65,7 @@ public final class YouranMod {
         GameRegistry.addSmelting(new ItemStack(ModBlocks.primogemOre), new ItemStack(ModItems.primogem), 1F);
         OreDictionary.registerOre("primogem", new ItemStack(ModItems.primogem));
         OreDictionary.registerOre("primogem_ore", new ItemStack(ModBlocks.primogemOre));
+        OreDictionary.registerOre("dustMagnetite", new ItemStack(ModItems.magnetiteDust));
         if (event.getSide().isClient()) {
             moe.qingu.youran.client.network.ClientNetwork.init();
         }
