@@ -2,6 +2,7 @@ package moe.qingu.youran;
 
 import moe.qingu.youran.net.NicChannel;
 import moe.qingu.youran.net.YouranNetwork;
+import moe.qingu.youran.recipe.CompatRecipes;
 import moe.qingu.youran.config.ServerConfig;
 import moe.qingu.youran.registry.ModBlocks;
 import moe.qingu.youran.registry.ModFluids;
@@ -15,6 +16,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLServerAboutToStartEvent;
 import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
@@ -70,6 +72,12 @@ public final class YouranMod {
         if (event.getSide().isClient()) {
             moe.qingu.youran.client.network.ClientNetwork.init();
         }
+    }
+
+    /** 后初始化：加进别的模组机器的配方（软依赖，见 {@code recipe.CompatRecipes}） */
+    @Mod.EventHandler
+    public void postInit(FMLPostInitializationEvent event) {
+        CompatRecipes.postInit();
     }
 
     /** 服务端（独立服务端或进单人世界时的内置服务端）启动前：读配置、登记 tick 处理 */

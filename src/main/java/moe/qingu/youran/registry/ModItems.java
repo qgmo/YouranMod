@@ -1,6 +1,7 @@
 package moe.qingu.youran.registry;
 
 import moe.qingu.youran.item.ItemDrink;
+import moe.qingu.youran.item.ItemFloppyDisk;
 import moe.qingu.youran.item.ItemHome;
 import moe.qingu.youran.item.ItemIceArmor;
 import moe.qingu.youran.item.ItemPrimogemSword;
@@ -48,6 +49,15 @@ public final class ModItems {
     public static Item smallMagnetiteDust;
     /** 钴改性磁粉（掺钴提高矫顽力），软盘磁性涂层的原料 */
     public static Item cobaltMagneticDust;
+    /** 软盘的加工链（服主 11-14）：盘片三道工序、塑料团与片、软盘 */
+    public static Item roughPlatter;
+    public static Item refinedPlatter;
+    public static Item polishedPlatter;
+    public static Item pvcLump;
+    public static Item pvcSheet;
+    public static Item polyethyleneLump;
+    public static Item polyethyleneSheet;
+    public static Item floppyDisk;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -93,6 +103,14 @@ public final class ModItems {
         magnetiteDust = add(registry, new ItemWithTooltip("magnetite_dust", 64, "四氧化三铁（Fe3O4），有磁性"));
         smallMagnetiteDust = add(registry, new ItemWithTooltip("small_magnetite_dust", 64, "四氧化三铁（Fe3O4），有磁性"));
         cobaltMagneticDust = add(registry, new ItemWithTooltip("cobalt_magnetic_dust", 64, "掺了钴的磁粉，矫顽力更高，用来做软盘的磁性涂层"));
+        roughPlatter = add(registry, new ItemWithTooltip("rough_platter", 64, "涂了磁性涂层的片基，还要烘干、压光"));
+        refinedPlatter = add(registry, new ItemWithTooltip("refined_platter", 64, "烘过的盘片，还要压光"));
+        polishedPlatter = add(registry, new ItemWithTooltip("polished_platter", 64, "压光的盘片，装进软套就是软盘"));
+        pvcLump = add(registry, new ItemWithTooltip("pvc_lump", 64, "聚氯乙烯（PVC）"));
+        pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做软盘的软套"));
+        polyethyleneLump = add(registry, new ItemWithTooltip("polyethylene_lump", 64, "聚乙烯（PE）"));
+        polyethyleneSheet = add(registry, new ItemWithTooltip("polyethylene_sheet", 64, "聚乙烯（PE）薄片，可以做软盘的软套"));
+        floppyDisk = add(registry, new ItemFloppyDisk());
     }
 
     private static Item itemBlock(Block block) {

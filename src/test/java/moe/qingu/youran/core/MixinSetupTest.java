@@ -1,0 +1,44 @@
+package moe.qingu.youran.core;
+
+import org.junit.jupiter.api.Test;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.Collections;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+class MixinSetupTest {
+    @Test
+    void ic2ConfigOnlyWithIc2() {
+        assertEquals(Collections.singletonList("mixins.youranmod.ic2.json"), MixinSetup.configs(true));
+        assertEquals(Collections.emptyList(), MixinSetup.configs(false));
+    }
+
+    /** 核心插件在 mods 与 mods/1.12.2 里按主类找 IC2 的 jar */
+    @Test
+    void findsIc2JarByMainClass() throws IOException {
+        File mods = Files.createTempDirectory("mods").toFile();
+        File sub = new File(mods, "1.12.2");
+        sub.mkdirs();
+        jar(new File(mods, "a-other.jar"), "other/Main.class");
+        new File(mods, "broken.jar").createNewFile();
+        assertNull(YouranCorePlugin.findModJar(mods, MixinSetup.IC2_MAIN_CLASS));
+        File ic2 = jar(new File(sub, "industrialcraft-2-2.8.221-ex112.jar"), MixinSetup.IC2_MAIN_CLASS);
+        assertEquals(ic2, YouranCorePlugin.findModJar(mods, MixinSetup.IC2_MAIN_CLASS));
+    }
+
+    private static File jar(File file, String entry) throws IOException {
+        try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(file))) {
+            out.putNextEntry(new ZipEntry(entry));
+            out.write(new byte[]{1});
+            out.closeEntry();
+        }
+        return file;
+    }
+}
