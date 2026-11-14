@@ -14,6 +14,7 @@ import moe.qingu.youran.worldgen.MineralWaterLakeGenerator;
 import moe.qingu.youran.worldgen.OreGenerator;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidRegistry;
+import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
@@ -75,11 +76,14 @@ public final class YouranMod {
     }
 
     /**
-     * 后初始化：加进别的模组机器的配方（两端）：炼金化学的化合机（在它载入完成时应用 CraftTweaker 的删改之前）。
+     * 后初始化：加进别的模组机器的配方（两端）。IC2 热能离心机；炼金化学的化合机（在它载入完成时应用 CraftTweaker 的删改之前）。
      * 装罐机反应配方与炼金化学的化合物见 {@code recipe.BuiltinRecipes}。
      */
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
+        if (Loader.isModLoaded("ic2")) {
+            moe.qingu.youran.compat.ic2.Ic2Recipes.register();
+        }
         AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
     }
 
