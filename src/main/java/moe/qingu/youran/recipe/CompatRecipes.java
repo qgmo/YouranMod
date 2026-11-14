@@ -1,6 +1,7 @@
 package moe.qingu.youran.recipe;
 
 import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
+import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.registry.ModItems;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fml.common.Loader;
@@ -30,7 +31,8 @@ public final class CompatRecipes {
         if (tic && ie && ic2) {
             moe.qingu.youran.compat.tconstruct.TicRecipes.registerAceticAcid();
         }
-        // 炼金化学的化合机（在它载入完成时应用 CraftTweaker 的删改之前加）
+        // 炼金化学的化合机、液化器、蒸发器（在它载入完成时应用 CraftTweaker 的删改之前加；没装时什么都不做）
         AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
+        AlchemistryCompat.registerAceticAcidConversion(ModFluids.aceticAcid);
     }
 }

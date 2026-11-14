@@ -153,4 +153,35 @@ public final class AlchemistryCompat {
             YouranMod.LOG.error("加炼金化学的化合机配方失败", e);
         }
     }
+
+    /**
+     * 乙酸化合物与乙酸流体互换：液化器 8 乙酸化合物 → 500 mB 乙酸，蒸发器 500 mB 乙酸 → 8 乙酸化合物。
+     * 两台机器都按数量处理（液化器每次扣输入的数量，蒸发器每次出整组产物），比例照原样。后初始化时调用。
+     */
+    public static void registerAceticAcidConversion(net.minecraftforge.fluids.Fluid aceticAcid) {
+        ItemStack compound = stack(ACETIC_ACID, 8);
+        if (compound.isEmpty()) {
+            return;
+        }
+        try {
+            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
+            Object modRecipes = modRecipesClass.getField("INSTANCE").get(null);
+            Object liquifier = Class.forName("al132.alchemistry.recipes.LiquifierRecipe")
+                    .getConstructor(ItemStack.class, net.minecraftforge.fluids.FluidStack.class)
+                    .newInstance(compound.copy(), new net.minecraftforge.fluids.FluidStack(aceticAcid, 500));
+            Object evaporator = Class.forName("al132.alchemistry.recipes.EvaporatorRecipe")
+                    .getConstructor(net.minecraftforge.fluids.FluidStack.class, ItemStack.class)
+                    .newInstance(new net.minecraftforge.fluids.FluidStack(aceticAcid, 500), compound.copy());
+            listOf(modRecipesClass, modRecipes, "getLiquifierRecipes").add(liquifier);
+            listOf(modRecipesClass, modRecipes, "getEvaporatorRecipes").add(evaporator);
+            YouranMod.LOG.info("已加炼金化学液化器、蒸发器配方：8 {} ⇄ 500 mB 乙酸", ACETIC_ACID);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("加炼金化学的乙酸液化器、蒸发器配方失败", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> listOf(Class<?> modRecipesClass, Object modRecipes, String getter) throws ReflectiveOperationException {
+        return (List<Object>) modRecipesClass.getMethod(getter).invoke(modRecipes);
+    }
 }
