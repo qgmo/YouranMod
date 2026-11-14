@@ -66,3 +66,4 @@ youranmod.net.client.get.result=HTTP %s，%s 位元組，%s
 youranmod.net.client.line=%s
 youranmod.net.client.ntp.result=UTC %s，偏差 %s 毫秒，往返 %s 毫秒
 youranmod.net.client.failed=失敗：%s
+fluid.acetic_acid=乙酸

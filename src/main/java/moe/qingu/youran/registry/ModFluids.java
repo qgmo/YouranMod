@@ -14,6 +14,8 @@ public final class ModFluids {
     public static Fluid hydrargyrum;
     public static Fluid gallium;
     public static Fluid chlorine;
+    /** 乙酸（服主 11-14）：没有流体方块（倒不到世界里），只有通用桶 */
+    public static Fluid aceticAcid;
 
     private ModFluids() {
     }
@@ -30,6 +32,9 @@ public final class ModFluids {
             FluidRegistry.registerFluid(f);
             FluidRegistry.addBucketForFluid(f);
         }
+        aceticAcid = fluid("acetic_acid", "acetic_acid").setDensity(1049).setViscosity(1200);
+        FluidRegistry.registerFluid(aceticAcid);
+        FluidRegistry.addBucketForFluid(aceticAcid);
     }
 
     private static Fluid fluid(String name, String texture) {
