@@ -1,8 +1,8 @@
 package moe.qingu.youran;
 
-import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
 import moe.qingu.youran.net.NicChannel;
 import moe.qingu.youran.net.YouranNetwork;
+import moe.qingu.youran.recipe.CompatRecipes;
 import moe.qingu.youran.config.ServerConfig;
 import moe.qingu.youran.registry.ModBlocks;
 import moe.qingu.youran.registry.ModFluids;
@@ -14,7 +14,6 @@ import moe.qingu.youran.worldgen.MineralWaterLakeGenerator;
 import moe.qingu.youran.worldgen.OreGenerator;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidRegistry;
-import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPostInitializationEvent;
@@ -75,19 +74,10 @@ public final class YouranMod {
         }
     }
 
-    /**
-     * 后初始化：加进别的模组机器的配方（两端）。IC2 热能离心机；沉浸工程灌装机（还要装了匠魂）；炼金化学的化合机（在它载入完成时应用 CraftTweaker 的删改之前）。
-     * 装罐机反应配方与炼金化学的化合物见 {@code recipe.BuiltinRecipes}。
-     */
+    /** 后初始化：加进别的模组机器的配方（软依赖，见 {@code recipe.CompatRecipes}） */
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
-        if (Loader.isModLoaded("ic2")) {
-            moe.qingu.youran.compat.ic2.Ic2Recipes.register();
-        }
-        if (Loader.isModLoaded("immersiveengineering") && Loader.isModLoaded("tconstruct")) {
-            moe.qingu.youran.compat.immersiveengineering.IeRecipes.register();
-        }
-        AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
+        CompatRecipes.postInit();
     }
 
     /** 服务端（独立服务端或进单人世界时的内置服务端）启动前：读配置、登记 tick 处理 */

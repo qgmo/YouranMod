@@ -6,7 +6,7 @@ import moe.qingu.youran.registry.ModItems;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 
-/** 加进 IC2 机器的配方。只有装了 IC2 时才会被加载（{@code YouranMod#postInit} 先查 IC2 在不在） */
+/** 加进 IC2 机器的配方。只有装了 IC2 时才会被加载（{@code recipe.CompatRecipes} 先查 IC2 在不在） */
 public final class Ic2Recipes {
     /** 热能离心机要的最低热量：同 IC2 自己的铁相关配方（粉碎铁矿石、纯净的粉碎铁矿石，见 IC2 的 thermal_centrifuge.ini） */
     static final int CENTRIFUGE_MIN_HEAT = 1500;

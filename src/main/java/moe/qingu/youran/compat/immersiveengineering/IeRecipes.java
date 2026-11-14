@@ -1,13 +1,15 @@
 package moe.qingu.youran.compat.immersiveengineering;
 
 import blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe;
+import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
+import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.YouranMod;
 import moe.qingu.youran.registry.ModItems;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
-/** 加进沉浸工程机器的配方。只有装了沉浸工程（和匠魂）时才会被加载（{@code YouranMod#postInit} 先查） */
+/** 加进沉浸工程机器的配方。只有装了沉浸工程时才会被加载（{@code recipe.CompatRecipes} 先查） */
 public final class IeRecipes {
     /** 匠魂的熔融钴 */
     static final String MOLTEN_COBALT = "cobalt";
@@ -15,8 +17,32 @@ public final class IeRecipes {
     private IeRecipes() {
     }
 
+    /** 乙醇（沉浸工程）、氧气（IC2） */
+    static final String ETHANOL = "ethanol";
+    static final String OXYGEN = "ic2oxygen";
+
+    /**
+     * 炼油厂：500 mB 乙醇 + 325 mB 氧气 → 500 mB 乙酸（服主 11-14 定的数）。炼油厂每 tick 做一次配方，这个量就是每 tick 的量；
+     * 每次的电耗 80 同沉浸工程自己的生物柴油配方。要装了 IC2（氧气）。
+     */
+    public static void registerRefinery() {
+        FluidStack ethanol = FluidRegistry.getFluidStack(ETHANOL, 500);
+        FluidStack oxygen = FluidRegistry.getFluidStack(OXYGEN, 325);
+        if (ethanol == null || oxygen == null) {
+            YouranMod.LOG.info("没有流体 {} 或 {}，不加沉浸工程炼油厂的乙酸配方", ETHANOL, OXYGEN);
+            return;
+        }
+        RefineryRecipe.addRecipe(new FluidStack(ModFluids.aceticAcid, 500), ethanol, oxygen, 80);
+        RefineryRecipe found = RefineryRecipe.findRecipe(ethanol, oxygen);
+        if (found == null || found.output.getFluid() != ModFluids.aceticAcid) {
+            YouranMod.LOG.error("沉浸工程炼油厂的乙酸配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
+        } else {
+            YouranMod.LOG.info("已加沉浸工程炼油厂配方：500 mB {} + 325 mB {} → 500 mB 乙酸", ETHANOL, OXYGEN);
+        }
+    }
+
     /** 灌装机：1 磁粉 + 10 mB 熔融钴 → 1 钴改性磁粉（同装罐机富集模式的那条） */
-    public static void register() {
+    public static void registerCobaltMagnetic() {
         FluidStack cobalt = FluidRegistry.getFluidStack(MOLTEN_COBALT, 10);
         if (cobalt == null) {
             YouranMod.LOG.error("没有流体 {}，不加沉浸工程灌装机的钴改性磁粉配方", MOLTEN_COBALT);
