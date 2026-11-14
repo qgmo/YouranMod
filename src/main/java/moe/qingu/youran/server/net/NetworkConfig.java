@@ -36,6 +36,15 @@ public final class NetworkConfig {
     @Config.RequiresMcRestart
     public static int hostMaxTcpConnections = 256;
 
+    @Config.Comment({"HTTPS：中间 CA 的证书文件（PEM，由 QinguMoe CA 签发；后面可以接上更上层的中间证书，不用放根证书）。",
+            "路径相对服务器根目录，如 config/youranmod-tls/intermediate.crt。和 tlsCaKey 都填了才开 HTTPS（网站的 443 口），空着就只有 HTTP。"})
+    @Config.RequiresMcRestart
+    public static String tlsCaCertificate = "";
+
+    @Config.Comment({"HTTPS：中间 CA 的私钥文件（PEM，不加密的 PKCS#8，即 -----BEGIN PRIVATE KEY-----）。只给运行服务器的帐号读。"})
+    @Config.RequiresMcRestart
+    public static String tlsCaKey = "";
+
     private NetworkConfig() {
     }
 }

@@ -121,6 +121,11 @@ public final class TcpConnection {
         return key.remotePort;
     }
 
+    /** 连接所在协议栈的事件循环（回调都在它上面） */
+    public EventLoop loop() {
+        return stack.loop;
+    }
+
     /** 当前状态（只在事件循环线程上读才准） */
     public State state() {
         return state;
