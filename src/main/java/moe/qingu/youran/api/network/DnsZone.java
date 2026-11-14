@@ -6,7 +6,8 @@ import java.util.List;
 @FunctionalInterface
 public interface DnsZone {
     /**
-     * 名字（小写、不带结尾点，如 {@code shop.example}）的 AAAA 地址。名字不存在返回 null；
+     * 名字（小写、不带结尾点的 ASCII 形式，如 {@code shop.example}；国际化域名是 A-label，如 {@code xn--0zwm56d.example}，
+     * 见 {@link DomainNames}）的 AAAA 地址。名字不存在返回 null；
      * 名字存在但没有 AAAA 返回空表。
      */
     List<Ipv6Address> aaaa(String name);

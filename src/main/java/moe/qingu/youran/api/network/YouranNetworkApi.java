@@ -8,7 +8,6 @@ import moe.qingu.youran.api.network.tls.TlsServerContext;
 import java.util.Collection;
 import java.util.function.Supplier;
 
-import java.util.Locale;
 
 /**
  * 服务器内网（游戏内 IPv6 网络）给其他模组的入口。
@@ -24,6 +23,8 @@ import java.util.Locale;
 public final class YouranNetworkApi {
     /** YouranMod 自己的机房（玩法 /64 里的第 0 号 /96） */
     public static final String YOURANMOD_DATACENTER = "youranmod:main";
+    /** 玩家临时地址的 /96（玩法 /64 的最后一个，序号 {@link NetworkLayout#PLAYERS_DATACENTER}）；不能在里面登记主机 */
+    public static final String PLAYERS_DATACENTER = "youranmod:players";
 
     private YouranNetworkApi() {
     }
@@ -35,9 +36,9 @@ public final class YouranNetworkApi {
         NetworkRegistry.addDatacenter(checkKey(key), -1);
     }
 
-    /** 登记一个机房，指定序号（0–4294967295；0 是 YouranMod 的） */
+    /** 登记一个机房，指定序号（0–4294967294；0 是 YouranMod 的，最后一个 4294967295 留给玩家临时地址） */
     public static void registerDatacenter(String key, long index) {
-        if (index < 0 || index > 0xFFFFFFFFL) {
+        if (index < 0 || index >= NetworkLayout.PLAYERS_DATACENTER) {
             throw new IllegalArgumentException("机房序号超出范围：" + index);
         }
         NetworkRegistry.addDatacenter(checkKey(key), index);
@@ -47,7 +48,7 @@ public final class YouranNetworkApi {
      * 在机房 {@code datacenter} 里登记一个 /128 主机，按顺序分地址。网络启动时在网络线程上调用 {@code service}。
      */
     public static void registerHost(String key, String datacenter, HostService service) {
-        NetworkRegistry.addHost(checkKey(key), checkKey(datacenter), -1, service);
+        NetworkRegistry.addHost(checkKey(key), checkHostDatacenter(datacenter), -1, service);
     }
 
     /** 同上，指定主机号（/96 里的低 32 位，如 0x53 得到 {@code …::53}；0 不能用） */
@@ -55,7 +56,7 @@ public final class YouranNetworkApi {
         if (hostPart <= 0 || hostPart > 0xFFFFFFFFL) {
             throw new IllegalArgumentException("主机号超出范围：" + hostPart);
         }
-        NetworkRegistry.addHost(checkKey(key), checkKey(datacenter), hostPart, service);
+        NetworkRegistry.addHost(checkKey(key), checkHostDatacenter(datacenter), hostPart, service);
     }
 
     /**
@@ -64,10 +65,12 @@ public final class YouranNetworkApi {
      * 为 null 时由你自己在这台主机上跑 DNS 服务器。{@code .com}、{@code .yr} 是 YouranMod 的，不能再登记。
      */
     public static void registerTopLevelDomain(String tld, String hostKey, DnsZone zone) {
-        String t = tld.toLowerCase(Locale.ROOT);
+        String t = tld.trim();
         if (t.startsWith(".")) {
             t = t.substring(1);
         }
+        // 国际化顶级域：先转成 A-label（转不了时抛出 IllegalArgumentException）
+        t = DomainNames.toAscii(t);
         if (!NetworkRegistry.TLD.matcher(t).matches()) {
             throw new IllegalArgumentException("顶级域不合法：" + tld);
         }
@@ -75,14 +78,13 @@ public final class YouranNetworkApi {
     }
 
     /**
-     * 在 YouranMod 的 {@code .yr} 或 {@code .com} 下登记一个名字（如 {@code minebay.yr}），指向主机 {@code hostKey}。
+     * 在 YouranMod 的 {@code .yr} 或 {@code .com} 下登记一个名字（如 {@code minebay.yr}、{@code 商店.悠然.yr}），指向主机 {@code hostKey}。
+     * 国际化域名可以直接写 Unicode，登记时转成 A-label（见 {@link DomainNames}）。
      * {@code .com} 只给少数特殊网站做本地记录（其余 .com 名字回答不存在）。
      */
     public static void registerDomainName(String name, String hostKey) {
-        String n = name.toLowerCase(Locale.ROOT);
-        if (n.endsWith(".")) {
-            n = n.substring(0, n.length() - 1);
-        }
+        // 国际化域名（如 悠然.yr）先转成 A-label（xn--…），DNS、证书里只用这个形式；转不了时抛出 IllegalArgumentException
+        String n = DomainNames.toAscii(name);
         if (!(n.endsWith(".yr") || n.endsWith(".com")) || !n.matches("[a-z0-9]([a-z0-9.-]*[a-z0-9])?") || n.contains("..")) {
             throw new IllegalArgumentException("只能登记 .yr 或 .com 下的名字：" + name);
         }
@@ -132,10 +134,30 @@ public final class YouranNetworkApi {
         return b == null ? null : b.serverTls(names);
     }
 
+    /**
+     * 服务端：YouranMod 自己的 {@code .yr} / {@code .com} 区里登记的名字（如 {@code minebay.yr}）的地址，直接查登记表，不走 DNS 报文。
+     * 其他模组顶级域里的名字、不存在的名字、网络没在运行时返回 null。给“按页面里的主机名放行玩家临时地址”这类服务端逻辑用。
+     */
+    public static Ipv6Address addressOfName(String name) {
+        NetworkBackend b = NetworkHooks.backend();
+        if (b == null || name == null) {
+            return null;
+        }
+        String n = DomainNames.tryToAscii(name);
+        return n == null ? null : b.localNameAddress(n);
+    }
+
     /** NTP 服务器的地址 */
     public static Ipv6Address ntpAddress() {
         NetworkBackend b = NetworkHooks.backend();
         return b == null ? null : b.ntpAddress();
+    }
+
+    private static String checkHostDatacenter(String datacenter) {
+        if (PLAYERS_DATACENTER.equals(datacenter)) {
+            throw new IllegalArgumentException("玩家临时地址的 /96 里不能登记主机");
+        }
+        return checkKey(datacenter);
     }
 
     private static String checkKey(String key) {

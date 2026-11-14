@@ -1,12 +1,12 @@
 package moe.qingu.youran.api.network.tls;
 
+import moe.qingu.youran.api.network.DomainNames;
 import moe.qingu.youran.api.network.Ipv6Address;
 import org.apache.logging.log4j.LogManager;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ByteArrayOutputStream;
-import java.net.IDN;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.cert.CertPath;
@@ -234,16 +234,14 @@ public final class TlsTrust {
         return false;
     }
 
+    /** 证书里的名字、要连的主机名 → A-label（国际化域名只按 ASCII 形式比）；通配符 {@code *.} 留着；不合法为 null */
     static String normalizeName(String s) {
         String n = s.toLowerCase(Locale.ROOT);
-        if (n.endsWith(".")) {
-            n = n.substring(0, n.length() - 1);
+        if (n.startsWith("*.")) {
+            String rest = DomainNames.tryToAscii(n.substring(2));
+            return rest == null ? null : "*." + rest;
         }
-        try {
-            return IDN.toASCII(n, IDN.ALLOW_UNASSIGNED).toLowerCase(Locale.ROOT);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return DomainNames.tryToAscii(n);
     }
 
     /** RFC 6125：完全相同，或者 {@code *.example.yr} 匹配正好多一级的名字（通配符只能在最左一级、整级） */

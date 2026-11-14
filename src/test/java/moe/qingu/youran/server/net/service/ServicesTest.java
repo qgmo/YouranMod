@@ -67,6 +67,7 @@ class ServicesTest {
         Map<String, List<Ipv6Address>> yrRec = new LinkedHashMap<>();
         yrRec.put("ns.yr", Collections.singletonList(YR));
         yrRec.put("test.yr", Collections.singletonList(WEB));
+        yrRec.put("xn--0zwm56d.yr", Collections.singletonList(WEB));
         Map<String, List<Ipv6Address>> comRec = new LinkedHashMap<>();
         comRec.put("dado.wixsite.com", Collections.singletonList(WEB));
         new AuthoritativeDnsServer(Arrays.asList(
@@ -80,7 +81,7 @@ class ServicesTest {
         resolver = new RecursiveResolver(res, Collections.singletonList(ROOT));
         resolver.start();
         new NtpServer(() -> 1_794_355_200_000L).start(ntp);
-        TestWebsite.start(web, new IssuingTlsContext(new LeafCache(pki.intermediate(), System::currentTimeMillis), () -> Collections.singletonList("test.yr")));
+        TestWebsite.start(web, new IssuingTlsContext(new LeafCache(pki.intermediate(), System::currentTimeMillis), () -> java.util.Arrays.asList("test.yr", "xn--0zwm56d.yr")));
         // 数一数递归解析器往外问了几次（发往三台权威服务器的包）
         link.filter = raw -> {
             Ipv6Address d = Ipv6Packet.destinationOf(raw);
@@ -216,6 +217,28 @@ class ServicesTest {
         assertEquals(200, r.status);
         assertEquals(TestWebsite.PAGE, r.bodyText());
         assertTrue(client.tcpRetransmissions() + 0 >= 0);
+    }
+
+    @Test
+    void internationalizedNameEndToEnd() throws Exception {
+        // DNS 报文里是 A-label；存根解析器收到 Unicode 先转
+        DnsResolver.Result r = resolve("测试.yr");
+        assertEquals(Collections.singletonList(WEB), r.addresses);
+        assertEquals("xn--0zwm56d.yr", r.response.questions.get(0).name);
+        // 转不了的名字报错，不发查询
+        CompletableFuture<DnsResolver.Result> bad = new DnsResolver(client, RESOLVER).resolveAaaa("\u0378.yr");
+        link.loop.advance(100);
+        assertEquals(NetworkException.Reason.LIMIT, ((NetworkException) assertThrowsCause(bad)).reason);
+        // 网址里的 Unicode 主机名：请求、SNI、证书都用 A-label
+        assertEquals("xn--0zwm56d.yr", HttpClient.Url.parse("https://测试.yr/").host);
+        assertNull(HttpClient.Url.parse("http://\u0378.yr/"));
+        CompletableFuture<HttpClient.Response> f = HttpClient.send(client, new DnsResolver(client, RESOLVER), HttpClient.Url.parse("https://测试.yr/"),
+                "GET", null, null, 15000, TlsTrust.of(pki.root));
+        link.loop.advance(10_000);
+        HttpClient.Response resp = done(f);
+        assertEquals(200, resp.status);
+        assertEquals(Collections.singletonList("DNS:xn--0zwm56d.yr"),
+                moe.qingu.youran.api.network.tls.CertificateInfo.of(resp.tls.peerChain.get(0)).subjectAltNames);
     }
 
     @Test

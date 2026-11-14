@@ -14,7 +14,7 @@ import java.util.Random;
 
 /**
  * /48 路由器（网络线程上）。按目的地址交给：坐标路由（第 0 号 /64 → 维度 /72 → 维度路由器 → 设备）、
- * 玩法子路由器（第 1 号 /64 → 机房 /96 → 主机 /128 的协议栈）、上行口（/48 以外）。
+ * 玩法子路由器（第 1 号 /64 → 机房 /96 → 主机 /128 的协议栈；最后一个 /96 是玩家临时地址，交给 {@link PlayerNics} 过滤）、上行口（/48 以外）。
  * 跳数在这里减一（整个 /48 算一跳），用完回“超时”；到不了的回“目标不可达”（ICMPv6 差错按 RFC 4443 限速）。
  * <p>
  * 测试开关 {@link #setSimulation}：按概率丢包、把包推迟 20–80 毫秒（造成乱序）。
@@ -29,6 +29,8 @@ public final class Router {
     private final RateLimiter errorLimiter = new RateLimiter(200, 200 * Ipv6Packet.MAX_PACKET);
     private final Random random = new Random();
     private Uplink uplink;
+    /** 玩家临时地址（玩法 /64 的最后一个 /96）；没开时为 null，那个 /96 和别的没登记的机房一样回“无路由” */
+    private PlayerNics players;
     private double lossRate;
     private double reorderRate;
 
@@ -65,6 +67,10 @@ public final class Router {
 
     void setUplink(Uplink u) {
         uplink = u;
+    }
+
+    void setPlayers(PlayerNics p) {
+        players = p;
     }
 
     /** 测试开关：丢包率、推迟率（0–1）；都为 0 时关掉 */
@@ -140,6 +146,10 @@ public final class Router {
                 return;
             }
             case NetworkLayout.SUBNET_GAMEPLAY: {
+                if (players != null && NetworkLayout.datacenterIndexOf(dst) == NetworkLayout.PLAYERS_DATACENTER) {
+                    players.deliver(p);
+                    return;
+                }
                 Map<Long, NetStack> dc = datacenters.get(NetworkLayout.datacenterIndexOf(dst));
                 if (dc == null) {
                     unreachable(p, Icmpv6Message.UNREACH_NO_ROUTE);

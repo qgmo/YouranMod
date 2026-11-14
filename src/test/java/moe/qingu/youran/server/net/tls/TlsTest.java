@@ -199,6 +199,31 @@ class TlsTest {
     }
 
     @Test
+    void internationalizedNamesUseALabels() throws Exception {
+        // 测试.yr 的 A-label；中间 CA 的约束 DNS:yr 也管 A-label 的子域
+        String alabel = moe.qingu.youran.api.network.DomainNames.toAscii("测试.yr");
+        assertEquals("xn--0zwm56d.yr", alabel);
+        TestPki pki = new TestPki();
+        IntermediateCa ca = pki.intermediate();
+        Date now = new Date();
+        TlsTrust trust = TlsTrust.of(pki.root);
+        List<X509Certificate> chain = ca.issue(alabel, now).chain;
+        assertEquals(Collections.singletonList("DNS:" + alabel), CertificateInfo.of(chain.get(0)).subjectAltNames, "SAN 里是 A-label");
+        assertNull(trust.check(chain, alabel, now));
+        assertNull(trust.check(chain, "测试.yr", now), "要连的名字写成 Unicode 也按 A-label 比");
+        assertEquals(CertificateProblem.HOSTNAME_MISMATCH, trust.check(chain, "测验.yr", now));
+        // 握手：SNI 用 A-label，按名字现签
+        LeafCache cache = new LeafCache(ca, System::currentTimeMillis);
+        echoServer(cache, alabel);
+        CompletableFuture<TlsConnection> f = TlsConnection.connect(client, SERVER, 443, alabel, trust, new Collect());
+        link.loop.advance(5000);
+        TlsConnection c = f.get();
+        assertEquals(Collections.singletonList("DNS:" + alabel), CertificateInfo.of(c.info().peerChain.get(0)).subjectAltNames);
+        c.close();
+        link.loop.advance(1000);
+    }
+
+    @Test
     void chainChecks() throws Exception {
         TestPki pki = new TestPki();
         IntermediateCa ca = pki.intermediate();

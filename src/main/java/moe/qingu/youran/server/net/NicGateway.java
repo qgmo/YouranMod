@@ -17,6 +17,8 @@ final class NicGateway {
     private final DeviceTable devices;
     private final Router router;
     private final RejectLog rejects;
+    /** 玩家临时地址；没开时为 null */
+    private PlayerNics players;
     private final int packetsPerSecond;
     private final int bytesPerSecond;
     volatile long accepted;
@@ -28,6 +30,20 @@ final class NicGateway {
         this.rejects = rejects;
         this.packetsPerSecond = packetsPerSecond;
         this.bytesPerSecond = bytesPerSecond;
+    }
+
+    void setPlayers(PlayerNics p) {
+        players = p;
+    }
+
+    /** 玩家客户端发来的玩家临时地址的包（{@code packet} 不为 null） */
+    void fromPlayerNic(UUID player, String name, byte[] packet) {
+        PlayerNics p = players;
+        if (p == null) {
+            reject("玩家 " + name, "玩家临时地址没开（network.playerAddresses=false）");
+            return;
+        }
+        p.fromPlayer(player, name, packet);
     }
 
     /** 玩家客户端发来的（{@code packet} 为 null 表示消息本身不对，{@code messageLength} 是消息长度） */

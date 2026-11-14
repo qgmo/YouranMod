@@ -76,8 +76,10 @@ public final class NicChannel {
                 }
                 int n = payload.readableBytes();
                 byte[] b = n >= 1 && n <= NicMessages.MAX_MESSAGE ? read(payload) : null;
-                // 太长、太短、不是 PACKET 的也交给网络线程（null），由它记日志
-                backend.onClientPacket(player, b != null && b[0] == NicMessages.PACKET ? java.util.Arrays.copyOfRange(b, 1, b.length) : null, n);
+                // 太长、太短、不是原始包的也交给网络线程（null），由它记日志
+                boolean playerNic = b != null && b[0] == NicMessages.PLAYER_PACKET;
+                boolean raw = b != null && (b[0] == NicMessages.PACKET || playerNic);
+                backend.onClientPacket(player, raw ? java.util.Arrays.copyOfRange(b, 1, b.length) : null, n, playerNic);
             } finally {
                 release(payload);
             }

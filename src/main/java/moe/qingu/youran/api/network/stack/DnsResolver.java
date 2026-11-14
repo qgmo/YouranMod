@@ -66,6 +66,15 @@ public final class DnsResolver {
     /** 发一个查询，返回原样的应答 */
     public CompletableFuture<DnsMessage> query(String name, int type) {
         CompletableFuture<DnsMessage> f = new CompletableFuture<>();
+        if (!moe.qingu.youran.api.network.DomainNames.isAscii(name)) {
+            // 国际化域名：报文里只用 A-label
+            try {
+                return query(moe.qingu.youran.api.network.DomainNames.toAscii(name), type);
+            } catch (IllegalArgumentException e) {
+                f.completeExceptionally(new NetworkException(NetworkException.Reason.LIMIT, e.getMessage()));
+                return f;
+            }
+        }
         if (!DnsMessage.isValidName(name)) {
             f.completeExceptionally(new NetworkException(NetworkException.Reason.LIMIT, "域名不合法：" + name));
             return f;

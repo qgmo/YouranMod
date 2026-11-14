@@ -6,6 +6,7 @@ import moe.qingu.youran.api.network.tls.TlsServerContext;
 import net.minecraft.entity.player.EntityPlayerMP;
 
 import java.util.Collection;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
@@ -29,7 +30,20 @@ public interface NetworkBackend {
 
     /**
      * 玩家客户端发来的原始包（在 Netty 线程上调用；实现马上转给网络线程，不碰世界）。
-     * 消息不是 PACKET 或长度不对时 {@code packet} 为 null，{@code messageLength} 是消息的字节数。
+     * 消息不是原始包或长度不对时 {@code packet} 为 null，{@code messageLength} 是消息的字节数。
+     * {@code playerNic} 为 true 时是玩家临时地址的包（PLAYER_PACKET），否则是他操作的设备的包（PACKET）。
      */
-    void onClientPacket(EntityPlayerMP player, byte[] packet, int messageLength);
+    void onClientPacket(EntityPlayerMP player, byte[] packet, int messageLength, boolean playerNic);
+
+    /** 玩家现在的临时地址；没有（不在线、网络没在运行）为 null。任意线程 */
+    Ipv6Address playerAddress(UUID player);
+
+    /** 给玩家的临时地址放行一组目标主机（见 {@code api.network.PlayerAddresses#allow}）；任意线程 */
+    boolean allowPlayer(UUID player, String purpose, Collection<Ipv6Address> hosts, long ttlMillis);
+
+    /** 撤销一个用途的放行；任意线程 */
+    void revokePlayer(UUID player, String purpose);
+
+    /** YouranMod 自己的 .yr / .com 区里登记的名字（A-label）的地址；没有为 null。任意线程 */
+    Ipv6Address localNameAddress(String asciiName);
 }

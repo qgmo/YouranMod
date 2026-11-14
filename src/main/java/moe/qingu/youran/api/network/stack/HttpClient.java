@@ -70,7 +70,7 @@ public final class HttpClient {
         }
     }
 
-    /** 分开的网址：只认 {@code http(s)://主机[:端口][/路径]}，主机可以是 {@code [IPv6 地址]} */
+    /** 分开的网址：只认 {@code http(s)://主机[:端口][/路径]}，主机可以是 {@code [IPv6 地址]}；Unicode 域名转成 A-label */
     public static final class Url {
         public final String host;
         public final int port;
@@ -125,6 +125,13 @@ public final class HttpClient {
             }
             if (host.isEmpty() || port < 1 || port > 65535 || path.indexOf(' ') >= 0 || path.indexOf('\r') >= 0 || path.indexOf('\n') >= 0) {
                 return null;
+            }
+            if (!moe.qingu.youran.api.network.DomainNames.isAscii(host)) {
+                // 国际化域名：请求、SNI、证书校验都用 A-label
+                host = moe.qingu.youran.api.network.DomainNames.tryToAscii(host);
+                if (host == null) {
+                    return null;
+                }
             }
             return new Url(host, port, path, secure);
         }
