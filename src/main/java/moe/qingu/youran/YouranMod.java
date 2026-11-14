@@ -1,5 +1,6 @@
 package moe.qingu.youran;
 
+import moe.qingu.youran.net.NicChannel;
 import moe.qingu.youran.net.YouranNetwork;
 import moe.qingu.youran.config.ServerConfig;
 import moe.qingu.youran.registry.ModBlocks;
@@ -18,6 +19,7 @@ import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLServerAboutToStartEvent;
 import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
 import net.minecraftforge.fml.common.event.FMLServerStoppedEvent;
+import net.minecraftforge.fml.common.event.FMLServerStoppingEvent;
 import net.minecraftforge.fml.common.registry.GameRegistry;
 import net.minecraftforge.oredict.OreDictionary;
 import org.apache.logging.log4j.LogManager;
@@ -47,8 +49,9 @@ public final class YouranMod {
             ServerConfig.loadOnDedicatedServer();
         }
         // 顺序同 1.3.4：流体与创造模式物品栏在方块、物品的注册事件之前
-        // 两端都登记网络频道（同步配置）
+        // 两端都登记网络频道（同步配置；游戏内网络的网卡）
         YouranNetwork.register();
+        NicChannel.register();
         ModFluids.register();
         YouranTab.create();
         MainCity.register();
@@ -62,6 +65,9 @@ public final class YouranMod {
         GameRegistry.addSmelting(new ItemStack(ModBlocks.primogemOre), new ItemStack(ModItems.primogem), 1F);
         OreDictionary.registerOre("primogem", new ItemStack(ModItems.primogem));
         OreDictionary.registerOre("primogem_ore", new ItemStack(ModBlocks.primogemOre));
+        if (event.getSide().isClient()) {
+            moe.qingu.youran.client.network.ClientNetwork.init();
+        }
     }
 
     /** 服务端（独立服务端或进单人世界时的内置服务端）启动前：读配置、登记 tick 处理 */
@@ -73,6 +79,12 @@ public final class YouranMod {
     @Mod.EventHandler
     public void serverStarting(FMLServerStartingEvent event) {
         ServerSide.registerCommands(event);
+    }
+
+    /** 关服开始时（玩家还连着）：停游戏内网络 */
+    @Mod.EventHandler
+    public void serverStopping(FMLServerStoppingEvent event) {
+        ServerSide.stopping();
     }
 
     @Mod.EventHandler
