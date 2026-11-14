@@ -1,5 +1,6 @@
 // 悠然服务器模组（modid youranmod）。
-// 构建：用 JDK 25 运行 Gradle（RetroFuturaGradle 2.x 要求），编译目标 Java 8。照 YouranSCP 的构建精简（去掉了 Mixin、分包等它专用的部分）。
+// 构建：用 JDK 25 运行 Gradle（RetroFuturaGradle 2.x 要求），编译目标 Java 8。照 YouranSCP 的构建精简。
+// Mixin（装罐机反应配方）的接法照 YouranSCP：注解与注解处理器取自 MixinBooter，两种引导见 core 包。
 plugins {
     id 'java'
     id 'com.gtnewhorizons.retrofuturagradle' version '2.0.3'
@@ -27,10 +28,49 @@ minecraft {
 }
 
 repositories {
+    maven {
+        // MixinBooter（CleanroomMC）：只编译（Mixin 注解与注解处理器）
+        name 'CleanroomMC'
+        url 'https://maven.cleanroommc.com'
+        mavenContent {
+            includeGroup 'zone.rong'
+        }
+    }
+    maven {
+        // 工业时代 2 官方仓库：industrialcraft-2-2.8.221-ex112.jar 与整合包、现网的是同一个文件（SHA-1 43e4af33…10ce）
+        name 'IC2'
+        url 'https://maven.ic2.player.to/'
+        mavenContent {
+            includeGroup 'net.industrial-craft'
+        }
+    }
+    maven {
+        // CraftTweaker（BlameJared 的仓库）
+        name 'BlameJared'
+        url 'https://maven.blamejared.com/'
+        mavenContent {
+            includeGroup 'CraftTweaker2'
+        }
+    }
     mavenCentral()
 }
 
 dependencies {
+    // Mixin 注解与注解处理器（生成 refmap）用 MixinBooter 带的 Mixin 0.8；运行时服务端用 SpongeForge 自带的、客户端用 MixinBooter（见 core 包）
+    String mixin = modUtils.enableMixins("zone.rong:mixinbooter:${property('mixin_booter_version')}", 'mixins.youranmod.refmap.json')
+    compileOnly(mixin) { transitive = false }
+    // 注解处理器还要 ASM、Guava、Gson（MixinBooter 的 pom 没带上），同 YouranSCP
+    annotationProcessor 'org.ow2.asm:asm-debug-all:5.2'
+    annotationProcessor 'com.google.guava:guava:32.1.2-jre'
+    annotationProcessor 'com.google.code.gson:gson:2.8.9'
+    annotationProcessor(mixin) { transitive = false }
+    // 工业时代 2（与现网同版本）：只编译、不打包；只有 compat.ic2 与 mixin.ic2 引用，没装 IC2 时不注册 Mixin、不加载这些类
+    compileOnly rfg.deobf('net.industrial-craft:industrialcraft-2:2.8.221-ex112')
+    // CraftTweaker 4.1.20.662（与整合包同版本）：只编译、不打包；只有 compat.crafttweaker 引用，没装时不加载
+    compileOnly rfg.deobf('CraftTweaker2:CraftTweaker2-MC1120-Main:1.12-4.1.20.662')
+    compileOnly 'CraftTweaker2:CraftTweaker2-API:4.1.20.662'
+    compileOnly 'CraftTweaker2:ZenScript:4.1.20.662'
+
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
@@ -43,6 +83,17 @@ processResources {
     inputs.property 'mod_version', project.version
     filesMatching(['mcmod.info', 'version.properties']) {
         expand('mod_version': project.version)
+    }
+}
+
+jar {
+    manifest {
+        attributes(
+            // 核心插件只负责在没有 MixinBooter 的环境（服务端 SpongeForge）注册 Mixin 配置（见 core.YouranCorePlugin）
+            'FMLCorePlugin': 'moe.qingu.youran.core.YouranCorePlugin',
+            'FMLCorePluginContainsFMLMod': 'true',
+            // 不写 MixinConfigs：写了会被当成早期配置在模组上类路径之前处理，找不到 IC2 的类（同 YouranSCP）
+        )
     }
 }
 

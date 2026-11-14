@@ -1,0 +1,16 @@
+{
+	"package": "moe.qingu.youran.mixin.ic2",
+	"required": true,
+	"refmap": "mixins.youranmod.refmap.json",
+	"minVersion": "0.8",
+	"compatibilityLevel": "JAVA_8",
+	"mixins": [
+		"TileEntityCannerMixin",
+		"InvSlotProcessableCannerMixin"
+	],
+	"client": [],
+	"server": [],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
