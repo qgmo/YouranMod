@@ -8,7 +8,6 @@ import moe.qingu.youran.api.network.tls.TlsServerContext;
 import java.util.Collection;
 import java.util.function.Supplier;
 
-import java.util.Locale;
 
 /**
  * 服务器内网（游戏内 IPv6 网络）给其他模组的入口。
@@ -66,10 +65,12 @@ public final class YouranNetworkApi {
      * 为 null 时由你自己在这台主机上跑 DNS 服务器。{@code .com}、{@code .yr} 是 YouranMod 的，不能再登记。
      */
     public static void registerTopLevelDomain(String tld, String hostKey, DnsZone zone) {
-        String t = tld.toLowerCase(Locale.ROOT);
+        String t = tld.trim();
         if (t.startsWith(".")) {
             t = t.substring(1);
         }
+        // 国际化顶级域：先转成 A-label（转不了时抛出 IllegalArgumentException）
+        t = DomainNames.toAscii(t);
         if (!NetworkRegistry.TLD.matcher(t).matches()) {
             throw new IllegalArgumentException("顶级域不合法：" + tld);
         }
@@ -77,14 +78,13 @@ public final class YouranNetworkApi {
     }
 
     /**
-     * 在 YouranMod 的 {@code .yr} 或 {@code .com} 下登记一个名字（如 {@code minebay.yr}），指向主机 {@code hostKey}。
+     * 在 YouranMod 的 {@code .yr} 或 {@code .com} 下登记一个名字（如 {@code minebay.yr}、{@code 商店.悠然.yr}），指向主机 {@code hostKey}。
+     * 国际化域名可以直接写 Unicode，登记时转成 A-label（见 {@link DomainNames}）。
      * {@code .com} 只给少数特殊网站做本地记录（其余 .com 名字回答不存在）。
      */
     public static void registerDomainName(String name, String hostKey) {
-        String n = name.toLowerCase(Locale.ROOT);
-        if (n.endsWith(".")) {
-            n = n.substring(0, n.length() - 1);
-        }
+        // 国际化域名（如 悠然.yr）先转成 A-label（xn--…），DNS、证书里只用这个形式；转不了时抛出 IllegalArgumentException
+        String n = DomainNames.toAscii(name);
         if (!(n.endsWith(".yr") || n.endsWith(".com")) || !n.matches("[a-z0-9]([a-z0-9.-]*[a-z0-9])?") || n.contains("..")) {
             throw new IllegalArgumentException("只能登记 .yr 或 .com 下的名字：" + name);
         }
@@ -143,11 +143,8 @@ public final class YouranNetworkApi {
         if (b == null || name == null) {
             return null;
         }
-        String n = name.toLowerCase(Locale.ROOT);
-        if (n.endsWith(".")) {
-            n = n.substring(0, n.length() - 1);
-        }
-        return b.localNameAddress(n);
+        String n = DomainNames.tryToAscii(name);
+        return n == null ? null : b.localNameAddress(n);
     }
 
     /** NTP 服务器的地址 */

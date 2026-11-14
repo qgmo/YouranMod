@@ -156,7 +156,8 @@ final class NetCommand extends CommandBase {
         }
         tell(sender, "§6DNS §f根 root.yr；YouranMod 的顶级域 .yr .com" + (net.tlds().isEmpty() ? "" : "；其他模组的 ." + String.join(" .", net.tlds())));
         for (Map.Entry<String, String> e : net.names().entrySet()) {
-            tell(sender, "  " + e.getKey() + " → " + e.getValue());
+            String shown = moe.qingu.youran.api.network.DomainNames.toDisplay(e.getKey());
+            tell(sender, "  " + e.getKey() + (shown.equals(e.getKey()) ? "" : "（" + shown + "）") + " → " + e.getValue());
         }
     }
 
@@ -358,6 +359,14 @@ final class NetCommand extends CommandBase {
             return;
         }
         String name = args[4];
+        if (!moe.qingu.youran.api.network.DomainNames.isAscii(name)) {
+            try {
+                tell(sender, "§7" + name + " 的 A-label 是 " + moe.qingu.youran.api.network.DomainNames.toAscii(name));
+            } catch (IllegalArgumentException e) {
+                tell(sender, "§c" + e.getMessage());
+                return;
+            }
+        }
         long start = System.nanoTime();
         dev.dns.query(name, DnsMessage.TYPE_AAAA).whenComplete((m, err) -> {
             if (err != null) {

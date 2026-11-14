@@ -62,6 +62,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     static final String HOST_ROOT_DNS = "youranmod:dns-root";
     static final String HOST_YR_DNS = "youranmod:dns-yr";
     static final String HOST_TEST = "youranmod:test";
+    /** 测试网站的国际化域名别名 */
+    static final String TEST_IDN_NAME = "测试.yr";
     static final long PART_ROUTER = 0x1;
     static final long PART_RESOLVER = 0x53;
     static final long PART_NTP = 0x123;
@@ -188,6 +190,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         Map<String, Ipv6Address> yrRecords = new LinkedHashMap<>();
         Map<String, Ipv6Address> comRecords = new LinkedHashMap<>();
         yrRecords.put("test.yr", hostAddresses.get(HOST_TEST));
+        // 国际化域名的测试别名（DNS 与证书里是 A-label）
+        yrRecords.put(moe.qingu.youran.api.network.DomainNames.toAscii(TEST_IDN_NAME), hostAddresses.get(HOST_TEST));
         for (NetworkRegistry.NameDecl n : NetworkRegistry.names()) {
             Ipv6Address a = hostAddresses.get(n.hostKey);
             Map<String, Ipv6Address> target = n.name.endsWith(".yr") ? yrRecords : comRecords;
