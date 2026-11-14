@@ -17,6 +17,7 @@ public final class Ic2Recipes {
     public static void register() {
         registerCentrifuge();
         registerRolling();
+        registerFloppy();
     }
 
     /** 热能离心机：1 铁粉（dustIron）→ 3 小撮磁粉 */
@@ -40,6 +41,19 @@ public final class Ic2Recipes {
     private static void rolling(ItemStack input, ItemStack output) {
         if (!Recipes.metalformerRolling.addRecipe(Recipes.inputFactory.forStack(input), null, false, output)) {
             YouranMod.LOG.error("IC2 金属成型机辊压配方（{} → {}）没加上：已有输入相同的配方", input.getItem().getRegistryName(), output.getItem().getRegistryName());
+        }
+    }
+
+    /**
+     * 流体/固体装罐机的固体装罐模式（容器放“罐子”槽，填充物放输入槽）：1 抛光盘片 + 6 聚氯乙烯片 → 1 软盘；
+     * 1 抛光盘片 + 6 聚乙烯片 → 1 软盘。
+     */
+    static void registerFloppy() {
+        for (ItemStack sheet : new ItemStack[]{new ItemStack(ModItems.pvcSheet), new ItemStack(ModItems.polyethyleneSheet)}) {
+            if (!Recipes.cannerBottle.addRecipe(Recipes.inputFactory.forStack(new ItemStack(ModItems.polishedPlatter), 1),
+                    Recipes.inputFactory.forStack(sheet, 6), new ItemStack(ModItems.floppyDisk), false)) {
+                YouranMod.LOG.error("IC2 固体装罐配方（抛光盘片 + 6 {} → 软盘）没加上：已有输入相同的配方", sheet.getItem().getRegistryName());
+            }
         }
     }
 }
