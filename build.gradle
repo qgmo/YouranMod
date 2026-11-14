@@ -52,3 +52,68 @@ test {
         languageVersion = JavaLanguageVersion.of(8)
     })
 }
+
+// ---- 分包（服主 11-14）----
+// 完整包：reobfJar 的产物 youranmod-<版本>.jar（服务器用，也能单人游戏；单人游戏里有游戏内网络）。
+// 客户端包：youranmod-<版本>-client.jar，发给玩家。只比完整包少服务端权威的网络实现 server/net 包
+// （路由器、地址分配表、DNS 根 / 顶级域 / 递归解析器、NTP、机房服务、测试网站、网卡的服务端校验、测试命令、网络配置）。
+// 两端共用的协议栈、网络包、公开 api 包、已有的其他内容照旧都在。不像 YouranSCP 那样严格（服主 11-14）：只查这一个包。
+// 打完包后检查（checkClientJar）：客户端包里没有 server/net 下的文件，别的类也没有直接引用它；
+// 按类名加载的只许 clientReflectiveServerClasses 里登记的（找不到时安静跳过）。不过就删掉产物、构建失败。
+def clientExcludedPrefix = 'moe/qingu/youran/server/net/'
+def clientReflectiveServerClasses = ['moe.qingu.youran.server.net.NetworkServer']
+def reobfJarFile = tasks.named('reobfJar').flatMap { it.archiveFile }
+
+def checkClientJar = { File file ->
+    def problems = []
+    int classCount = 0
+    new java.util.zip.ZipFile(file).withCloseable { z ->
+        z.entries().toList().findAll { !it.directory }.each { e ->
+            if (e.name.startsWith(clientExcludedPrefix)) {
+                problems << "不该在客户端包里：${e.name}"
+                return
+            }
+            if (!e.name.endsWith('.class')) {
+                return
+            }
+            classCount++
+            // 常量池里的 UTF-8 串按 ISO-8859-1 读出来，类名部分是 ASCII，直接找
+            String text = new String(z.getInputStream(e).bytes, 'ISO-8859-1')
+            if (text.contains(clientExcludedPrefix)) {
+                problems << "${e.name} 直接引用了客户端包里没有的 ${clientExcludedPrefix} 下的类"
+            }
+            (text =~ /moe\.qingu\.youran\.server\.net\.[A-Za-z0-9_$]+/).each { String ref ->
+                if (!clientReflectiveServerClasses.contains(ref)) {
+                    problems << "${e.name} 按类名引用了 ${ref}（找不到时要安静跳过，确认后登记进 clientReflectiveServerClasses）"
+                }
+            }
+        }
+    }
+    if (!problems.isEmpty()) {
+        file.delete()
+        throw new GradleException("客户端包检查没过（产物已删除）：\n  " + problems.join('\n  '))
+    }
+    logger.lifecycle("客户端包检查通过：${file.name}，${classCount} 个类，没有 ${clientExcludedPrefix}，也没有类引用它")
+}
+
+def clientJar = tasks.register('clientJar', Zip) {
+    group = 'build'
+    description = '客户端包（发给玩家）：完整包去掉服务端权威的网络实现，打完检查引用'
+    archiveBaseName.set(base.archivesName)
+    archiveVersion.set(project.version.toString())
+    archiveClassifier.set('client')
+    archiveExtension.set('jar')
+    destinationDirectory.set(layout.buildDirectory.dir('libs'))
+    preserveFileTimestamps = false
+    includeEmptyDirs = false
+    from(zipTree(reobfJarFile)) {
+        exclude "${clientExcludedPrefix}**"
+    }
+    doLast {
+        checkClientJar(archiveFile.get().asFile)
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn clientJar
+}
