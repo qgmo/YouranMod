@@ -31,6 +31,7 @@ tile.chlorine_youran.name=Chlorine
 tile.hydrargyrum_youran.name=Hydrargyrum
 advancements.youran.descr=Welcome to Youran Server!
 item.magnetite_dust.name=Magnetite Dust
+item.small_magnetite_dust.name=Tiny Pile of Magnetite Dust
 item.red_blood_gem.name=Red Blood Gem
 advancements.itisbetterthandiamond.title=It is better than diamond
 advancements.youran.title=YouranServer

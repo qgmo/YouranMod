@@ -66,6 +66,7 @@ public final class YouranMod {
         OreDictionary.registerOre("primogem", new ItemStack(ModItems.primogem));
         OreDictionary.registerOre("primogem_ore", new ItemStack(ModBlocks.primogemOre));
         OreDictionary.registerOre("dustMagnetite", new ItemStack(ModItems.magnetiteDust));
+        OreDictionary.registerOre("dustTinyMagnetite", new ItemStack(ModItems.smallMagnetiteDust));
         if (event.getSide().isClient()) {
             moe.qingu.youran.client.network.ClientNetwork.init();
         }
