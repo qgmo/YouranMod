@@ -14,14 +14,32 @@ public final class Ic2Recipes {
     private Ic2Recipes() {
     }
 
-    /** 热能离心机：1 铁粉（dustIron）→ 3 小撮磁粉 */
     public static void register() {
+        registerCentrifuge();
+        registerRolling();
+    }
+
+    /** 热能离心机：1 铁粉（dustIron）→ 3 小撮磁粉 */
+    static void registerCentrifuge() {
         NBTTagCompound meta = new NBTTagCompound();
         meta.setInteger("minHeat", CENTRIFUGE_MIN_HEAT);
         boolean ok = Recipes.centrifuge.addRecipe(Recipes.inputFactory.forOreDict("dustIron"), meta, false,
                 new ItemStack(ModItems.smallMagnetiteDust, 3));
         if (!ok) {
             YouranMod.LOG.error("IC2 热能离心机配方（铁粉 → 3 小撮磁粉）没加上：已有输入相同的配方");
+        }
+    }
+
+    /** 金属成型机辊压（同锭压成板）：精制盘片 → 抛光盘片，聚氯乙烯团 → 聚氯乙烯片，聚乙烯团 → 聚乙烯片 */
+    static void registerRolling() {
+        rolling(new ItemStack(ModItems.refinedPlatter), new ItemStack(ModItems.polishedPlatter));
+        rolling(new ItemStack(ModItems.pvcLump), new ItemStack(ModItems.pvcSheet));
+        rolling(new ItemStack(ModItems.polyethyleneLump), new ItemStack(ModItems.polyethyleneSheet));
+    }
+
+    private static void rolling(ItemStack input, ItemStack output) {
+        if (!Recipes.metalformerRolling.addRecipe(Recipes.inputFactory.forStack(input), null, false, output)) {
+            YouranMod.LOG.error("IC2 金属成型机辊压配方（{} → {}）没加上：已有输入相同的配方", input.getItem().getRegistryName(), output.getItem().getRegistryName());
         }
     }
 }

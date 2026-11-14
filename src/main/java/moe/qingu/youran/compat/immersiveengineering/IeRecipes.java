@@ -1,14 +1,18 @@
 package moe.qingu.youran.compat.immersiveengineering;
 
 import blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe;
+import blusunrize.immersiveengineering.api.crafting.MetalPressRecipe;
 import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
 import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.YouranMod;
 import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
 import moe.qingu.youran.registry.ModItems;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
+import net.minecraftforge.fml.common.registry.ForgeRegistries;
 
 /** 加进沉浸工程机器的配方。只有装了沉浸工程时才会被加载（{@code recipe.CompatRecipes} 先查） */
 public final class IeRecipes {
@@ -78,6 +82,27 @@ public final class IeRecipes {
             YouranMod.LOG.error("沉浸工程灌装机的醋酸纤维素配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
         } else {
             YouranMod.LOG.info("已加沉浸工程灌装机配方：纤维素 + 188 mB 乙酸 → 醋酸纤维素");
+        }
+    }
+
+    /** 金属冲压机，板模具（同锭压成板，电耗 2400 同沉浸工程的板）：精制盘片 → 抛光盘片，塑料团 → 塑料片 */
+    public static void registerMetalPress() {
+        Item moldItem = ForgeRegistries.ITEMS.getValue(new ResourceLocation("immersiveengineering", "mold"));
+        if (moldItem == null) {
+            YouranMod.LOG.error("找不到沉浸工程的模具，不加金属冲压机配方");
+            return;
+        }
+        ItemStack plateMold = new ItemStack(moldItem, 1, 0);
+        press(new ItemStack(ModItems.refinedPlatter), new ItemStack(ModItems.polishedPlatter), plateMold);
+        press(new ItemStack(ModItems.pvcLump), new ItemStack(ModItems.pvcSheet), plateMold);
+        press(new ItemStack(ModItems.polyethyleneLump), new ItemStack(ModItems.polyethyleneSheet), plateMold);
+    }
+
+    private static void press(ItemStack input, ItemStack output, ItemStack mold) {
+        MetalPressRecipe.addRecipe(output, input, mold, 2400);
+        MetalPressRecipe found = MetalPressRecipe.findRecipe(mold, input);
+        if (found == null || !ItemStack.areItemsEqual(found.output, output)) {
+            YouranMod.LOG.error("沉浸工程金属冲压机配方（{} → {}）没生效", input.getItem().getRegistryName(), output.getItem().getRegistryName());
         }
     }
 }

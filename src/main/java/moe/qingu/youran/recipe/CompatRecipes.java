@@ -21,6 +21,9 @@ public final class CompatRecipes {
         if (ic2) {
             moe.qingu.youran.compat.ic2.Ic2Recipes.register();
         }
+        if (ie) {
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerMetalPress();
+        }
         if (ie && tic) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCobaltMagnetic();
         }
