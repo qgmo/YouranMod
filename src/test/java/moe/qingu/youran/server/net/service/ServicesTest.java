@@ -11,6 +11,12 @@ import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NtpClient;
 import moe.qingu.youran.api.network.stack.TestLink;
 import moe.qingu.youran.api.network.packet.TcpSegment;
+import moe.qingu.youran.server.net.tls.IssuingTlsContext;
+import moe.qingu.youran.server.net.tls.LeafCache;
+import moe.qingu.youran.server.net.tls.TestPki;
+import moe.qingu.youran.api.network.stack.NetworkException;
+import moe.qingu.youran.api.network.tls.CertificateProblem;
+import moe.qingu.youran.api.network.tls.TlsTrust;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -40,9 +46,11 @@ class ServicesTest {
     final TestLink link = new TestLink();
     final NetStack client = link.host("fd00::c");
     RecursiveResolver resolver;
+    final TestPki pki;
     final AtomicInteger upstreamQueries = new AtomicInteger();
 
-    ServicesTest() {
+    ServicesTest() throws Exception {
+        pki = new TestPki();
         NetStack root = link.host(ROOT.toString());
         NetStack yr = link.host(YR.toString());
         NetStack mod = link.host(MOD.toString());
@@ -72,7 +80,7 @@ class ServicesTest {
         resolver = new RecursiveResolver(res, Collections.singletonList(ROOT));
         resolver.start();
         new NtpServer(() -> 1_794_355_200_000L).start(ntp);
-        TestWebsite.start(web);
+        TestWebsite.start(web, new IssuingTlsContext(new LeafCache(pki.intermediate(), System::currentTimeMillis), () -> Collections.singletonList("test.yr")));
         // 数一数递归解析器往外问了几次（发往三台权威服务器的包）
         link.filter = raw -> {
             Ipv6Address d = Ipv6Packet.destinationOf(raw);
@@ -208,6 +216,101 @@ class ServicesTest {
         assertEquals(200, r.status);
         assertEquals(TestWebsite.PAGE, r.bodyText());
         assertTrue(client.tcpRetransmissions() + 0 >= 0);
+    }
+
+    @Test
+    void fetchTestSiteOverHttps() throws Exception {
+        DnsResolver dns = new DnsResolver(client, RESOLVER);
+        CompletableFuture<HttpClient.Response> f = HttpClient.send(client, dns, HttpClient.Url.parse("https://test.yr/"), "GET", null, null, 15000, TlsTrust.of(pki.root));
+        link.loop.advance(10_000);
+        HttpClient.Response r = done(f);
+        assertEquals(200, r.status);
+        assertEquals(TestWebsite.PAGE, r.bodyText());
+        assertEquals(WEB, r.remoteAddress);
+        assertEquals(443, r.remotePort);
+        assertTrue(r.tls != null && r.tls.peerChain.size() == 2);
+        // 不信任测试根（默认只信 QinguMoe CA）：证书错误
+        CompletableFuture<HttpClient.Response> g = HttpClient.fetch(client, dns, "https://test.yr/", 15000);
+        link.loop.advance(10_000);
+        assertTrue(g.isCompletedExceptionally());
+        NetworkException e = (NetworkException) assertThrowsCause(g);
+        assertEquals(NetworkException.Reason.CERTIFICATE, e.reason);
+        assertEquals(CertificateProblem.UNTRUSTED, e.certificateProblem);
+    }
+
+    @Test
+    void fetchOverHttpsWithLossAndReordering() throws Exception {
+        java.util.Random rnd = new java.util.Random(7);
+        link.filter = raw -> {
+            double r = rnd.nextDouble();
+            if (r < 0.2) {
+                return null;
+            }
+            return r < 0.5 ? 20L + rnd.nextInt(61) : 0L;
+        };
+        int ok = 0;
+        for (int i = 0; i < 3; i++) {
+            CompletableFuture<HttpClient.Response> f = HttpClient.send(client, new DnsResolver(client, RESOLVER), HttpClient.Url.parse("https://test.yr/"),
+                    "GET", null, null, 60_000, TlsTrust.of(pki.root));
+            link.loop.advance(60_000);
+            if (!f.isCompletedExceptionally()) {
+                assertEquals(TestWebsite.PAGE, done(f).bodyText());
+                ok++;
+            } else {
+                // 只允许 DNS 三次都丢了这一种失败（同 HTTP）
+                assertEquals(NetworkException.Reason.DNS_FAILED, ((NetworkException) assertThrowsCause(f)).reason);
+            }
+        }
+        assertTrue(ok >= 2, "3 次里至少 2 次取到：" + ok);
+    }
+
+    @Test
+    void errorReasonsForBrowser() throws Exception {
+        DnsResolver dns = new DnsResolver(client, RESOLVER);
+        CompletableFuture<HttpClient.Response> nx = HttpClient.fetch(client, dns, "http://nothing.yr/", 15000);
+        link.loop.advance(15_000);
+        assertEquals(NetworkException.Reason.NAME_NOT_FOUND, ((NetworkException) assertThrowsCause(nx)).reason);
+        CompletableFuture<HttpClient.Response> refused = HttpClient.fetch(client, dns, "http://test.yr:8080/", 15000);
+        link.loop.advance(15_000);
+        assertEquals(NetworkException.Reason.REFUSED, ((NetworkException) assertThrowsCause(refused)).reason);
+        // 递归解析器不在：DNS 失败
+        CompletableFuture<HttpClient.Response> dead = HttpClient.fetch(client, new DnsResolver(client, Ipv6Address.parse("fd00::9999")), "http://test.yr/", 15000);
+        link.loop.advance(15_000);
+        assertEquals(NetworkException.Reason.DNS_FAILED, ((NetworkException) assertThrowsCause(dead)).reason);
+        // POST 带正文
+        HttpClient.Url u = HttpClient.Url.parse("http://test.yr/");
+        CompletableFuture<HttpClient.Response> post = HttpClient.send(client, dns, u, "POST", Collections.singletonMap("Content-Type", "application/x-www-form-urlencoded"),
+                "a=1".getBytes(StandardCharsets.US_ASCII), 15000, null);
+        link.loop.advance(15_000);
+        assertEquals(405, done(post).status);
+    }
+
+    static Throwable assertThrowsCause(CompletableFuture<?> f) {
+        assertTrue(f.isDone(), "future 还没完成");
+        try {
+            f.get();
+        } catch (java.util.concurrent.ExecutionException e) {
+            return e.getCause();
+        } catch (InterruptedException e) {
+            throw new AssertionError(e);
+        }
+        throw new AssertionError("没有失败");
+    }
+
+    @Test
+    void urlParsing() {
+        HttpClient.Url a = HttpClient.Url.parse("https://minebay.yr");
+        assertTrue(a.secure);
+        assertEquals(443, a.port);
+        assertEquals("/", a.path);
+        assertEquals("minebay.yr", a.hostHeader());
+        HttpClient.Url b = HttpClient.Url.parse("http://[fd00::2]:8080/x?y=1");
+        assertEquals("fd00::2", b.host);
+        assertEquals(8080, b.port);
+        assertEquals("[fd00::2]:8080", b.hostHeader());
+        assertEquals("http://[fd00::2]:8080/x?y=1", b.toString());
+        assertNull(HttpClient.Url.parse("ftp://x.yr/"));
+        assertEquals("https://a.yr:8443/", HttpClient.Url.parse("HTTPS://a.yr:8443").toString());
     }
 
     @Test

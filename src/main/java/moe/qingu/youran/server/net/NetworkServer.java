@@ -19,6 +19,10 @@ import moe.qingu.youran.server.net.service.DnsZoneData;
 import moe.qingu.youran.server.net.service.NtpServer;
 import moe.qingu.youran.server.net.service.RecursiveResolver;
 import moe.qingu.youran.server.net.service.TestWebsite;
+import moe.qingu.youran.server.net.tls.IntermediateCa;
+import moe.qingu.youran.server.net.tls.IssuingTlsContext;
+import moe.qingu.youran.server.net.tls.LeafCache;
+import moe.qingu.youran.api.network.tls.TlsServerContext;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
 import net.minecraftforge.common.MinecraftForge;
@@ -26,7 +30,9 @@ import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.File;
 import java.security.SecureRandom;
+import java.util.Collection;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -81,6 +87,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private final AtomicLong overflowDrops = new AtomicLong();
     private final List<String> tlds = new ArrayList<>();
     private final Map<String, String> names = new LinkedHashMap<>();
+    /** 每台主机的域名（HTTPS 证书用） */
+    private final Map<String, List<String>> hostNames = new LinkedHashMap<>();
+    /** 中间 CA 签好的叶子证书；没配中间 CA 时为 null（只有 HTTP） */
+    private LeafCache leafCache;
     private Ipv6Address routerAddress;
     private Ipv6Address resolverAddress;
     private Ipv6Address ntpAddress;
@@ -189,6 +199,12 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             names.put(n, keyOf(hostAddresses, comRecords.get(n)));
         }
 
+        hostNames.clear();
+        for (Map.Entry<String, String> e : names.entrySet()) {
+            hostNames.computeIfAbsent(e.getValue(), k -> new ArrayList<>()).add(e.getKey());
+        }
+        leafCache = loadCa(server);
+
         // 运行时
         loop = new ExecutorEventLoop(THREAD_NAME);
         rejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
@@ -211,6 +227,58 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         NetworkHooks.setBackend(this);
         LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机 {} 个；递归解析器 {}，NTP {}",
                 layout.prefix(), dims, activeDc.size(), hostAddresses.size(), resolverAddress, ntpAddress);
+    }
+
+    /** 读配置里的中间 CA；没配或读不了时返回 null（只有 HTTP） */
+    private static LeafCache loadCa(MinecraftServer server) {
+        String cert = NetworkConfig.tlsCaCertificate == null ? "" : NetworkConfig.tlsCaCertificate.trim();
+        String key = NetworkConfig.tlsCaKey == null ? "" : NetworkConfig.tlsCaKey.trim();
+        if (cert.isEmpty() || key.isEmpty()) {
+            LOG.info("游戏内网络：没有配中间 CA（network.tlsCaCertificate / tlsCaKey），网站只开 HTTP，不开 HTTPS");
+            return null;
+        }
+        File certFile = server.getFile(cert);
+        File keyFile = server.getFile(key);
+        try {
+            IntermediateCa ca = IntermediateCa.load(certFile.toPath(), keyFile.toPath());
+            long left = ca.certificate().getNotAfter().getTime() - System.currentTimeMillis();
+            if (left <= 0) {
+                LOG.error("游戏内网络：中间 CA {} 已经过期，网站只开 HTTP", ca.certificate().getSubjectX500Principal());
+                return null;
+            }
+            if (left < 30L * 24 * 3600 * 1000) {
+                LOG.warn("游戏内网络：中间 CA 不到 30 天就过期了（{}），请换新的", ca.certificate().getNotAfter());
+            }
+            LOG.info("游戏内网络：HTTPS 已开，中间 CA {}（有效期到 {}）", ca.certificate().getSubjectX500Principal(), ca.certificate().getNotAfter());
+            return new LeafCache(ca, System::currentTimeMillis);
+        } catch (Exception e) {
+            LOG.error("游戏内网络：读不了中间 CA（{}、{}），网站只开 HTTP：{}", certFile, keyFile, e.toString());
+            return null;
+        }
+    }
+
+    /** 机房主机的 TLS；没配中间 CA、或主机没有域名时为 null */
+    private TlsServerContext hostTls(String hostKey) {
+        List<String> n = hostNames.get(hostKey);
+        if (n == null || n.isEmpty()) {
+            return null;
+        }
+        List<String> fixed = Collections.unmodifiableList(new ArrayList<>(n));
+        return serverTls(() -> fixed);
+    }
+
+    @Override
+    public TlsServerContext serverTls(java.util.function.Supplier<? extends Collection<String>> names) {
+        LeafCache c = leafCache;
+        if (c == null) {
+            return null;
+        }
+        try {
+            return new IssuingTlsContext(c, names);
+        } catch (Exception e) {
+            LOG.error("游戏内网络：TLS 初始化失败", e);
+            return null;
+        }
     }
 
     private static String keyOf(Map<String, Ipv6Address> hosts, Ipv6Address a) {
@@ -276,7 +344,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         resolver = new RecursiveResolver(hostStacks.get(HOST_RESOLVER), Collections.singletonList(root));
         resolver.start();
         new NtpServer(System::currentTimeMillis).start(hostStacks.get(HOST_NTP));
-        TestWebsite.start(hostStacks.get(HOST_TEST));
+        TestWebsite.start(hostStacks.get(HOST_TEST), hostTls(HOST_TEST));
 
         // 其他模组的顶级域：替它们跑权威 DNS
         Map<String, List<DnsZoneData>> zonesByHost = new LinkedHashMap<>();
@@ -356,6 +424,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         resolver = null;
         book = null;
         server = null;
+        leafCache = null;
+        hostNames.clear();
         queued.clear();
     }
 
@@ -522,6 +592,18 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         @Override
         public NetStack stack() {
             return stack;
+        }
+
+        private TlsServerContext tls;
+        private boolean tlsChecked;
+
+        @Override
+        public synchronized TlsServerContext tls() {
+            if (!tlsChecked) {
+                tlsChecked = true;
+                tls = hostTls(key);
+            }
+            return tls;
         }
 
         @Override

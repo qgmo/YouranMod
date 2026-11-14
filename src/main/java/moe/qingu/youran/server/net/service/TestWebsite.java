@@ -4,6 +4,8 @@ import moe.qingu.youran.api.network.stack.EventLoop;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NetworkException;
 import moe.qingu.youran.api.network.stack.TcpConnection;
+import moe.qingu.youran.api.network.tls.TlsConnection;
+import moe.qingu.youran.api.network.tls.TlsServerContext;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -13,12 +15,13 @@ import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 
 /**
- * 测试网站（{@code test.yr}，TCP 80）：最简单的 HTTP/1.1 服务，GET / 或 /index.xhtml 给一页固定的 XHTML，HEAD 只给首部。
+ * 测试网站（{@code test.yr}，TCP 80；服务器配了中间 CA 时 443 口也开 HTTPS）：最简单的 HTTP/1.1 服务，GET / 或 /index.xhtml 给一页固定的 XHTML，HEAD 只给首部。
  * 每条连接只处理一个请求，回完就关（{@code Connection: close}）。请求首部超过 8 KiB 回 431，
  * 15 秒内没收齐请求就断开。
  */
 public final class TestWebsite {
     public static final int PORT = 80;
+    public static final int TLS_PORT = 443;
     static final int MAX_REQUEST = 8 * 1024;
     static final long IDLE_TIMEOUT_MS = 15_000;
 
@@ -41,28 +44,112 @@ public final class TestWebsite {
     }
 
     public static void start(NetStack stack) {
-        stack.listen(null, PORT, c -> new Session(stack.loop(), c).start());
+        start(stack, null);
     }
 
-    private static final class Session implements TcpConnection.Listener {
+    /** 80 口 HTTP；{@code tls} 不为 null 时 443 口再开 HTTPS（同一页） */
+    public static void start(NetStack stack, TlsServerContext tls) {
+        stack.listen(null, PORT, c -> {
+            Session s = new Session(stack.loop(), new Out() {
+                @Override
+                public void write(byte[] d) {
+                    c.write(d);
+                }
+
+                @Override
+                public void close() {
+                    c.close();
+                }
+
+                @Override
+                public void abort() {
+                    c.abort();
+                }
+            });
+            c.setListener(new TcpConnection.Listener() {
+                @Override
+                public void onData(TcpConnection connection, byte[] data) {
+                    s.onData(data);
+                }
+
+                @Override
+                public void onEnd(TcpConnection connection) {
+                    s.onEnd();
+                }
+
+                @Override
+                public void onClosed(TcpConnection connection, NetworkException error) {
+                    s.onClosed();
+                }
+            });
+            s.start();
+        });
+        if (tls != null) {
+            stack.listen(null, TLS_PORT, c -> {
+                TlsConnection[] holder = new TlsConnection[1];
+                Session s = new Session(stack.loop(), new Out() {
+                    @Override
+                    public void write(byte[] d) {
+                        holder[0].write(d);
+                    }
+
+                    @Override
+                    public void close() {
+                        holder[0].close();
+                    }
+
+                    @Override
+                    public void abort() {
+                        holder[0].abort();
+                    }
+                });
+                holder[0] = TlsConnection.accept(c, tls, new TlsConnection.Listener() {
+                    @Override
+                    public void onData(TlsConnection connection, byte[] data) {
+                        s.onData(data);
+                    }
+
+                    @Override
+                    public void onEnd(TlsConnection connection) {
+                        s.onEnd();
+                    }
+
+                    @Override
+                    public void onClosed(TlsConnection connection, NetworkException error) {
+                        s.onClosed();
+                    }
+                });
+                s.start();
+            });
+        }
+    }
+
+    /** 往连接里写（TCP 或 TLS） */
+    private interface Out {
+        void write(byte[] d);
+
+        void close();
+
+        void abort();
+    }
+
+    private static final class Session {
         private final EventLoop loop;
-        private final TcpConnection connection;
+        private final Out connection;
         private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
         private EventLoop.Timer idle;
         private boolean answered;
 
-        Session(EventLoop loop, TcpConnection connection) {
+        Session(EventLoop loop, Out connection) {
             this.loop = loop;
             this.connection = connection;
         }
 
         void start() {
-            connection.setListener(this);
             idle = loop.schedule(connection::abort, IDLE_TIMEOUT_MS);
         }
 
-        @Override
-        public void onData(TcpConnection c, byte[] data) {
+        void onData(byte[] data) {
             if (answered) {
                 return;
             }
@@ -83,8 +170,7 @@ public final class TestWebsite {
             connection.close();
         }
 
-        @Override
-        public void onEnd(TcpConnection c) {
+        void onEnd() {
             if (!answered) {
                 answered = true;
                 idle.cancel();
@@ -92,8 +178,7 @@ public final class TestWebsite {
             }
         }
 
-        @Override
-        public void onClosed(TcpConnection c, NetworkException error) {
+        void onClosed() {
             if (idle != null) {
                 idle.cancel();
             }

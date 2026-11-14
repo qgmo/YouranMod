@@ -2,7 +2,11 @@ package moe.qingu.youran.network;
 
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
+import moe.qingu.youran.api.network.tls.TlsServerContext;
 import net.minecraft.entity.player.EntityPlayerMP;
+
+import java.util.Collection;
+import java.util.function.Supplier;
 
 /**
  * 服务端网络的实现（在服务端专用的 {@code server.net} 包里，客户端包里没有）。网络运行时由它登记到 {@link NetworkHooks}，
@@ -19,6 +23,9 @@ public interface NetworkBackend {
     Ipv6Address resolverAddress();
 
     Ipv6Address ntpAddress();
+
+    /** 给拥有 {@code names} 里这些名字的网站做 TLS（证书按名字现签）；服务器没配中间 CA 时为 null */
+    TlsServerContext serverTls(Supplier<? extends Collection<String>> names);
 
     /**
      * 玩家客户端发来的原始包（在 Netty 线程上调用；实现马上转给网络线程，不碰世界）。

@@ -3,6 +3,10 @@ package moe.qingu.youran.api.network;
 import moe.qingu.youran.network.NetworkBackend;
 import moe.qingu.youran.network.NetworkHooks;
 import moe.qingu.youran.network.NetworkRegistry;
+import moe.qingu.youran.api.network.tls.TlsServerContext;
+
+import java.util.Collection;
+import java.util.function.Supplier;
 
 import java.util.Locale;
 
@@ -116,6 +120,16 @@ public final class YouranNetworkApi {
     public static Ipv6Address resolverAddress() {
         NetworkBackend b = NetworkHooks.backend();
         return b == null ? null : b.resolverAddress();
+    }
+
+    /**
+     * 服务端：给一个网站做 TLS（443）。证书由服务器配置的中间 CA 按客户端要访问的名字（SNI）现签，
+     * 只签 {@code names} 当前给出的名字（每次握手都重新取，名字可以在运行时增删）。
+     * 不限于机房主机：挂在任意一台设备地址上的服务端协议栈也能用。服务器没配中间 CA、网络没在运行时返回 null。
+     */
+    public static TlsServerContext serverTls(Supplier<? extends Collection<String>> names) {
+        NetworkBackend b = NetworkHooks.backend();
+        return b == null ? null : b.serverTls(names);
     }
 
     /** NTP 服务器的地址 */
