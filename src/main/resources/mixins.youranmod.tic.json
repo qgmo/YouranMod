@@ -1,0 +1,15 @@
+{
+	"package": "moe.qingu.youran.mixin.tconstruct",
+	"required": true,
+	"refmap": "mixins.youranmod.refmap.json",
+	"minVersion": "0.8",
+	"compatibilityLevel": "JAVA_8",
+	"mixins": [
+		"FluidHandlerCastingMixin"
+	],
+	"client": [],
+	"server": [],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

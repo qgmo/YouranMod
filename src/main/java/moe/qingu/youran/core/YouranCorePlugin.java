@@ -21,7 +21,7 @@ import java.util.zip.ZipFile;
  * 没有 MixinBooter 时（服务端 SpongeForge）的引导，照 YouranSCP 的 {@code YouranScpCorePlugin}。
  *
  * <p>SpongeForge 自带的 Mixin 没有“模组上类路径之后再注册”的入口：在这里注册的配置，会在游戏主类加载时准备，
- * 那时 Forge 还没把 mods 里的普通模组加进类路径，IC2 的类找不到。所以先在这里把要修补的模组（IC2、沉浸工程、沉浸原油）
+ * 那时 Forge 还没把 mods 里的普通模组加进类路径，IC2 的类找不到。所以先在这里把要修补的模组（IC2、沉浸工程、沉浸原油、匠魂）
  * 的 jar 加进类路径，再注册配置。
  * 提前加进类路径后，Forge 找模组时会在类路径上再认出它一次（报“重复的模组”），所以把它的文件名登记进
  * {@link CoreModManager#getReparseableCoremods()}：类路径扫描跳过它，只从 mods 目录认一次。
@@ -59,7 +59,7 @@ public final class YouranCorePlugin implements IFMLLoadingPlugin {
             return;
         }
         if (!MixinSetup.hasMixin()) {
-            LOG.warn("没有 Mixin（既没有 SpongeForge 也没有 MixinBooter），装罐机反应配方、太阳能蒸馏机与精馏塔的提纯、搅拌机的三氯氢硅配方、洗矿机认别的水与洗硅晶圆不生效");
+            LOG.warn("没有 Mixin（既没有 SpongeForge 也没有 MixinBooter），装罐机反应配方、太阳能蒸馏机与精馏塔的提纯、搅拌机的三氯氢硅配方、洗矿机认别的水与洗硅晶圆、匠魂浇铸台收带纯度的混合气不生效");
             return;
         }
         File mods = new File((File) data.get("mcLocation"), "mods");
@@ -80,7 +80,7 @@ public final class YouranCorePlugin implements IFMLLoadingPlugin {
         }
         List<String> configs = MixinSetup.lateConfigs();
         if (configs.isEmpty()) {
-            LOG.info("mods 里没有工业时代 2、沉浸工程，不注册 Mixin");
+            LOG.info("mods 里没有工业时代 2、沉浸工程、匠魂，不注册 Mixin");
             return;
         }
         for (String config : configs) {
