@@ -24,13 +24,16 @@ import java.util.function.Supplier;
  * 一个键按优先级从高到低查（规则同 YouranAPI 的 {@code Translations}，语言目录两边共用一份）：
  * <ol>
  * <li>语言目录（{@code config/youranmod.cfg} 的 {@code lang.dir}，默认 {@code config/youranapi/lang}）：其中的 {@code .lang} 文件与
- * 资源包（文件夹或 zip，读其中的 {@code assets/*}{@code /lang/<语言>.lang}），按文件名排序，同一个键以后面的为准；</li>
+ * 资源包（文件夹或 zip，读其中所有语言的 {@code assets/*}{@code /lang/<语言>.lang}），按文件名排序，同一个键以后面的为准；</li>
  * <li>所有已加载模组的 jar（开发环境里是文件夹）里的 {@code assets/*}{@code /lang/<语言>.lang}；</li>
  * <li>英文：上面两处的 {@code en_us.lang}，再是服务端自己的翻译（{@code I18n}）；</li>
  * <li>键名。</li>
  * </ol>
- * 读的语言是 {@link #LOCALES}（{@code zh_cn}、{@code zh_tw}、{@code en_us}）；语言目录里直接放的 {@code .lang} 文件，文件名是
- * 语言代码的（如 {@code zh_tw.lang}）算那个语言，其余的（如 {@code zh_cn.lang}、{@code zz-覆盖.lang}）算简体，同 YouranAPI。
+ * 所有语言都读，{@link #find}、{@link #get}、{@link #format} 支持任意语言代码（{@code xx_yy}，不分大小写）；{@link #names}、{@link #itemNames}
+ * 固定取 {@link #NAME_LOCALES}（英文、简体、繁体）。语言目录里直接放的 {@code .lang} 文件由文件名决定语言：
+ * {@code <语言>.lang} 或 {@code <语言>-<任意>.lang}（如 {@code zh_cn.lang}、{@code zh_tw.lang}、{@code zh_cn-覆盖.lang}），
+ * 文件名对不上的记警告、跳过；同一种语言内按文件名排序（不含扩展名，{@code zh_cn.lang} 在 {@code zh_cn-覆盖.lang} 前面），后面的覆盖前面的。
+ * 与原版一致，查不到时只退回 {@code en_us}，不在简繁之间互相回退。规则同 YouranAPI。
  * <p>
  * 开服前（{@code FMLServerAboutToStartEvent}）YouranMod 在后台线程加载，加载完成后只读；加载完成前查到的只有服务端英文与键名。
  * 要等中文名的调用方用 {@link #isLoaded()}、{@link #onLoaded(Runnable)} 或 {@link #version()}（加载完成的次数，适合做缓存的键）。
@@ -44,8 +47,8 @@ public final class ServerLang {
     public static final String EN_US = "en_us";
     public static final String ZH_CN = "zh_cn";
     public static final String ZH_TW = "zh_tw";
-    /** 读的语言；{@link #names(String...)} 也按这个顺序（英文、简体、繁体） */
-    public static final List<String> LOCALES = Collections.unmodifiableList(Arrays.asList(EN_US, ZH_CN, ZH_TW));
+    /** {@link #names(String...)}、{@link #itemNames} 取的语言，按这个顺序（英文、简体、繁体）；其他接口支持任意语言代码 */
+    public static final List<String> NAME_LOCALES = Collections.unmodifiableList(Arrays.asList(EN_US, ZH_CN, ZH_TW));
 
     /** 读文件的实现（只在完整包里；客户端包里找不到时安静跳过） */
     static final String LOADER = "moe.qingu.youran.server.lang.ServerLangLoader";
@@ -253,7 +256,7 @@ public final class ServerLang {
                 if (key == null) {
                     continue;
                 }
-                for (String loc : LOCALES) {
+                for (String loc : NAME_LOCALES) {
                     add(out, find(loc, key));
                 }
             }
@@ -292,7 +295,7 @@ public final class ServerLang {
     /** 物品的各种名字：英文、简体、繁体（{@link #findItemName}），去重，查不到的不放 */
     public static List<String> itemNames(ItemStack stack) {
         Set<String> out = new LinkedHashSet<>();
-        for (String loc : LOCALES) {
+        for (String loc : NAME_LOCALES) {
             add(out, findItemName(loc, stack));
         }
         return new ArrayList<>(out);

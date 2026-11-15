@@ -28,7 +28,7 @@ public final class ServerLangLoader implements Supplier<LangSource> {
                 sources.add(f.toPath());
             }
         }
-        return LangTables.load(langDir(), sources, ServerLang.LOCALES, msg -> YouranMod.LOG.warn("服务端翻译：{}", msg));
+        return LangTables.load(langDir(), sources, msg -> YouranMod.LOG.warn("服务端翻译：{}", msg));
     }
 
     /** 语言目录：相对路径相对于服务器目录（config 目录的上一级）；留空 = 不读 */

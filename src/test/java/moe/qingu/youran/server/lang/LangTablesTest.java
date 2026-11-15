@@ -1,6 +1,5 @@
 package moe.qingu.youran.server.lang;
 
-import moe.qingu.youran.api.lang.ServerLang;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,7 +26,7 @@ class LangTablesTest {
     private final List<String> warnings = new ArrayList<>();
 
     private LangTables load(Path dir, Path... mods) {
-        return LangTables.load(dir, Arrays.asList(mods), ServerLang.LOCALES, warnings::add);
+        return LangTables.load(dir, Arrays.asList(mods), warnings::add);
     }
 
     private static void write(Path p, String text) throws IOException {
@@ -66,12 +65,16 @@ class LangTablesTest {
     @Test
     void laterFileNameWinsInLangDir() throws IOException {
         Path dir = tmp.resolve("lang");
-        write(dir.resolve("zz-覆盖.lang"), "item.saddle.name=马鞍\n");
+        write(dir.resolve("zh_cn-覆盖.lang"), "item.saddle.name=马鞍\n");
         write(dir.resolve("zh_cn.lang"), "item.saddle.name=鞍\nitem.book.name=书\n");
-        write(dir.resolve("a-早的.lang"), "item.book.name=被覆盖\n");
+        write(dir.resolve("zh_cn-a.lang"), "item.book.name=被覆盖\n");
+        write(dir.resolve("zh_tw-覆盖.lang"), "k=覆蓋\n");
+        write(dir.resolve("zh_tw.lang"), "k=原\n");
         LangTables t = load(dir);
-        assertEquals("马鞍", t.find("zh_cn", "item.saddle.name"), "zz-覆盖.lang 排在 zh_cn.lang 后面");
-        assertEquals("书", t.find("zh_cn", "item.book.name"), "zh_cn.lang 排在 a-早的.lang 后面");
+        assertEquals("马鞍", t.find("zh_cn", "item.saddle.name"), "zh_cn-覆盖.lang 盖过 zh_cn.lang（比较时不含扩展名）");
+        assertEquals("被覆盖", t.find("zh_cn", "item.book.name"), "zh_cn-a.lang 排在 zh_cn.lang 后面");
+        assertEquals("覆蓋", t.find("zh_tw", "k"));
+        assertTrue(warnings.isEmpty(), warnings.toString());
     }
 
     @Test
@@ -97,9 +100,9 @@ class LangTablesTest {
         LangTables t = load(dir);
         assertEquals("压缩包", t.find("zh_cn", "k.zip"));
         assertEquals("壓縮包", t.find("zh_tw", "k.zip"));
-        assertNull(t.find("ja_jp", "k.zip"), "不读的语言");
+        assertEquals("圧縮", t.find("ja_jp", "k.zip"), "所有语言都读");
         assertEquals("文件夹", t.find("zh_cn", "k.folder"));
-        assertEquals("資料夾", t.find("zh_tw", "k.folder"), "老写法 zh_TW.lang 也认");
+        assertEquals("資料夾", t.find("zh_tw", "k.folder"), "zh_TW.lang 大小写不分");
         assertEquals("文件夹", t.find("zh_cn", "k.both"), "文件夹排在 zip 后面");
         assertTrue(warnings.isEmpty(), warnings.toString());
     }
@@ -109,24 +112,36 @@ class LangTablesTest {
         Path dir = tmp.resolve("lang");
         write(dir.resolve("zh_cn.lang"), "item.beef.cooked.name=牛排\n");
         write(dir.resolve("zh_tw.lang"), "item.beef.cooked.name=牛排（繁）\n");
-        write(dir.resolve("zh_tw-x.lang"), "item.x.name=算簡體\n");
+        write(dir.resolve("zh_tw-x.lang"), "item.x.name=繁體X\n");
         Path mod = tmp.resolve("mods/m.jar");
         zip(mod, "assets/m/lang/zh_tw.lang", "item.m.name=模組\n", "assets/m/lang/zh_CN.lang", "item.m.name=模组\n");
         LangTables t = load(dir, mod);
         assertEquals("牛排（繁）", t.find("zh_tw", "item.beef.cooked.name"));
         assertEquals("牛排", t.find("zh_cn", "item.beef.cooked.name"));
         assertEquals("模組", t.find("zh_tw", "item.m.name"));
-        assertEquals("模组", t.find("zh_cn", "item.m.name"), "模组 jar 里老写法 zh_CN.lang 也认");
-        assertEquals("算簡體", t.find("zh_cn", "item.x.name"), "文件名不是语言代码的算简体（同 YouranAPI）");
+        assertEquals("模组", t.find("zh_cn", "item.m.name"), "模组 jar 里 zh_CN.lang 大小写不分");
+        assertEquals("繁體X", t.find("zh_tw", "item.x.name"));
+        assertNull(t.find("zh_cn", "item.x.name"), "不再把别的文件名当简体");
+        assertNull(t.find("zh_tw", "item.beef.cooked.name.nope"));
+        assertTrue(warnings.isEmpty(), warnings.toString());
     }
 
     @Test
     void localeOfFileInLangDir() {
-        assertEquals("zh_cn", LangTables.localeOfFile("zh_cn.lang", ServerLang.LOCALES));
-        assertEquals("zh_tw", LangTables.localeOfFile("zh_TW.lang", ServerLang.LOCALES));
-        assertEquals("en_us", LangTables.localeOfFile("en_us.lang", ServerLang.LOCALES));
-        assertEquals("zh_cn", LangTables.localeOfFile("zz-覆盖.lang", ServerLang.LOCALES));
-        assertNull(LangTables.localeOfFile("ja_jp.lang", ServerLang.LOCALES), "别的语言不读");
+        assertEquals("zh_cn", LangTables.localeOfFile("zh_cn.lang"));
+        assertEquals("zh_tw", LangTables.localeOfFile("zh_TW.lang"));
+        assertEquals("zh_tw", LangTables.localeOfFile("ZH_TW.LANG"));
+        assertEquals("en_us", LangTables.localeOfFile("en_us.lang"));
+        assertEquals("ja_jp", LangTables.localeOfFile("ja_jp.lang"));
+        assertEquals("zh_cn", LangTables.localeOfFile("zh_cn-覆盖.lang"));
+        assertEquals("zh_cn", LangTables.localeOfFile("zh_CN-a-b.lang"));
+        assertEquals("fil_ph", LangTables.localeOfFile("fil_ph.lang"));
+        assertNull(LangTables.localeOfFile("zz-覆盖.lang"), "不是语言代码");
+        assertNull(LangTables.localeOfFile("zh_cn覆盖.lang"), "语言后面要有 - 才算后缀");
+        assertNull(LangTables.localeOfFile("zh_cn_extra.lang"));
+        assertNull(LangTables.localeOfFile("custom.lang"));
+        assertNull(LangTables.localeOfFile("zh.lang"));
+        assertNull(LangTables.localeOfFile("-zh_cn.lang"));
     }
 
     @Test
@@ -135,10 +150,24 @@ class LangTablesTest {
         write(dir.resolve("说明.txt"), "k=不是语言文件\n");
         write(dir.resolve("ja_jp.lang"), "k=日本語\n");
         write(dir.resolve("zh_cn.lang"), "k=中文\n");
+        write(dir.resolve("zz-覆盖.lang"), "k=旧规则当简体\n");
         LangTables t = load(dir);
-        assertEquals("中文", t.find("zh_cn", "k"));
-        assertTrue(t.summary().contains("跳过 ja_jp.lang、说明.txt"), t.summary());
-        assertTrue(warnings.isEmpty());
+        assertEquals("中文", t.find("zh_cn", "k"), "文件名对不上的不再当简体");
+        assertEquals("日本語", t.find("ja_jp", "k"));
+        assertTrue(t.summary().contains("跳过 zz-覆盖.lang、说明.txt"), t.summary());
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.get(0).contains("zz-覆盖.lang"), warnings.toString());
+    }
+
+    @Test
+    void fallbackLanguagesAreNotMixed() throws IOException {
+        Path dir = tmp.resolve("lang");
+        write(dir.resolve("zh_cn.lang"), "only.cn=简体\n");
+        write(dir.resolve("ko_kr.lang"), "only.ko=한국어\n");
+        LangTables t = load(dir);
+        assertNull(t.find("zh_tw", "only.cn"), "表本身不在简繁之间回退");
+        assertEquals("한국어", t.find("ko_kr", "only.ko"));
+        assertTrue(t.summary().contains("ko_kr 1 zh_cn 1"), t.summary());
     }
 
     @Test
@@ -146,7 +175,7 @@ class LangTablesTest {
         Path dir = tmp.resolve("lang");
         write(dir.resolve("a-坏的.zip"), "这不是 zip");
         write(dir.resolve("zh_cn.lang"), "k.ok=好的\n");
-        Path big = dir.resolve("zz-太大.lang");
+        Path big = dir.resolve("zh_cn-太大.lang");
         try (OutputStream out = Files.newOutputStream(big)) {
             byte[] line = "k.big=很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长\n".getBytes(StandardCharsets.UTF_8);
             for (long n = 0; n <= LangFile.MAX_BYTES / line.length + 1; n++) {
@@ -164,7 +193,7 @@ class LangTablesTest {
         assertNull(t.find("zh_cn", "k.big"), "超过大小上限的整个跳过");
         assertEquals(3, warnings.size(), warnings.toString());
         assertTrue(warnings.get(0).contains("a-坏的.zip"), warnings.toString());
-        assertTrue(warnings.get(1).contains("zz-太大.lang"), warnings.toString());
+        assertTrue(warnings.get(1).contains("zh_cn-太大.lang"), warnings.toString());
         assertTrue(warnings.get(2).contains("broken.jar"), warnings.toString());
     }
 
@@ -179,7 +208,7 @@ class LangTablesTest {
         assertTrue(missing.summary().contains("不存在"), missing.summary());
         assertTrue(!Files.exists(tmp.resolve("没有这个目录")), "不自动创建");
         assertTrue(warnings.isEmpty());
-        assertNull(LangTables.load(null, Collections.<Path>emptyList(), ServerLang.LOCALES, warnings::add).find("zh_cn", "k"));
+        assertNull(LangTables.load(null, Collections.<Path>emptyList(), warnings::add).find("zh_cn", "k"));
     }
 
     @Test

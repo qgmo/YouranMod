@@ -77,6 +77,19 @@ class ServerLangTest {
     }
 
     @Test
+    void anyLocaleCodeIsSupported() {
+        ServerLang.start(() -> table("ja_jp", "item.beef.cooked.name", "ステーキ",
+                "fil_ph", "item.beef.cooked.name", "Steyk",
+                "zh_cn", "item.beef.cooked.name", "牛排"), false);
+        assertEquals("ステーキ", ServerLang.get("ja_jp", "item.beef.cooked.name"));
+        assertEquals("ステーキ", ServerLang.find("JA-JP", "item.beef.cooked.name"));
+        assertEquals("Steyk", ServerLang.get("fil_ph", "item.beef.cooked.name"));
+        assertEquals("Steak", ServerLang.get("ko_kr", "item.beef.cooked.name"), "没有的语言退回服务端英文");
+        assertEquals("ステーキ x", ServerLang.format("ja_jp", "item.beef.cooked.name") + " x");
+        assertEquals(Arrays.asList("Steak", "牛排"), ServerLang.names("item.beef.cooked.name"), "names 仍只取英文、简体、繁体");
+    }
+
+    @Test
     void namesAreEnglishSimplifiedTraditionalDeduplicated() {
         ServerLang.start(() -> table("zh_cn", "item.beef.cooked.name", " 牛排 ",
                 "zh_tw", "item.beef.cooked.name", "牛排",
