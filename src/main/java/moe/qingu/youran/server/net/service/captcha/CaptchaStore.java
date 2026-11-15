@@ -12,7 +12,7 @@ import java.util.concurrent.CompletableFuture;
  * 验证码题库（服主 11-15）：只在内存里，有上限。纯逻辑，时间由调用方给；线程安全（网络线程与本机端口的线程都用）。
  * <ul>
  * <li>题号：16 个随机字节的十六进制（32 位小写），猜不到；</li>
- * <li>答案：{@value #LENGTH} 位，字符表 {@value #ALPHABET}（去掉了易混的 0/O/Q、1/I/L、2/Z、5/S、8/B、6/G、U/V），
+ * <li>答案：{@value #LENGTH} 位，字符表 {@value #ALPHABET}（去掉了易混的 0/O/Q、1/I/L、2/Z、5/S、8/B、6/G、U/V、R/A），
  * 核对时不分大小写、去掉首尾空白；</li>
  * <li>每题只核对一次：核对过就作废，不论对错；{@value #TTL_MS} 毫秒（5 分钟）过期；</li>
  * <li>上限：分两个池子，游戏内（{@code captcha.yr}）与本机端口（网页面板后台）各自最多 {@code maxPerPool} 题，满了不再出新题；
@@ -21,7 +21,7 @@ import java.util.concurrent.CompletableFuture;
  */
 public final class CaptchaStore {
     /** 字符表：21 个，去掉了扭曲后容易认错的 0 O Q、1 I L、2 Z、5 S、8 B、6 G（留 6 去 G）、U V（都去） */
-    public static final String ALPHABET = "ACDEFHJKMNPRTWXY34679";
+    public static final String ALPHABET = "ACDEFHJKMNPTWXY34679";
     public static final int LENGTH = 5;
     public static final long TTL_MS = 5 * 60_000L;
 
