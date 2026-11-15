@@ -87,6 +87,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     static final String LOCATION_NAME = moe.qingu.youran.api.network.location.LocationProofs.DOMAIN;
     /** 定位模块的签名密钥文件（相对服务器根目录） */
     static final String LOCATION_KEY_FILE = "config/youranmod-location-key.pem";
+    /** 聚合付款服务（pay.yr，服主 11-15） */
+    static final String HOST_PAY = "youranmod:pay";
+    static final String PAY_NAME = moe.qingu.youran.api.pay.PayApi.DOMAIN;
     /** 测试网站的国际化域名别名 */
     static final String TEST_IDN_NAME = "测试.yr";
     static final long PART_ROUTER = 0x1;
@@ -119,6 +122,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private RejectLog mainRejects;
     /** 定位模块的签名密钥；没有（读不了）为 null */
     private volatile LocationSigner locationSigner;
+    /** pay.yr 的账本与给模组的接口；没开（配置关掉、读不了账本）为 null */
+    private moe.qingu.youran.server.net.pay.PayServer pay;
     /** 每个玩家请位置的频率（主线程） */
     private final SourceLimiter locationLimit = new SourceLimiter(0.5, 3, 4096);
     /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
@@ -188,6 +193,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_TEST, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_CAPTCHA, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_LOCATION, -1, dc));
+        if (moe.qingu.youran.server.net.pay.PayConfig.enabled) {
+            hostRequests.add(new AllocationTable.Request(HOST_PAY, -1, dc));
+        }
         for (NetworkRegistry.HostDecl h : hostDecls) {
             if (h.datacenter.equals(YouranNetworkApi.PLAYERS_DATACENTER)) {
                 problems.add("主机 " + h.key + " 不能登记在玩家临时地址的 /96（" + h.datacenter + "）里，拒绝");
@@ -235,6 +243,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         if (hostAddresses.containsKey(HOST_LOCATION)) {
             yrRecords.put(LOCATION_NAME, hostAddresses.get(HOST_LOCATION));
+        }
+        if (hostAddresses.containsKey(HOST_PAY)) {
+            yrRecords.put(PAY_NAME, hostAddresses.get(HOST_PAY));
         }
         for (NetworkRegistry.NameDecl n : NetworkRegistry.names()) {
             Ipv6Address a = hostAddresses.get(n.hostKey);
@@ -301,6 +312,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         mainRejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
         prompts = new ConfirmPrompts(new PromptEnv(), new SecureRandom());
         startCaptchaLocal(captcha);
+        if (moe.qingu.youran.server.net.pay.PayConfig.enabled) {
+            pay = moe.qingu.youran.server.net.pay.PayServer.start(server);
+        } else {
+            LOG.info("游戏内网络：pay.yr 在配置里关掉了（pay.enabled=false）");
+        }
         loop.execute(() -> startHosts(hostAddresses, declByKey, tldDecls, yrRecords, comRecords, activeDcCopy, serial));
         loop.execute(this::scheduleOverflowLog);
 
@@ -512,6 +528,13 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (signer != null && locationStack != null) {
             new LocationService(signer, System::currentTimeMillis).start(locationStack, hostTls(HOST_LOCATION));
         }
+        moe.qingu.youran.server.net.pay.PayServer ps = pay;
+        NetStack payStack = hostStacks.get(HOST_PAY);
+        if (ps != null && payStack != null) {
+            String idName = DomainNames.tryToAscii(moe.qingu.youran.server.net.pay.PayConfig.idDomain.trim().toLowerCase(java.util.Locale.ROOT));
+            moe.qingu.youran.server.net.pay.PayServer.startWeb(ps, new Context(HOST_PAY, hosts.get(HOST_PAY), payStack), resolverAddress,
+                    () -> idName != null && nameAddresses.containsKey(idName));
+        }
 
         // 其他模组的顶级域：替它们跑权威 DNS
         Map<String, List<DnsZoneData>> zonesByHost = new LinkedHashMap<>();
@@ -553,6 +576,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     public void stop() {
         if (NetworkHooks.backend() == this) {
             NetworkHooks.setBackend(null);
+        }
+        if (pay != null) {
+            pay.stop();
+            pay = null;
         }
         if (events != null) {
             MinecraftForge.EVENT_BUS.unregister(events);
@@ -828,9 +855,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (!d.hasCapability(DeviceCapability.LOCATION)) {
             return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.NO_LOCATOR));
         }
-        ConfirmRequest req = new ConfirmRequest("获取这台电脑的位置", s, Arrays.asList(
-                "这台电脑的位置：维度 " + d.key.dimension + "，坐标 " + d.key.x + ", " + d.key.y + ", " + d.key.z,
-                "这台电脑的游戏内地址"));
+        // 固定文字用翻译键，按操作者客户端的语言显示（服务端写好的中文是客户端没有这个键时的退路）
+        ConfirmRequest req = new ConfirmRequest(
+                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.title", "获取这台电脑的位置"), s, Arrays.asList(
+                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.position",
+                        "这台电脑的位置：维度 " + d.key.dimension + "，坐标 " + d.key.x + ", " + d.key.y + ", " + d.key.z,
+                        d.key.dimension, d.key.x, d.key.y, d.key.z),
+                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.address", "这台电脑的游戏内地址")),
+                ConfirmRequest.DEFAULT_TIMEOUT_SECONDS, ConfirmRequest.Purpose.SHARE);
         return confirmDevice(p, d, req).thenApply(r -> {
             switch (r.outcome) {
                 case APPROVED:

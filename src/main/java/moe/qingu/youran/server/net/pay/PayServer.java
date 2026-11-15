@@ -1,0 +1,784 @@
+package moe.qingu.youran.server.net.pay;
+
+import com.mojang.authlib.GameProfile;
+import moe.qingu.youran.api.network.ConfirmRequest;
+import moe.qingu.youran.api.network.ConfirmResult;
+import moe.qingu.youran.api.network.ConfirmText;
+import moe.qingu.youran.api.network.DomainNames;
+import moe.qingu.youran.api.network.stack.HttpClient;
+import moe.qingu.youran.api.pay.AccountRef;
+import moe.qingu.youran.api.pay.Amount;
+import moe.qingu.youran.api.pay.Currency;
+import moe.qingu.youran.api.pay.OrderInfo;
+import moe.qingu.youran.api.pay.OrderSpec;
+import moe.qingu.youran.api.pay.PayApi;
+import moe.qingu.youran.api.pay.PayException;
+import moe.qingu.youran.api.pay.PayItem;
+import moe.qingu.youran.api.pay.PayRecord;
+import moe.qingu.youran.api.pay.PaymentInfo;
+import moe.qingu.youran.api.pay.PaymentListener;
+import moe.qingu.youran.api.pay.VirtualAccount;
+import moe.qingu.youran.network.PayBackend;
+import moe.qingu.youran.network.PayHooks;
+import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.item.ItemStack;
+import net.minecraft.server.MinecraftServer;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
+import net.minecraftforge.fml.common.gameevent.PlayerEvent;
+import net.minecraftforge.fml.common.gameevent.TickEvent;
+
+import java.io.File;
+import java.io.IOException;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.regex.Pattern;
+
+/**
+ * 聚合付款服务 pay.yr 的服务端本体（不含网页）：账本、动背包、给模组的接口（{@link PayBackend}）、准备确认框与确认后执行。
+ * 账本在世界存档目录的 {@code youranmod/pay/}。开服时读账本、照存档补上崩溃时没结束的那几笔；关服时写快照。
+ * <p>
+ * 网页与 HTTP 接口在 {@link PayService}（网络线程），要动游戏的都交到这里的主线程方法。
+ */
+public final class PayServer implements PayBackend {
+    static final int MAX_DESCRIPTION = 60;
+    static final int MAX_REFERENCE = 64;
+    static final int MAX_ITEM_LINES = 16;
+    static final long MAX_YUAN = 1_000_000;
+    static final long MAX_ITEM_COUNT = 100_000;
+    static final Pattern REFERENCE = Pattern.compile("[\\x20-\\x7e]{1," + MAX_REFERENCE + "}");
+    static final Pattern DOMAIN = Pattern.compile("[a-z0-9]([a-z0-9.-]*[a-z0-9])?");
+
+    private final MinecraftServer server;
+    final Ledger ledger;
+    private final McWorld world;
+    private final TxRunner runner;
+    /** 付款页的网址用 https（服务器配了中间 CA）还是 http */
+    private volatile boolean https;
+    private final Events events = new Events();
+    private int ticks;
+
+    private PayServer(MinecraftServer server, Ledger ledger) {
+        this.server = server;
+        this.ledger = ledger;
+        this.world = new McWorld(server);
+        this.runner = new TxRunner(ledger, world, System::currentTimeMillis, this::firePaid);
+    }
+
+    /** 开服（主线程，世界已加载、还没有玩家）：读账本、恢复、登记接口；读不了账本时返回 null（pay.yr 不开） */
+    public static PayServer start(MinecraftServer server) {
+        File dir = new File(new File(server.getWorld(0).getSaveHandler().getWorldDirectory(), "youranmod"), "pay");
+        Ledger ledger = new Ledger(new PayStore(dir.toPath()), new SecureRandom());
+        try {
+            ledger.load();
+        } catch (IOException | RuntimeException e) {
+            Ledger.LOG.error("pay.yr：读不了账本 {}，pay.yr 不开（文件没有动；修好后重启）", dir, e);
+            ledger.close();
+            return null;
+        }
+        PayServer s = new PayServer(server, ledger);
+        int pending = ledger.pending().size();
+        if (pending > 0) {
+            int n = s.runner.recover();
+            Ledger.LOG.warn("pay.yr：上次关服时有 {} 笔扣物品 / 发物品没结束，照存档补上了 {} 笔", pending, n);
+        }
+        MinecraftForge.EVENT_BUS.register(s.events);
+        PayHooks.setBackend(s);
+        Ledger.LOG.info("pay.yr：账本 {} 已读", dir);
+        return s;
+    }
+
+    /** 网络线程：在 pay.yr 这台主机上开网页与接口 */
+    public static void startWeb(PayServer s, moe.qingu.youran.api.network.HostContext ctx, moe.qingu.youran.api.network.Ipv6Address resolver,
+                                java.util.function.BooleanSupplier idAvailable) {
+        new PayService(s, ctx, resolver, idAvailable).start();
+        Ledger.LOG.info("pay.yr：网页与接口开在 {}（{}）", ctx.address(), ctx.tls() == null ? "HTTP" : "HTTP 与 HTTPS");
+    }
+
+    public void stop() {
+        if (PayHooks.backend() == this) {
+            PayHooks.setBackend(null);
+        }
+        MinecraftForge.EVENT_BUS.unregister(events);
+        runner.clear();
+        ledger.snapshotNow(System.currentTimeMillis(), keepMillis());
+        ledger.close();
+    }
+
+    void setHttps(boolean https) {
+        this.https = https;
+    }
+
+    boolean https() {
+        return https;
+    }
+
+    static long keepMillis() {
+        return PayConfig.keepDays * 24L * 3600 * 1000;
+    }
+
+    MinecraftServer server() {
+        return server;
+    }
+
+    /** 在主线程上做（已经在主线程就直接做） */
+    void onMain(Runnable r) {
+        if (server.isCallingFromMinecraftThread()) {
+            r.run();
+        } else {
+            server.addScheduledTask(r);
+        }
+    }
+
+    // ---------------------------------------------------------------- 收款单
+
+    @Override
+    public String checkoutUrl(String orderId) {
+        return (https ? "https://" : "http://") + PayApi.DOMAIN + "/c/" + orderId;
+    }
+
+    @Override
+    public OrderInfo createOrder(OrderSpec spec) throws PayException {
+        mainThread();
+        long now = System.currentTimeMillis();
+        Ledger.Order o = create(draft(spec, "mod", now), now);
+        return ledger.info(o, now, this::checkoutUrl);
+    }
+
+    Ledger.Order create(Ledger.Draft d, long now) throws PayException {
+        if (ledger.openOrders(d.receiver, now) >= PayConfig.maxOpenOrders) {
+            throw new PayException("too_many_orders", "还能付的收款单太多了（最多 " + PayConfig.maxOpenOrders + " 张），等一些过期或取消后再建");
+        }
+        try {
+            if (d.receiver.isPlayer()) {
+                if (ledger.account(d.receiver) == null) {
+                    GameProfile gp = server.getPlayerProfileCache().getProfileByUUID(d.receiver.player);
+                    if (gp == null) {
+                        throw new PayException("no_such_account", "收款方不是这个服务器的玩家");
+                    }
+                    ledger.touchPlayer(d.receiver.player, gp.getName());
+                }
+            } else {
+                ledger.ensureVirtual(d.receiver.virtual);
+            }
+            return ledger.createOrder(d, now);
+        } catch (IOException e) {
+            Ledger.LOG.error("pay.yr：写账本失败，收款单没建", e);
+            throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
+        }
+    }
+
+    /** 检查收款单的各项（主线程：要做物品） */
+    Ledger.Draft draft(OrderSpec spec, String origin, long now) throws PayException {
+        Ledger.Draft d = new Ledger.Draft();
+        d.receiver = spec.receiver;
+        String site = spec.site == null ? null : DomainNames.tryToAscii(spec.site.trim().toLowerCase(java.util.Locale.ROOT));
+        if (site == null || site.isEmpty() || site.length() > DomainNames.MAX_NAME || !DOMAIN.matcher(site).matches() || !site.contains(".")) {
+            throw new PayException("invalid_site", "网站域名不对：" + spec.site);
+        }
+        d.site = site;
+        Amount price = spec.price();
+        if (price.isZero()) {
+            throw new PayException("invalid_amount", "价格不能是零");
+        }
+        if (price.yuan > MAX_YUAN) {
+            throw new PayException("invalid_amount", "价格太大（最多 " + MAX_YUAN + " 元）");
+        }
+        if (price.items.size() > MAX_ITEM_LINES) {
+            throw new PayException("invalid_amount", "物品种类太多（最多 " + MAX_ITEM_LINES + " 种）");
+        }
+        Map<PayItem, Long> items = new LinkedHashMap<>();
+        for (Map.Entry<PayItem, Long> e : price.items.entrySet()) {
+            PayItem i = e.getKey();
+            if (e.getValue() > MAX_ITEM_COUNT) {
+                throw new PayException("invalid_amount", "物品数量太大（每种最多 " + MAX_ITEM_COUNT + " 个）");
+            }
+            ItemStack s = i.toStack(1);
+            if (s.isEmpty()) {
+                throw new PayException("invalid_item", "没有这种物品：" + i);
+            }
+            PayItem norm = McWorld.itemOf(s);
+            if (norm == null) {
+                throw new PayException("invalid_item", "这种物品的 NBT 记不了账：" + i);
+            }
+            checkUsable(norm, s);
+            items.merge(norm, e.getValue(), Math::addExact);
+            ItemText.cache(norm);
+        }
+        d.price = Amount.of(price.yuan, items);
+        d.unit = spec.unit();
+        d.description = text(spec.description(), MAX_DESCRIPTION, "description", "说明");
+        String ref = spec.reference();
+        if (ref != null && !ref.isEmpty() && !REFERENCE.matcher(ref).matches()) {
+            throw new PayException("invalid_reference", "reference 最多 " + MAX_REFERENCE + " 个可见 ASCII 字符");
+        }
+        d.reference = ref == null || ref.isEmpty() ? null : ref;
+        d.returnUrl = url(spec.returnUrl(), site, "return_url");
+        d.cancelUrl = url(spec.cancelUrl(), site, "cancel_url");
+        int ttl = spec.ttlSeconds() <= 0 ? PayConfig.orderTtlSeconds : spec.ttlSeconds();
+        if (ttl < 60 || ttl > PayConfig.orderMaxTtlSeconds) {
+            throw new PayException("invalid_expires", "有效期要在 60–" + PayConfig.orderMaxTtlSeconds + " 秒之间");
+        }
+        d.expiresAt = now + ttl * 1000L;
+        d.origin = origin;
+        return d;
+    }
+
+    /** 这种物品能不能用来付：黑名单、装着东西的容器 */
+    static void checkUsable(PayItem item, ItemStack stack) throws PayException {
+        if (item.isCurrency()) {
+            return;
+        }
+        if (ItemRules.blacklisted(item, PayConfig.blacklist)) {
+            throw new PayException("item_not_allowed", "这种物品不能用来付款（服务器设置）：" + ItemText.cache(item));
+        }
+        if (ItemRules.filledContainer(stack)) {
+            throw new PayException("item_not_allowed", "装着东西的容器不能用来付款：" + ItemText.cache(item));
+        }
+    }
+
+    private static String text(String s, int max, String field, String what) throws PayException {
+        if (s == null || s.trim().isEmpty()) {
+            return null;
+        }
+        String t = s.trim();
+        if (t.codePointCount(0, t.length()) > max) {
+            throw new PayException("invalid_" + field, what + "最多 " + max + " 个字");
+        }
+        for (int i = 0; i < t.length(); i++) {
+            if (!ConfirmRequest.isAllowedChar(t.charAt(i))) {
+                throw new PayException("invalid_" + field, what + "里有不允许的字符（控制字符、颜色代码、文字方向控制）");
+            }
+        }
+        return t;
+    }
+
+    /** 跳回的网址：http(s)，主机必须是这个网站 */
+    static String url(String u, String site, String field) throws PayException {
+        if (u == null || u.trim().isEmpty()) {
+            return null;
+        }
+        String t = u.trim();
+        HttpClient.Url p = t.length() > 512 ? null : HttpClient.Url.parse(t);
+        if (p == null || !(t.regionMatches(true, 0, "http://", 0, 7) || t.regionMatches(true, 0, "https://", 0, 8)) || t.contains("#")
+                || !t.matches("[\\x21-\\x7e]+")) {
+            throw new PayException("invalid_" + field, field + " 要是 http:// 或 https:// 开头的网址（最长 512，不能有 #）");
+        }
+        if (!p.host.equalsIgnoreCase(site)) {
+            throw new PayException("invalid_" + field, field + " 的主机要是这个网站（" + site + "）");
+        }
+        return t;
+    }
+
+    @Override
+    public OrderInfo order(String id) {
+        return ledger.orderInfo(id, System.currentTimeMillis(), this::checkoutUrl);
+    }
+
+    @Override
+    public boolean cancelOrder(String id, AccountRef receiver) {
+        try {
+            return ledger.cancel(id, receiver, System.currentTimeMillis());
+        } catch (IOException e) {
+            Ledger.LOG.error("pay.yr：写账本失败，收款单没取消", e);
+            return false;
+        }
+    }
+
+    @Override
+    public PaymentInfo payment(String id) {
+        Ledger.Payment p = ledger.payment(id);
+        return p == null ? null : p.info();
+    }
+
+    @Override
+    public Amount balance(AccountRef account) {
+        return ledger.balance(account);
+    }
+
+    @Override
+    public List<PayRecord> records(AccountRef account, int max) {
+        return ledger.records(account, max);
+    }
+
+    /** 模组给虚拟账户收到的付款退款 */
+    @Override
+    public PaymentInfo refund(String paymentId, Amount amount, String note) throws PayException {
+        mainThread();
+        Ledger.Payment p = ledger.payment(paymentId);
+        if (p == null) {
+            throw new PayException("no_such_payment", "没有这笔付款");
+        }
+        if (p.receiver.isPlayer()) {
+            throw new PayException("not_allowed", "收款方是玩家的付款只能由他自己在 pay.yr 上退");
+        }
+        return doRefund(paymentId, amount, note);
+    }
+
+    PaymentInfo doRefund(String paymentId, Amount amount, String note) throws PayException {
+        try {
+            Ledger.Payment p = ledger.refund(paymentId, amount, note, System.currentTimeMillis());
+            PaymentInfo info = p.info();
+            for (PaymentListener l : PayHooks.listeners(p.receiver)) {
+                try {
+                    l.onRefunded(info, amount);
+                } catch (RuntimeException e) {
+                    Ledger.LOG.error("pay.yr：退款回调出错", e);
+                }
+            }
+            return info;
+        } catch (IOException e) {
+            Ledger.LOG.error("pay.yr：写账本失败，没退款", e);
+            throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
+        }
+    }
+
+    @Override
+    public VirtualAccount virtual(String key) throws PayException {
+        AccountRef ref;
+        try {
+            ref = AccountRef.virtual(key);
+        } catch (IllegalArgumentException e) {
+            throw new PayException("invalid_account", e.getMessage());
+        }
+        try {
+            ledger.ensureVirtual(key);
+        } catch (IOException e) {
+            throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
+        }
+        return new Virtual(ref);
+    }
+
+    private void firePaid(Ledger.Paid paid) {
+        OrderInfo o = ledger.info(paid.order, System.currentTimeMillis(), this::checkoutUrl);
+        PaymentInfo p = paid.payment.info();
+        Ledger.LOG.info("pay.yr：{} 付了 {}（{}，{} → {}）", p.payerName, o.id, p.amount, o.site, o.receiverName);
+        for (PaymentListener l : PayHooks.listeners(o.receiver)) {
+            try {
+                l.onPaid(o, p);
+            } catch (RuntimeException e) {
+                Ledger.LOG.error("pay.yr：收款回调出错", e);
+            }
+        }
+    }
+
+    private void mainThread() throws PayException {
+        if (!server.isCallingFromMinecraftThread()) {
+            throw new PayException("wrong_thread", "要在服务端主线程上调用");
+        }
+    }
+
+    // ---------------------------------------------------------------- 付款（主线程）
+
+    /** 准备好的一次付款：算好的拿法与确认框 */
+    static final class PreparedPay {
+        final String orderId;
+        final UUID payer;
+        final CurrencyPlan.PayPlan plan;
+        final ConfirmRequest request;
+
+        PreparedPay(String orderId, UUID payer, CurrencyPlan.PayPlan plan, ConfirmRequest request) {
+            this.orderId = orderId;
+            this.payer = payer;
+            this.plan = plan;
+            this.request = request;
+        }
+    }
+
+    /** 付款页上预览：按现在的背包怎么付（主线程）；不在线返回 null */
+    CurrencyPlan.PayPlan preview(String orderId, UUID payer, CurrencyPlan.Prefer prefer) {
+        Ledger.Order o = ledger.order(orderId);
+        WorldPort.PlayerPort p = world.player(payer);
+        if (o == null || p == null) {
+            return null;
+        }
+        CurrencyPlan.PayPlan plan = CurrencyPlan.planPayment(o.price, p.counts(), prefer);
+        ItemText.cacheAll(plan.take);
+        ItemText.cacheAll(plan.change);
+        if (plan.lack != null) {
+            ItemText.cacheAll(plan.lack);
+        }
+        return plan;
+    }
+
+    PreparedPay preparePay(String orderId, UUID payer, CurrencyPlan.Prefer prefer) throws PayException {
+        long now = System.currentTimeMillis();
+        Ledger.Order o = ledger.order(orderId);
+        if (o == null) {
+            throw new PayException("no_such_order", "没有这张收款单");
+        }
+        OrderInfo.Status st = o.status(now);
+        if (st != OrderInfo.Status.OPEN) {
+            throw new PayException("order_not_open", statusText(st));
+        }
+        WorldPort.PlayerPort p = world.player(payer);
+        if (p == null) {
+            throw new PayException("offline", "登录的角色不在线");
+        }
+        if (o.receiver.isPlayer() && o.receiver.player.equals(payer)) {
+            throw new PayException("self_payment", "不能付给自己");
+        }
+        if (ledger.hasPending(payer)) {
+            throw new PayException("busy", "上一笔还没处理完，请稍后再试");
+        }
+        CurrencyPlan.PayPlan plan = CurrencyPlan.planPayment(o.price, p.counts(), prefer);
+        if (!plan.ok()) {
+            ItemText.cacheAll(plan.lack);
+            throw new PayException("insufficient_items", "背包里的不够：还差 " + ItemText.describe(plan.lack, o.unit));
+        }
+        String recv = ItemText.clean(ItemText.clip(ledger.name(o.receiver), 24));
+        List<ConfirmText> items = new ArrayList<>();
+        items.add(ConfirmText.translate("youranmod.pay.confirm.to", "收款方：" + recv, ConfirmText.literal(recv)));
+        if (o.description != null) {
+            String d = ItemText.clip(o.description, 60);
+            items.add(ConfirmText.translate("youranmod.pay.confirm.what", "内容：" + d, ConfirmText.literal(d)));
+        }
+        if (o.price.yuan > 0) {
+            items.add(ItemText.confirmMoney("youranmod.pay.confirm.price", "价格：%s（%s）", o.price.yuan, o.unit));
+        }
+        List<ConfirmText> lines = new ArrayList<>();
+        for (Map.Entry<PayItem, Long> e : plan.take.entrySet()) {
+            lines.add(ItemText.confirmLine("youranmod.pay.confirm.take", "拿出：%s ×%s", e.getKey(), e.getValue()));
+        }
+        for (Map.Entry<PayItem, Long> e : plan.change.entrySet()) {
+            lines.add(ItemText.confirmLine("youranmod.pay.confirm.change", "找回：%s ×%s", e.getKey(), e.getValue()));
+        }
+        int room = ConfirmRequest.MAX_ITEMS - items.size() - 1;
+        if (lines.size() > room) {
+            int more = lines.size() - (room - 1);
+            lines = new ArrayList<>(lines.subList(0, room - 1));
+            lines.add(ConfirmText.translate("youranmod.pay.confirm.more", "……还有 " + more + " 行，见付款页", more));
+        }
+        items.addAll(lines);
+        String payerName = ItemText.clean(p.name());
+        items.add(ConfirmText.translate("youranmod.pay.confirm.from", "从 " + payerName + " 的背包里拿，经 pay.yr 付款", ConfirmText.literal(payerName)));
+        ConfirmRequest req = new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.title", ItemText.clip("付款给 " + recv, 40),
+                ConfirmText.literal(recv)), o.site, items, PayConfig.confirmSeconds, ConfirmRequest.Purpose.PAY);
+        return new PreparedPay(orderId, payer, plan, req);
+    }
+
+    /** 确认框同意以后（主线程）：再查一遍，照确认时的拿法扣 */
+    TxRunner.Result executePay(PreparedPay prep, ConfirmResult r) {
+        PayException refused = refusal(r, prep.payer);
+        if (refused != null) {
+            return TxRunner.Result.failed(refused);
+        }
+        Ledger.Order o = ledger.order(prep.orderId);
+        WorldPort.PlayerPort p = world.player(prep.payer);
+        if (o == null || p == null) {
+            return TxRunner.Result.failed(new PayException("offline", "登录的角色不在线"));
+        }
+        return runner.pay(o, p, prep.plan.take, prep.plan.change);
+    }
+
+    /** 确认框的结果不是“登录的这个人同意了”时的说明 */
+    static PayException refusal(ConfirmResult r, UUID expected) {
+        if (r == null) {
+            return new PayException("unavailable", "确认框没弹出来");
+        }
+        switch (r.outcome) {
+            case APPROVED:
+                return r.player != null && r.player.equals(expected) ? null
+                        : new PayException("operator_mismatch", "确认的人（" + r.playerName + "）不是登录的角色；请退出后用自己的角色重新登录");
+            case DENIED:
+                return new PayException("denied", "你在确认框里点了拒绝");
+            case TIMEOUT:
+                return new PayException("timeout", "确认框超时了（" + PayConfig.confirmSeconds + " 秒没回应）");
+            case OPERATOR_CHANGED:
+                return new PayException("operator_changed", "确认的时候离开了电脑或换了人");
+            case NO_OPERATOR:
+                return new PayException("no_operator", "这台电脑现在没人操作");
+            case BUSY:
+                return new PayException("busy", "你已经有一个确认框开着，先处理那个");
+            default:
+                return new PayException("unavailable", "确认框不可用");
+        }
+    }
+
+    static String statusText(OrderInfo.Status s) {
+        switch (s) {
+            case PAID:
+                return "这张收款单已经付过了";
+            case CANCELED:
+                return "这张收款单已经被网站取消了";
+            case EXPIRED:
+                return "这张收款单已经过期了";
+            case PAYING:
+                return "这张收款单正在付款";
+            default:
+                return "可以付款";
+        }
+    }
+
+    /** 这一笔还在“处理中”（存盘没核对上，在重试） */
+    boolean processing(String txId) {
+        return txId != null && runner.processing(txId);
+    }
+
+    // ---------------------------------------------------------------- 提现（主线程）
+
+    static final class PreparedWithdraw {
+        final AccountRef account;
+        final UUID player;
+        final Amount value;
+        final Map<PayItem, Long> give;
+        final ConfirmRequest request;
+
+        PreparedWithdraw(AccountRef account, UUID player, Amount value, Map<PayItem, Long> give, ConfirmRequest request) {
+            this.account = account;
+            this.player = player;
+            this.value = value;
+            this.give = give;
+            this.request = request;
+        }
+    }
+
+    /** 提现：钱 {@code yuan}（按 {@code form} 给）加物品 {@code items}，给账户的主人（要在线） */
+    PreparedWithdraw prepareWithdraw(UUID player, long yuan, Currency.Unit form, Map<PayItem, Long> items) throws PayException {
+        AccountRef acct = AccountRef.player(player);
+        WorldPort.PlayerPort p = world.player(player);
+        if (p == null) {
+            throw new PayException("offline", "提现要本人在线");
+        }
+        Amount value = Amount.of(yuan, items);
+        if (value.isZero()) {
+            throw new PayException("invalid_amount", "要提多少？");
+        }
+        Amount bal = ledger.balance(acct);
+        if (!bal.covers(value)) {
+            throw new PayException("insufficient_balance", "账户余额不够：还差 " + ItemText.describe(bal.shortOf(value), Currency.Unit.YUAN));
+        }
+        Map<PayItem, Long> give = new LinkedHashMap<>(CurrencyPlan.split(yuan, form));
+        for (Map.Entry<PayItem, Long> e : value.items.entrySet()) {
+            if (!e.getKey().exists()) {
+                throw new PayException("invalid_item", "这种物品现在没有了（模组没装），提不出来：" + e.getKey());
+            }
+            give.merge(e.getKey(), e.getValue(), Math::addExact);
+        }
+        List<ConfirmText> lines = new ArrayList<>();
+        String name = ItemText.clean(p.name());
+        lines.add(ConfirmText.translate("youranmod.pay.confirm.withdraw.into", "放进 " + name + " 的背包，放不下的掉在脚边",
+                ConfirmText.literal(name)));
+        for (Map.Entry<PayItem, Long> e : give.entrySet()) {
+            lines.add(ItemText.confirmLine("youranmod.pay.confirm.item", "%s ×%s", e.getKey(), e.getValue()));
+        }
+        if (lines.size() > ConfirmRequest.MAX_ITEMS) {
+            int more = lines.size() - (ConfirmRequest.MAX_ITEMS - 1);
+            lines = new ArrayList<>(lines.subList(0, ConfirmRequest.MAX_ITEMS - 1));
+            lines.add(ConfirmText.translate("youranmod.pay.confirm.more", "……还有 " + more + " 行，见付款页", more));
+        }
+        ConfirmRequest req = new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.withdraw.title",
+                ItemText.clip("从 " + name + " 的 pay.yr 账户提现", ConfirmRequest.MAX_TITLE), ConfirmText.literal(name)),
+                PayApi.DOMAIN, lines, PayConfig.confirmSeconds, ConfirmRequest.Purpose.RECEIVE);
+        return new PreparedWithdraw(acct, player, value, give, req);
+    }
+
+    TxRunner.Result executeWithdraw(PreparedWithdraw prep, ConfirmResult r) {
+        PayException refused = refusal(r, prep.player);
+        if (refused != null) {
+            return TxRunner.Result.failed(refused);
+        }
+        WorldPort.PlayerPort p = world.player(prep.player);
+        if (p == null) {
+            return TxRunner.Result.failed(new PayException("offline", "提现要本人在线"));
+        }
+        return runner.withdraw(prep.account, p, prep.value, prep.give, "在 pay.yr 提现");
+    }
+
+    // ---------------------------------------------------------------- 退款、密钥（主线程）
+
+    static final class PreparedRefund {
+        final String paymentId;
+        final UUID by;
+        final Amount amount;
+        final ConfirmRequest request;
+
+        PreparedRefund(String paymentId, UUID by, Amount amount, ConfirmRequest request) {
+            this.paymentId = paymentId;
+            this.by = by;
+            this.amount = amount;
+            this.request = request;
+        }
+    }
+
+    PreparedRefund prepareRefund(UUID by, String paymentId, Amount amount) throws PayException {
+        Ledger.Payment p = ledger.payment(paymentId);
+        if (p == null || !p.receiver.equals(AccountRef.player(by))) {
+            throw new PayException("no_such_payment", "没有这笔付款（只能退自己收到的）");
+        }
+        if (amount.isZero()) {
+            throw new PayException("invalid_amount", "要退多少？");
+        }
+        if (!p.amount.minus(p.refunded).covers(amount)) {
+            throw new PayException("exceeds_refundable", "超过了这笔还能退的：" + ItemText.describe(p.amount.minus(p.refunded), Currency.Unit.YUAN));
+        }
+        Amount bal = ledger.balance(p.receiver);
+        if (!bal.covers(amount)) {
+            throw new PayException("insufficient_balance", "账户余额不够退（已经提现了）：还差 " + ItemText.describe(bal.shortOf(amount), Currency.Unit.YUAN));
+        }
+        ItemText.cacheAll(amount);
+        String payer = ItemText.clean(p.payerName == null ? "?" : p.payerName);
+        List<ConfirmText> lines = new ArrayList<>();
+        lines.add(ConfirmText.translate("youranmod.pay.confirm.refund.to", "退进 " + payer + " 在 pay.yr 的账户", ConfirmText.literal(payer)));
+        if (amount.yuan > 0) {
+            lines.add(ItemText.confirmMoney("youranmod.pay.confirm.refund.money", "从你的账户扣回：%s（%s）", amount.yuan, Currency.Unit.YUAN));
+        }
+        for (Map.Entry<PayItem, Long> e : amount.items.entrySet()) {
+            if (lines.size() >= ConfirmRequest.MAX_ITEMS) {
+                break;
+            }
+            lines.add(ItemText.confirmLine("youranmod.pay.confirm.refund.item", "从你的账户扣回：%s ×%s", e.getKey(), e.getValue()));
+        }
+        ConfirmRequest req = new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.refund.title", ItemText.clip("退款给 " + payer, 40),
+                ConfirmText.literal(payer)), PayApi.DOMAIN, lines, PayConfig.confirmSeconds, ConfirmRequest.Purpose.PAY);
+        return new PreparedRefund(paymentId, by, amount, req);
+    }
+
+    void executeRefund(PreparedRefund prep, ConfirmResult r) throws PayException {
+        PayException refused = refusal(r, prep.by);
+        if (refused != null) {
+            throw refused;
+        }
+        doRefund(prep.paymentId, prep.amount, "收款方在 pay.yr 退款");
+    }
+
+    /** 重置密钥的确认框；标题写明是谁的账户（同一台电脑上别人登录着时，坐下的人看得出不是自己的） */
+    ConfirmRequest keyRequest(String accountName) {
+        String n = ItemText.clean(ItemText.clip(accountName, 16));
+        return new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.key.title", "重置 " + n + " 的 pay.yr 密钥", ConfirmText.literal(n)), PayApi.DOMAIN,
+                java.util.Arrays.asList(ConfirmText.translate("youranmod.pay.confirm.key.item1", "生成一把新的密钥，给你的网站创建、查询收款单用"),
+                        ConfirmText.translate("youranmod.pay.confirm.key.item2", "旧的密钥马上作废")),
+                PayConfig.confirmSeconds, ConfirmRequest.Purpose.ACTION);
+    }
+
+    String executeKey(UUID player, ConfirmResult r) throws PayException {
+        PayException refused = refusal(r, player);
+        if (refused != null) {
+            throw refused;
+        }
+        try {
+            return ledger.newKey(AccountRef.player(player), System.currentTimeMillis());
+        } catch (IOException e) {
+            throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
+        }
+    }
+
+    // ---------------------------------------------------------------- 虚拟账户
+
+    private final class Virtual implements VirtualAccount {
+        private final AccountRef ref;
+
+        Virtual(AccountRef ref) {
+            this.ref = ref;
+        }
+
+        @Override
+        public AccountRef ref() {
+            return ref;
+        }
+
+        @Override
+        public Amount balance() {
+            return ledger.balance(ref);
+        }
+
+        @Override
+        public List<PayRecord> records(int max) {
+            return ledger.records(ref, max);
+        }
+
+        @Override
+        public List<ItemStack> take(Amount amount, Currency.Unit form, String note) throws PayException {
+            mainThread();
+            for (PayItem i : amount.items.keySet()) {
+                if (!i.exists()) {
+                    throw new PayException("invalid_item", "这种物品现在没有了，取不出来：" + i);
+                }
+            }
+            remove(amount, moe.qingu.youran.api.pay.PayRecord.Kind.TAKEN, note);
+            List<ItemStack> out = new ArrayList<>();
+            Map<PayItem, Long> things = new LinkedHashMap<>(CurrencyPlan.split(amount.yuan, form == null ? Currency.Unit.EMERALD : form));
+            for (Map.Entry<PayItem, Long> e : amount.items.entrySet()) {
+                things.merge(e.getKey(), e.getValue(), Math::addExact);
+            }
+            for (Map.Entry<PayItem, Long> e : things.entrySet()) {
+                long left = e.getValue();
+                while (left > 0) {
+                    ItemStack s = e.getKey().toStack(1);
+                    int n = (int) Math.min(left, s.getMaxStackSize());
+                    s.setCount(n);
+                    out.add(s);
+                    left -= n;
+                }
+            }
+            return out;
+        }
+
+        @Override
+        public void discard(Amount amount, String note) throws PayException {
+            mainThread();
+            remove(amount, moe.qingu.youran.api.pay.PayRecord.Kind.DISCARDED, note);
+        }
+
+        private void remove(Amount amount, PayRecord.Kind kind, String note) throws PayException {
+            try {
+                ledger.remove(ref, amount, kind, note, System.currentTimeMillis());
+            } catch (IOException e) {
+                throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
+            }
+        }
+
+        @Override
+        public void giveTo(EntityPlayerMP player, Amount amount, Currency.Unit form, String note) throws PayException {
+            mainThread();
+            WorldPort.PlayerPort p = player == null ? null : world.player(player.getUniqueID());
+            if (p == null) {
+                throw new PayException("offline", "玩家不在线");
+            }
+            Map<PayItem, Long> give = new LinkedHashMap<>(CurrencyPlan.split(amount.yuan, form == null ? Currency.Unit.EMERALD : form));
+            for (Map.Entry<PayItem, Long> e : amount.items.entrySet()) {
+                give.merge(e.getKey(), e.getValue(), Math::addExact);
+            }
+            TxRunner.Result r = runner.withdraw(ref, p, amount, give, note);
+            if (r.status == TxRunner.Result.Status.FAILED) {
+                throw r.error;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- 事件（主线程）
+
+    public final class Events {
+        @SubscribeEvent
+        public void onLogin(PlayerEvent.PlayerLoggedInEvent e) {
+            if (!(e.player instanceof EntityPlayerMP)) {
+                return;
+            }
+            EntityPlayerMP p = (EntityPlayerMP) e.player;
+            try {
+                ledger.touchPlayer(p.getUniqueID(), p.getName());
+            } catch (IOException ex) {
+                Ledger.LOG.warn("pay.yr：记玩家名字失败：{}", ex.toString());
+            }
+            McWorld.cleanMarkers(p, tx -> ledger.pending(tx) != null);
+        }
+
+        @SubscribeEvent
+        public void onTick(TickEvent.ServerTickEvent e) {
+            if (e.phase != TickEvent.Phase.END) {
+                return;
+            }
+            ticks++;
+            if (ticks % 20 == 0) {
+                runner.tick();
+            }
+            if (ticks % 1200 == 0) {
+                ledger.maybeSnapshot(System.currentTimeMillis(), keepMillis());
+            }
+        }
+    }
+}

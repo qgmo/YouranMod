@@ -1,5 +1,7 @@
 package moe.qingu.youran.client.confirm;
 
+import moe.qingu.youran.api.network.ConfirmRequest;
+import moe.qingu.youran.api.network.ConfirmText;
 import moe.qingu.youran.api.network.DomainNames;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
@@ -22,16 +24,21 @@ public final class ConfirmDialog {
     /** 显示用的域名（混用文字系统的显示 xn-- 形式） */
     final String site;
     final List<String> items;
+    final ConfirmRequest.Purpose purpose;
     final long shownAt;
     final long deadline;
     private final GuiButton approve = new GuiButton(1, 0, 0, 80, 20, "");
     private final GuiButton deny = new GuiButton(2, 0, 0, 80, 20, "");
 
-    ConfirmDialog(long id, String title, String site, List<String> items, int seconds, long now) {
+    ConfirmDialog(long id, ConfirmText title, String site, List<ConfirmText> items, int seconds, ConfirmRequest.Purpose purpose, long now) {
         this.id = id;
-        this.title = title;
+        this.title = ConfirmTexts.render(title, ConfirmRequest.MAX_TITLE, I18n::hasKey, I18n::format);
         this.site = DomainNames.toDisplay(site);
-        this.items = new ArrayList<>(items);
+        this.items = new ArrayList<>();
+        for (ConfirmText i : items) {
+            this.items.add(ConfirmTexts.render(i, ConfirmRequest.MAX_ITEM, I18n::hasKey, I18n::format));
+        }
+        this.purpose = purpose == null ? ConfirmRequest.Purpose.SHARE : purpose;
         this.shownAt = now;
         this.deadline = now + Math.max(1, seconds) * 1000L;
     }
@@ -58,7 +65,7 @@ public final class ConfirmDialog {
         out.add("");
         out.addAll(f.listFormattedStringToWidth(I18n.format("youranmod.confirm.site", "§1" + site + "§r"), WIDTH - 16));
         if (!items.isEmpty()) {
-            out.add(I18n.format("youranmod.confirm.items"));
+            out.add(I18n.format(itemsKey(purpose)));
             for (String i : items) {
                 List<String> w = f.listFormattedStringToWidth(i, WIDTH - 28);
                 for (int k = 0; k < w.size(); k++) {
@@ -104,7 +111,7 @@ public final class ConfirmDialog {
         f.drawString(I18n.format("youranmod.confirm.note"), x + 8, ty, 0xFF606060);
         layout(x, y + buttonsOffset(f));
         boolean armed = armed(now);
-        approve.displayString = I18n.format("youranmod.confirm.approve");
+        approve.displayString = I18n.format(approveKey(purpose));
         deny.displayString = I18n.format("youranmod.confirm.deny");
         approve.enabled = armed;
         deny.enabled = armed;
@@ -112,6 +119,33 @@ public final class ConfirmDialog {
         approve.drawButton(mc, mouseX, mouseY, 0);
         deny.drawButton(mc, mouseX, mouseY, 0);
         GlStateManager.popMatrix();
+    }
+
+    /** 条目上面那一行的翻译键 */
+    static String itemsKey(ConfirmRequest.Purpose p) {
+        switch (p) {
+            case PAY:
+                return "youranmod.confirm.items.pay";
+            case RECEIVE:
+                return "youranmod.confirm.items.receive";
+            case ACTION:
+                return "youranmod.confirm.items.action";
+            default:
+                return "youranmod.confirm.items";
+        }
+    }
+
+    /** 同意按钮的翻译键 */
+    static String approveKey(ConfirmRequest.Purpose p) {
+        switch (p) {
+            case PAY:
+                return "youranmod.confirm.approve.pay";
+            case RECEIVE:
+            case ACTION:
+                return "youranmod.confirm.approve.ok";
+            default:
+                return "youranmod.confirm.approve";
+        }
     }
 
     private void layout(int x, int buttonsY) {

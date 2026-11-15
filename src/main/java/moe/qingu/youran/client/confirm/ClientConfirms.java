@@ -1,6 +1,8 @@
 package moe.qingu.youran.client.confirm;
 
 import moe.qingu.youran.YouranMod;
+import moe.qingu.youran.api.network.ConfirmRequest;
+import moe.qingu.youran.api.network.ConfirmText;
 import moe.qingu.youran.net.ConfirmMessages;
 import moe.qingu.youran.net.YouranNetwork;
 import net.minecraft.client.Minecraft;
@@ -30,10 +32,10 @@ public final class ClientConfirms {
     }
 
     /** Netty 线程上收到：转到主线程弹框（新的顶掉旧的；服务端保证同一时间只有一个） */
-    public static void show(long id, String title, String site, List<String> items, int seconds) {
+    public static void show(long id, ConfirmText title, String site, List<ConfirmText> items, int seconds, ConfirmRequest.Purpose purpose) {
         Minecraft mc = Minecraft.getMinecraft();
         mc.addScheduledTask(() -> {
-            current = new ConfirmDialog(id, title, site, items, seconds, System.currentTimeMillis());
+            current = new ConfirmDialog(id, title, site, items, seconds, purpose, System.currentTimeMillis());
             ensureHost(mc);
         });
     }
