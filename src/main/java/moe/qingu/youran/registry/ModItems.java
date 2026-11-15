@@ -1,5 +1,6 @@
 package moe.qingu.youran.registry;
 
+import moe.qingu.youran.item.ItemDopedWaferMold;
 import moe.qingu.youran.item.ItemDrink;
 import moe.qingu.youran.item.ItemFloppyDisk;
 import moe.qingu.youran.item.ItemHome;
@@ -10,6 +11,7 @@ import moe.qingu.youran.item.ItemRedBloodGem;
 import moe.qingu.youran.item.ItemWaterBottle;
 import moe.qingu.youran.item.ItemWithTooltip;
 import moe.qingu.youran.item.ItemYouranLogo;
+import moe.qingu.youran.logic.purity.WaferMold;
 import net.minecraft.block.Block;
 import net.minecraft.inventory.EntityEquipmentSlot;
 import net.minecraft.item.Item;
@@ -61,11 +63,19 @@ public final class ModItems {
     public static Item siliconDust;
     /** 硼硅酸盐渣（服主 11-15，硼的来源）：热能离心机分出电气石里的金属后剩下的渣 */
     public static Item borosilicateSlag;
+    /** 掺杂硅晶圆铸模（服主 11-15，芯片线第 7 步）：金、粘土各一种 */
+    public static Item dopedWaferMoldGold;
+    public static Item dopedWaferMoldClay;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
 
     private ModItems() {
+    }
+
+    /** 这种材质的掺杂硅晶圆铸模 */
+    public static Item dopedWaferMold(WaferMold mold) {
+        return mold == WaferMold.GOLD ? dopedWaferMoldGold : dopedWaferMoldClay;
     }
 
     public static List<Item> all() {
@@ -115,6 +125,8 @@ public final class ModItems {
         floppyDisk = add(registry, new ItemFloppyDisk());
         siliconDust = add(registry, new ItemWithTooltip("silicon_dust", 64, "粗硅（Si）打成的粉，加盐酸做成三氯氢硅"));
         borosilicateSlag = add(registry, new ItemWithTooltip("borosilicate_slag", 64, "电气石分出金属后剩下的渣，含硼和硅"));
+        dopedWaferMoldGold = add(registry, new ItemDopedWaferMold(WaferMold.GOLD));
+        dopedWaferMoldClay = add(registry, new ItemDopedWaferMold(WaferMold.CLAY));
     }
 
     private static Item itemBlock(Block block) {

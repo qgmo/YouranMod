@@ -27,6 +27,8 @@ public final class CompatRecipes {
         }
         if (ie && tic) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCobaltMagnetic();
+            // 芯片线第 7 步：匠魂“盘”铸模 + 硼锭 + 萤石粉 → 掺杂硅晶圆铸模（电弧炉；硼锭要炼金化学）
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerDopedMolds();
         }
         boolean alchemistry = Loader.isModLoaded(AlchemistryCompat.MODID);
         if (ie && alchemistry) {

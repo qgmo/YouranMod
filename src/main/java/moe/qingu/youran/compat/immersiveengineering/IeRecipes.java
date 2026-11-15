@@ -3,11 +3,13 @@ package moe.qingu.youran.compat.immersiveengineering;
 import blusunrize.immersiveengineering.api.crafting.ArcFurnaceRecipe;
 import blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe;
 import blusunrize.immersiveengineering.api.crafting.CrusherRecipe;
+import blusunrize.immersiveengineering.api.crafting.IngredientStack;
 import blusunrize.immersiveengineering.api.crafting.MetalPressRecipe;
 import blusunrize.immersiveengineering.api.crafting.MixerRecipe;
 import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
 import moe.qingu.youran.fluid.FluidPurity;
 import moe.qingu.youran.logic.purity.Purity;
+import moe.qingu.youran.logic.purity.WaferMold;
 import moe.qingu.youran.logic.purity.WaferRules;
 import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.YouranMod;
@@ -225,6 +227,61 @@ public final class IeRecipes {
             YouranMod.LOG.error("沉浸工程电弧炉的硼硅酸盐渣配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
         } else {
             YouranMod.LOG.info("已加沉浸工程电弧炉配方：5 硼硅酸盐渣 → 硼锭 + {} 二氧化硅粉", silica.getCount());
+        }
+    }
+
+    /** 匠魂的“盘”（平底锅锅头）部件，铸模的 NBT 里记它：{PartType:"tconstruct:pan_head"} */
+    static final String PAN_HEAD = "tconstruct:pan_head";
+    static final String TIC_PART_TYPE = "PartType";
+    /** 掺杂辅料：1 硼锭（矿物词典 ingotBoron，炼金化学注册）+ 4 萤石粉（dustGlowstone，原版） */
+    static final String BORON_INGOT = "ingotBoron";
+    static final String GLOWSTONE_DUST = "dustGlowstone";
+    static final int GLOWSTONE_PER_MOLD = 4;
+
+    /** 匠魂“盘”铸模：金铸模 {@code tconstruct:cast}、粘土铸模 {@code tconstruct:clay_cast}，NBT 记部件；没装匠魂时为空物品 */
+    static ItemStack panCast(WaferMold mold) {
+        Item cast = ForgeRegistries.ITEMS.getValue(new ResourceLocation("tconstruct", mold == WaferMold.GOLD ? "cast" : "clay_cast"));
+        if (cast == null || !ForgeRegistries.ITEMS.containsKey(new ResourceLocation(PAN_HEAD))) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack stack = new ItemStack(cast);
+        net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
+        tag.setString(TIC_PART_TYPE, PAN_HEAD);
+        stack.setTagCompound(tag);
+        return stack;
+    }
+
+    /**
+     * 电弧炉：匠魂“盘”铸模（金或粘土）+ 辅料 1 硼锭 + 4 萤石粉 → 对应材质的掺杂硅晶圆铸模（服主 11-15，芯片线第 7 步）。
+     * 铸模按 NBT 比（只认“盘”的铸模，别的部件的不行）；时间、电耗同粗硅（Claude 定）。要装了匠魂；硼锭没有时（没装炼金化学）不加。
+     */
+    public static void registerDopedMolds() {
+        if (OreDictionary.getOres(BORON_INGOT, false).isEmpty()) {
+            YouranMod.LOG.info("矿物词典里没有 {}（没装炼金化学？），不加沉浸工程电弧炉的掺杂硅晶圆铸模配方", BORON_INGOT);
+            return;
+        }
+        for (WaferMold mold : WaferMold.values()) {
+            ItemStack cast = panCast(mold);
+            if (cast.isEmpty()) {
+                YouranMod.LOG.info("没有匠魂的“盘”铸模（{}），不加沉浸工程电弧炉的掺杂硅晶圆铸模配方", mold.id);
+                return;
+            }
+            ItemStack output = new ItemStack(ModItems.dopedWaferMold(mold));
+            ArcFurnaceRecipe.addRecipe(output, new IngredientStack(cast).setUseNBT(true), ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK,
+                    BORON_INGOT, new IngredientStack(GLOWSTONE_DUST, GLOWSTONE_PER_MOLD));
+            NonNullList<ItemStack> additives = NonNullList.withSize(4, ItemStack.EMPTY);
+            additives.set(0, OreDictionary.getOres(BORON_INGOT, false).get(0).copy());
+            additives.set(1, new ItemStack(net.minecraft.init.Items.GLOWSTONE_DUST, GLOWSTONE_PER_MOLD));
+            ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(cast, additives);
+            ItemStack otherPart = cast.copy();
+            otherPart.getTagCompound().setString(TIC_PART_TYPE, "tconstruct:sword_blade");
+            ArcFurnaceRecipe wrong = ArcFurnaceRecipe.findRecipe(otherPart, additives);
+            if (found == null || found.output.getItem() != output.getItem() || (wrong != null && wrong.output.getItem() == output.getItem())) {
+                YouranMod.LOG.error("沉浸工程电弧炉的掺杂硅晶圆铸模配方（{}）没生效：找到的是 {}，别的部件的铸模找到的是 {}", mold.id,
+                        found == null ? null : found.output, wrong == null ? null : wrong.output);
+            } else {
+                YouranMod.LOG.info("已加沉浸工程电弧炉配方：“盘”{}铸模 + 硼锭 + {} 萤石粉 → 掺杂硅晶圆铸模", mold.id, GLOWSTONE_PER_MOLD);
+            }
         }
     }
 
