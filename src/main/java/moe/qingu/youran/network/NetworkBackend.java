@@ -1,5 +1,6 @@
 package moe.qingu.youran.network;
 
+import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
 import moe.qingu.youran.api.network.tls.TlsServerContext;
@@ -46,4 +47,7 @@ public interface NetworkBackend {
 
     /** YouranMod 自己的 .yr / .com 区里登记的名字（A-label）的地址；没有为 null。任意线程 */
     Ipv6Address localNameAddress(String asciiName);
+
+    /** 这个地址是设备表里一台设备的地址时，它在哪；否则 null。任意线程（不读世界） */
+    DeviceLocation deviceLocation(Ipv6Address address);
 }

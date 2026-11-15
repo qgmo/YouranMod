@@ -147,6 +147,18 @@ public final class YouranNetworkApi {
         return n == null ? null : b.localNameAddress(n);
     }
 
+    /**
+     * 服务端：这个地址是设备表里一台设备（家具电脑等）的地址时，返回它在哪个维度、哪一格；不是（玩家临时地址、机房主机、
+     * 那一格上没有登记设备、不在这个服务器内网里）或网络没在运行时返回 null。按地址结构直接算（坐标路由里的地址就是坐标），
+     * 再查一次设备表，不读世界；任意线程都可以调用（例如在网络线程上按 TCP 来源地址查）。
+     * <p>
+     * 路由器已经保证设备发出的包源地址就是设备地址（只收当前操作者的、源地址必须对），所以按来源查到的位置可以信。
+     */
+    public static DeviceLocation deviceLocation(Ipv6Address address) {
+        NetworkBackend b = NetworkHooks.backend();
+        return b == null || address == null ? null : b.deviceLocation(address);
+    }
+
     /** NTP 服务器的地址 */
     public static Ipv6Address ntpAddress() {
         NetworkBackend b = NetworkHooks.backend();

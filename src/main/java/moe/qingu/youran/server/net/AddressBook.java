@@ -1,5 +1,6 @@
 package moe.qingu.youran.server.net;
 
+import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkLayout;
@@ -52,5 +53,30 @@ final class AddressBook {
         }
         long bits = d.network.encode(x, y, z, 0);
         return bits < 0 ? null : layout.coordinateAddress(d.index, bits);
+    }
+
+    /**
+     * 按地址结构算出它是哪个维度、哪一格的 0 号地址（设备地址）；不在坐标路由里、维度序号没分配、不是 0 号槽位、
+     * 不是维度方案编得出来的值时返回 null。只读不可变的表，任意线程。
+     */
+    DeviceLocation locate(Ipv6Address a) {
+        if (a == null || layout.subnetOf(a) != NetworkLayout.SUBNET_COORDINATES) {
+            return null;
+        }
+        Dim d = byIndex.get(NetworkLayout.dimensionIndexOf(a));
+        if (d == null) {
+            return null;
+        }
+        long bits = NetworkLayout.dimensionBitsOf(a);
+        DimensionNetwork.BlockSlot b;
+        try {
+            b = d.network.decode(bits);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (b == null || b.slot != 0 || d.network.encode(b.x, b.y, b.z, 0) != bits) {
+            return null;
+        }
+        return new DeviceLocation(d.dimension, b.x, b.y, b.z);
     }
 }

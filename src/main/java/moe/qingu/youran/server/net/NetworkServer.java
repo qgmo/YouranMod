@@ -1,6 +1,7 @@
 package moe.qingu.youran.server.net;
 
 import moe.qingu.youran.api.network.DefaultDimensionNetwork;
+import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.HostContext;
 import moe.qingu.youran.api.network.Ipv6Address;
@@ -533,6 +534,13 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (p != null) {
             p.revoke(player, purpose);
         }
+    }
+
+    @Override
+    public DeviceLocation deviceLocation(Ipv6Address address) {
+        AddressBook b = book;
+        DeviceTable d = devices;
+        return b == null || d == null ? null : d.locate(b, address);
     }
 
     @Override
