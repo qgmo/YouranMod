@@ -71,6 +71,8 @@ public final class ModItems {
     public static Item siliconWafer;
     public static Item precisionSiliconWafer;
     public static Item scrapSiliconWafer;
+    /** 定位模块（位置外设，服主 11-15）：装进电脑的卡槽，网站经操作者同意后能拿到签了名的位置 */
+    public static Item locatorModule;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -135,6 +137,8 @@ public final class ModItems {
         siliconWafer = add(registry, new ItemSiliconWafer("silicon_wafer", "浇注出来的硅晶圆，要在洗矿机里洗过才能用"));
         precisionSiliconWafer = add(registry, new ItemSiliconWafer("precision_silicon_wafer", "洗干净的硅晶圆，可以拿去做芯片"));
         scrapSiliconWafer = add(registry, new ItemWithTooltip("scrap_silicon_wafer", 64, "洗坏了的硅晶圆，放进熔炉或电弧炉烧回硅锭，从头再来"));
+        locatorModule = add(registry, new ItemWithTooltip(moe.qingu.youran.api.network.location.LocatorModule.NAME, 16,
+                "装进电脑的卡槽：网站要位置时，经你同意给它一份签了名的电脑位置"));
     }
 
     private static Item itemBlock(Block block) {

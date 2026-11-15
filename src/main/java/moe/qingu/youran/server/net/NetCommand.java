@@ -53,7 +53,7 @@ final class NetCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/ynet <table|stats|device|identify|confirm|ping|dns|get|ntp|sim|stress|flush>";
+        return "/ynet <table|stats|device|identify|confirm|location|ping|dns|get|ntp|sim|stress|flush>";
     }
 
     @Override
@@ -75,6 +75,7 @@ final class NetCommand extends CommandBase {
             "§6/ynet device cap <x> <y> <z> login|location on|off §f声明、去掉设备的能力（一键登录、定位模块）",
             "§6/ynet identify <地址> | <x> <y> <z> [维度] §f按来源地址认人：哪台设备、什么能力、谁在操作",
             "§6/ynet confirm <玩家> §f给他弹一个测试用的系统确认框，回应后显示结果",
+            "§6/ynet location <x> <y> <z> <网站域名> <随机数> §f给这一格的设备签位置（先问操作者），显示证明",
             "§6/ynet ping <x> <y> <z> <目标> [次数] [字节数] §f目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名",
             "§6/ynet dns <x> <y> <z> <域名> §f经递归解析器查 AAAA",
             "§6/ynet get <x> <y> <z> <网址> §f用 TCP 取网页（如 http://test.yr/）",
@@ -108,6 +109,9 @@ final class NetCommand extends CommandBase {
                 break;
             case "confirm":
                 confirm(server, sender, args);
+                break;
+            case "location":
+                location(sender, args);
                 break;
             case "ping":
                 ping(sender, args);
@@ -358,6 +362,26 @@ final class NetCommand extends CommandBase {
                 Arrays.asList("这是 /ynet confirm 发的测试", "点同意或拒绝都可以"), 30);
         net.confirm(null, player.getUniqueID(), r).thenAccept(res -> tell(sender, "§e测试确认框的结果：" + res));
         tell(sender, "§a已给 " + player.getName() + " 弹框（30 秒）");
+    }
+
+    private void location(ICommandSender sender, String[] args) throws CommandException {
+        if (args.length < 6) {
+            throw new WrongUsageException("/ynet location <x> <y> <z> <网站域名> <随机数>");
+        }
+        Place p = place(sender, args, 1, false);
+        DeviceTable.Device d = net.deviceTable().byPosition(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+        if (d == null) {
+            tell(sender, "§c" + p + " 没有设备");
+            return;
+        }
+        net.signOnMain(d, args[4], args[5]).thenAccept(res -> {
+            tell(sender, "§e位置签名：" + res.status.code);
+            if (res.ok()) {
+                for (String line : res.proof.split("\n")) {
+                    tell(sender, "  " + line);
+                }
+            }
+        });
     }
 
     // ---- ping、DNS、HTTP、NTP ----

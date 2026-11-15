@@ -113,6 +113,7 @@ public final class YouranJeiPlugin implements IModPlugin {
         }
         registry.addIngredientInfo(wafers, VanillaTypes.ITEM, "youranmod.jei.wafer.info");
         registry.addIngredientInfo(new ItemStack(ModItems.scrapSiliconWafer), VanillaTypes.ITEM, "youranmod.jei.scrap_wafer.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.locatorModule), VanillaTypes.ITEM, "youranmod.jei.locator_module.info");
     }
 
     @Override

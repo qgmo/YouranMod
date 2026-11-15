@@ -3,8 +3,16 @@ package moe.qingu.youran.server.net;
 import moe.qingu.youran.api.network.ConfirmRequest;
 import moe.qingu.youran.api.network.ConfirmResult;
 import moe.qingu.youran.api.network.DefaultDimensionNetwork;
+import moe.qingu.youran.api.network.DeviceCapability;
+import moe.qingu.youran.api.network.DomainNames;
+import moe.qingu.youran.api.network.location.LocationProof;
+import moe.qingu.youran.api.network.location.LocationResult;
 import moe.qingu.youran.net.ConfirmMessages;
+import moe.qingu.youran.net.LocationMessages;
 import moe.qingu.youran.net.YouranNetwork;
+import moe.qingu.youran.server.net.location.LocationService;
+import moe.qingu.youran.server.net.location.LocationSigner;
+import moe.qingu.youran.server.net.service.captcha.SourceLimiter;
 import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.HostContext;
@@ -74,6 +82,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     /** 人机验证（captcha.yr，服主 11-15） */
     static final String HOST_CAPTCHA = "youranmod:captcha";
     static final String CAPTCHA_NAME = "captcha.yr";
+    /** 定位模块的公钥与核对（location.yr，服主 11-15） */
+    static final String HOST_LOCATION = "youranmod:location";
+    static final String LOCATION_NAME = moe.qingu.youran.api.network.location.LocationProofs.DOMAIN;
+    /** 定位模块的签名密钥文件（相对服务器根目录） */
+    static final String LOCATION_KEY_FILE = "config/youranmod-location-key.pem";
     /** 测试网站的国际化域名别名 */
     static final String TEST_IDN_NAME = "测试.yr";
     static final long PART_ROUTER = 0x1;
@@ -104,6 +117,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private ConfirmPrompts prompts;
     /** 主线程上的拒绝日志（{@link #rejects} 只给网络线程用） */
     private RejectLog mainRejects;
+    /** 定位模块的签名密钥；没有（读不了）为 null */
+    private volatile LocationSigner locationSigner;
+    /** 每个玩家请位置的频率（主线程） */
+    private final SourceLimiter locationLimit = new SourceLimiter(0.5, 3, 4096);
     /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
     private volatile Map<String, Ipv6Address> nameAddresses = Collections.emptyMap();
     private final Map<String, NetStack> hostStacks = new LinkedHashMap<>();
@@ -170,6 +187,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_YR_DNS, PART_YR_DNS, dc));
         hostRequests.add(new AllocationTable.Request(HOST_TEST, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_CAPTCHA, -1, dc));
+        hostRequests.add(new AllocationTable.Request(HOST_LOCATION, -1, dc));
         for (NetworkRegistry.HostDecl h : hostDecls) {
             if (h.datacenter.equals(YouranNetworkApi.PLAYERS_DATACENTER)) {
                 problems.add("主机 " + h.key + " 不能登记在玩家临时地址的 /96（" + h.datacenter + "）里，拒绝");
@@ -214,6 +232,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         yrRecords.put(moe.qingu.youran.api.network.DomainNames.toAscii(TEST_IDN_NAME), hostAddresses.get(HOST_TEST));
         if (hostAddresses.containsKey(HOST_CAPTCHA)) {
             yrRecords.put(CAPTCHA_NAME, hostAddresses.get(HOST_CAPTCHA));
+        }
+        if (hostAddresses.containsKey(HOST_LOCATION)) {
+            yrRecords.put(LOCATION_NAME, hostAddresses.get(HOST_LOCATION));
         }
         for (NetworkRegistry.NameDecl n : NetworkRegistry.names()) {
             Ipv6Address a = hostAddresses.get(n.hostKey);
@@ -276,6 +297,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             System.setProperty("java.awt.headless", "true");
         }
         captcha = new CaptchaService(CaptchaStore.createDefault(), System::currentTimeMillis, CaptchaService.newDrawer());
+        locationSigner = loadLocationKey(server);
         mainRejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
         prompts = new ConfirmPrompts(new PromptEnv(), new SecureRandom());
         startCaptchaLocal(captcha);
@@ -333,6 +355,23 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         ConfirmPrompts p = prompts;
         if (p != null) {
             p.tick();
+        }
+    }
+
+    /** 读定位模块的签名密钥；第一次开服时生成。读不了时返回 null（不签名，位置证明不可用） */
+    private static LocationSigner loadLocationKey(MinecraftServer server) {
+        File f = server.getFile(LOCATION_KEY_FILE);
+        try {
+            LocationSigner.Loaded l = LocationSigner.loadOrCreate(f.toPath());
+            if (l.created) {
+                LOG.info("游戏内网络：第一次开服，生成了定位模块的签名密钥 {}（公钥编号 {}；私钥不要外传，不要放进仓库）", f, l.signer.keyId());
+            } else {
+                LOG.info("游戏内网络：定位模块的签名密钥公钥编号 {}", l.signer.keyId());
+            }
+            return l.signer;
+        } catch (Exception e) {
+            LOG.error("游戏内网络：读不了定位模块的签名密钥 {}，位置证明不可用（文件没有动；坏了的话移走它，下次开服会生成新的）：{}", f, e.toString());
+            return null;
         }
     }
 
@@ -468,6 +507,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (cs != null && captchaStack != null) {
             cs.start(captchaStack, hostTls(HOST_CAPTCHA));
         }
+        LocationSigner signer = locationSigner;
+        NetStack locationStack = hostStacks.get(HOST_LOCATION);
+        if (signer != null && locationStack != null) {
+            new LocationService(signer, System::currentTimeMillis).start(locationStack, hostTls(HOST_LOCATION));
+        }
 
         // 其他模组的顶级域：替它们跑权威 DNS
         Map<String, List<DnsZoneData>> zonesByHost = new LinkedHashMap<>();
@@ -535,6 +579,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             prompts.clear();
             prompts = null;
         }
+        locationSigner = null;
         for (CompletableFuture<?> f : mainThreadTasks) {
             f.completeExceptionally(new IllegalStateException("服务器正在关"));
         }
@@ -715,6 +760,106 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
 
     ConfirmPrompts prompts() {
         return prompts;
+    }
+
+    // ---- 定位模块 ----
+
+    @Override
+    public java.security.PublicKey locationKey() {
+        LocationSigner s = locationSigner;
+        return s == null ? null : s.publicKey();
+    }
+
+    LocationSigner locationSigner() {
+        return locationSigner;
+    }
+
+    @Override
+    public CompletableFuture<LocationResult> signLocation(Ipv6Address device, String site, String nonce) {
+        MinecraftServer s = server;
+        if (s == null || prompts == null) {
+            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.UNAVAILABLE));
+        }
+        CompletableFuture<LocationResult> out = new CompletableFuture<>();
+        s.addScheduledTask(() -> {
+            AddressBook b = book;
+            DeviceTable dt = devices;
+            DeviceTable.Device d = b == null || dt == null ? null : dt.deviceAt(b, device);
+            if (d == null) {
+                out.complete(LocationResult.of(LocationResult.Status.NO_OPERATOR));
+                return;
+            }
+            signOnMain(d, site, nonce).whenComplete((r, e) -> out.complete(r != null ? r : LocationResult.of(LocationResult.Status.UNAVAILABLE)));
+        });
+        return out;
+    }
+
+    @Override
+    public void onLocationRequest(EntityPlayerMP player, int requestId, String site, String nonce) {
+        DeviceTable dt = devices;
+        if (!locationLimit.tryAcquire(player.getUniqueID().toString(), System.currentTimeMillis())) {
+            YouranNetwork.CHANNEL.sendTo(new LocationMessages.Reply(requestId, LocationResult.Status.BUSY.code, null), player);
+            return;
+        }
+        // 他现在接着的那台设备（网卡接在他客户端上的）
+        DeviceTable.Device d = dt == null ? null : dt.byPlayer(player.getUniqueID());
+        CompletableFuture<LocationResult> f = d == null || d.removed
+                ? CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.NO_OPERATOR))
+                : signOnMain(d, site, nonce);
+        f.whenComplete((r, e) -> {
+            LocationResult res = r != null ? r : LocationResult.of(LocationResult.Status.UNAVAILABLE);
+            if (player.connection != null) {
+                YouranNetwork.CHANNEL.sendTo(new LocationMessages.Reply(requestId, res.status.code, res.proof), player);
+            }
+        });
+    }
+
+    /** 主线程：核对、问操作者、签名 */
+    CompletableFuture<LocationResult> signOnMain(DeviceTable.Device d, String site, String nonce) {
+        String s = site == null ? null : DomainNames.tryToAscii(site.trim().toLowerCase(java.util.Locale.ROOT));
+        if (s == null || !LocationProof.SITE.matcher(s).matches() || nonce == null || !LocationProof.NONCE.matcher(nonce).matches()) {
+            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.BAD_REQUEST));
+        }
+        LocationSigner signer = locationSigner;
+        ConfirmPrompts p = prompts;
+        if (signer == null || p == null) {
+            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.UNAVAILABLE));
+        }
+        if (!d.hasCapability(DeviceCapability.LOCATION)) {
+            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.NO_LOCATOR));
+        }
+        ConfirmRequest req = new ConfirmRequest("获取这台电脑的位置", s, Arrays.asList(
+                "这台电脑的位置：维度 " + d.key.dimension + "，坐标 " + d.key.x + ", " + d.key.y + ", " + d.key.z,
+                "这台电脑的游戏内地址"));
+        return confirmDevice(p, d, req).thenApply(r -> {
+            switch (r.outcome) {
+                case APPROVED:
+                    if (d.removed || !d.hasCapability(DeviceCapability.LOCATION)) {
+                        return LocationResult.of(d.removed ? LocationResult.Status.OPERATOR_CHANGED : LocationResult.Status.NO_LOCATOR);
+                    }
+                    try {
+                        LocationProof proof = signer.sign(d.key.dimension, d.key.x, d.key.y, d.key.z, d.address,
+                                System.currentTimeMillis() / 1000, s, nonce);
+                        LOG.info("游戏内网络：{} 同意把 {} 的位置给 {}", r.playerName, d.label(), s);
+                        return new LocationResult(LocationResult.Status.OK, proof.text());
+                    } catch (Exception e) {
+                        LOG.error("游戏内网络：位置签名失败", e);
+                        return LocationResult.of(LocationResult.Status.UNAVAILABLE);
+                    }
+                case DENIED:
+                    return LocationResult.of(LocationResult.Status.DENIED);
+                case TIMEOUT:
+                    return LocationResult.of(LocationResult.Status.TIMEOUT);
+                case OPERATOR_CHANGED:
+                    return LocationResult.of(LocationResult.Status.OPERATOR_CHANGED);
+                case BUSY:
+                    return LocationResult.of(LocationResult.Status.BUSY);
+                case NO_OPERATOR:
+                    return LocationResult.of(LocationResult.Status.NO_OPERATOR);
+                default:
+                    return LocationResult.of(LocationResult.Status.UNAVAILABLE);
+            }
+        });
     }
 
     @Override

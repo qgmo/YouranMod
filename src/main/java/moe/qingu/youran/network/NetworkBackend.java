@@ -3,6 +3,7 @@ package moe.qingu.youran.network;
 import moe.qingu.youran.api.network.ConfirmRequest;
 import moe.qingu.youran.api.network.ConfirmResult;
 import moe.qingu.youran.api.network.DeviceLocation;
+import moe.qingu.youran.api.network.location.LocationResult;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
 import moe.qingu.youran.api.network.SourceIdentity;
@@ -63,4 +64,13 @@ public interface NetworkBackend {
 
     /** 主线程：客户端对确认框的回应 */
     void onConfirmAnswer(EntityPlayerMP player, long id, boolean approve);
+
+    /** 给设备签位置（先问操作者）。任意线程；future 在主线程上完成 */
+    CompletableFuture<LocationResult> signLocation(Ipv6Address device, String site, String nonce);
+
+    /** 主线程：客户端请位置（按他现在操作的设备签），结果发回给他 */
+    void onLocationRequest(EntityPlayerMP player, int requestId, String site, String nonce);
+
+    /** 定位模块的签名公钥；没有为 null */
+    java.security.PublicKey locationKey();
 }

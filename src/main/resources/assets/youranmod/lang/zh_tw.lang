@@ -104,6 +104,8 @@ youranmod.jei.trichlorosilane_hydrogen.info=三氯矽烷氫氣混合氣：達到
 youranmod.jei.wafer.info=矽晶圓的純度隨澆注用的混合氣，還記著用的是金鑄模還是黏土鑄模。矽晶圓要在 IC2 洗礦機裡洗（每片 1000 mB 水），洗成高精矽晶圓（純度、鑄模照抄）或者報廢。報廢率 = (1 − 水的純淨率) × 鑄模倍數（金 1，黏土 1.5）× 0.8^(幾個 9 − 9)，超過 100% 按 100%；不到 9 個 9 的一定報廢。各種水的純淨率見「洗礦機：洗矽晶圓」。
 youranmod.jei.scrap_wafer.info=洗壞了的矽晶圓。放進熔爐或沉浸工程電弧爐燒回煉金化學矽錠，從頭再走一遍矽線。
 tile.home_portal.name=主城傳送門
+item.locator_module.name=定位模組
+youranmod.jei.locator_module.info=定位模組（位置周邊）：裝進電腦介面裡的定位模組卡槽。網站要這台電腦的位置時，先彈出系統確認框（在電腦螢幕之外，網頁點不到），你同意後伺服器按電腦所在的維度與座標簽一份位置證明交給網站，網站用公開的公鑰（location.yr）當場核對。沒裝時照樣上網，只是要位置的網站用不了。臨時配方，以後進電腦製造流水線時再改。
 youranmod.confirm.header=系統確認（遊戲顯示）
 youranmod.confirm.site=網站：%s
 youranmod.confirm.items=將會提供：

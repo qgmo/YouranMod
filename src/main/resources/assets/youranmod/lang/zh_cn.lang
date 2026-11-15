@@ -104,6 +104,8 @@ youranmod.jei.trichlorosilane_hydrogen.info=三氯氢硅氢气混合气：到了
 youranmod.jei.wafer.info=硅晶圆的纯度随浇注用的混合气，还记着用的是金铸模还是粘土铸模。硅晶圆要在 IC2 洗矿机里洗（每片 1000 mB 水），洗成高精硅晶圆（纯度、铸模照抄）或者报废。报废率 = (1 − 水的纯净率) × 铸模倍数（金 1，粘土 1.5）× 0.8^(几个 9 − 9)，超过 100% 按 100%；不到 9 个 9 的一定报废。各种水的纯净率见“洗矿机：洗硅晶圆”。
 youranmod.jei.scrap_wafer.info=洗坏了的硅晶圆。放进熔炉或沉浸工程电弧炉烧回炼金化学硅锭，从头再走一遍硅线。
 tile.home_portal.name=主城传送门
+item.locator_module.name=定位模块
+youranmod.jei.locator_module.info=定位模块（位置外设）：装进电脑界面里的定位模块卡槽。网站要这台电脑的位置时，先弹出系统确认框（在电脑屏幕之外，网页点不到），你同意后服务器按电脑所在的维度与坐标签一份位置证明交给网站，网站用公开的公钥（location.yr）当场核对。没装时照样上网，只是要位置的网站用不了。临时配方，以后进电脑制造流水线时再改。
 youranmod.confirm.header=系统确认（游戏显示）
 youranmod.confirm.site=网站：%s
 youranmod.confirm.items=将会提供：

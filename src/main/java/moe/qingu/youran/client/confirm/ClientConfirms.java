@@ -139,5 +139,6 @@ public final class ClientConfirms {
     @SubscribeEvent
     public static void onDisconnected(FMLNetworkEvent.ClientDisconnectionFromServerEvent event) {
         Minecraft.getMinecraft().addScheduledTask(() -> current = null);
+        moe.qingu.youran.api.network.location.ClientLocation.onDisconnected();
     }
 }
