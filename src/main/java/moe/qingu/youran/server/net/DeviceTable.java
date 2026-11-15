@@ -2,6 +2,7 @@ package moe.qingu.youran.server.net;
 
 import moe.qingu.youran.api.network.DeviceEndpoint;
 import moe.qingu.youran.api.network.DeviceHandle;
+import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
 import moe.qingu.youran.net.NicChannel;
@@ -137,6 +138,19 @@ public final class DeviceTable implements NetworkDevices {
     }
 
     // ---- 网络线程 ----
+
+    /**
+     * 地址 → 设备位置：按地址结构算出坐标（{@link AddressBook#locate}），再查那一格上登记着（没被拿掉）的设备；
+     * 不是设备地址时为 null。只读并发表与不可变的地址表，任意线程都可以调用。
+     */
+    DeviceLocation locate(AddressBook book, Ipv6Address address) {
+        DeviceLocation l = book.locate(address);
+        if (l == null) {
+            return null;
+        }
+        Device d = byPosition.get(new PosKey(l.dimension, l.x, l.y, l.z));
+        return d == null || d.removed || !d.address().equals(address) ? null : l;
+    }
 
     Device byPosition(int dimension, int x, int y, int z) {
         return byPosition.get(new PosKey(dimension, x, y, z));

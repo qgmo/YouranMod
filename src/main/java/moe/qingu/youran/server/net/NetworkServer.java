@@ -1,6 +1,7 @@
 package moe.qingu.youran.server.net;
 
 import moe.qingu.youran.api.network.DefaultDimensionNetwork;
+import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.HostContext;
 import moe.qingu.youran.api.network.Ipv6Address;
@@ -19,6 +20,9 @@ import moe.qingu.youran.server.net.service.DnsZoneData;
 import moe.qingu.youran.server.net.service.NtpServer;
 import moe.qingu.youran.server.net.service.RecursiveResolver;
 import moe.qingu.youran.server.net.service.TestWebsite;
+import moe.qingu.youran.server.net.service.captcha.CaptchaLocalServer;
+import moe.qingu.youran.server.net.service.captcha.CaptchaService;
+import moe.qingu.youran.server.net.service.captcha.CaptchaStore;
 import moe.qingu.youran.server.net.tls.IntermediateCa;
 import moe.qingu.youran.server.net.tls.IssuingTlsContext;
 import moe.qingu.youran.server.net.tls.LeafCache;
@@ -62,6 +66,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     static final String HOST_ROOT_DNS = "youranmod:dns-root";
     static final String HOST_YR_DNS = "youranmod:dns-yr";
     static final String HOST_TEST = "youranmod:test";
+    /** 人机验证（captcha.yr，服主 11-15） */
+    static final String HOST_CAPTCHA = "youranmod:captcha";
+    static final String CAPTCHA_NAME = "captcha.yr";
     /** 测试网站的国际化域名别名 */
     static final String TEST_IDN_NAME = "测试.yr";
     static final long PART_ROUTER = 0x1;
@@ -85,6 +92,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private RecursiveResolver resolver;
     /** 玩家临时地址；没开（配置关掉、序号冲突）时为 null */
     private PlayerNics players;
+    /** captcha.yr 与它的本机端口（没开为 null） */
+    private CaptchaService captcha;
+    private CaptchaLocalServer captchaLocal;
     /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
     private volatile Map<String, Ipv6Address> nameAddresses = Collections.emptyMap();
     private final Map<String, NetStack> hostStacks = new LinkedHashMap<>();
@@ -150,6 +160,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_ROOT_DNS, PART_ROOT_DNS, dc));
         hostRequests.add(new AllocationTable.Request(HOST_YR_DNS, PART_YR_DNS, dc));
         hostRequests.add(new AllocationTable.Request(HOST_TEST, -1, dc));
+        hostRequests.add(new AllocationTable.Request(HOST_CAPTCHA, -1, dc));
         for (NetworkRegistry.HostDecl h : hostDecls) {
             if (h.datacenter.equals(YouranNetworkApi.PLAYERS_DATACENTER)) {
                 problems.add("主机 " + h.key + " 不能登记在玩家临时地址的 /96（" + h.datacenter + "）里，拒绝");
@@ -192,6 +203,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         yrRecords.put("test.yr", hostAddresses.get(HOST_TEST));
         // 国际化域名的测试别名（DNS 与证书里是 A-label）
         yrRecords.put(moe.qingu.youran.api.network.DomainNames.toAscii(TEST_IDN_NAME), hostAddresses.get(HOST_TEST));
+        if (hostAddresses.containsKey(HOST_CAPTCHA)) {
+            yrRecords.put(CAPTCHA_NAME, hostAddresses.get(HOST_CAPTCHA));
+        }
         for (NetworkRegistry.NameDecl n : NetworkRegistry.names()) {
             Ipv6Address a = hostAddresses.get(n.hostKey);
             Map<String, Ipv6Address> target = n.name.endsWith(".yr") ? yrRecords : comRecords;
@@ -248,6 +262,12 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             declByKey.putIfAbsent(h.key, h);
         }
         Map<String, Long> activeDcCopy = new LinkedHashMap<>(activeDc);
+        // 验证码图片在服务端用 Java2D 画：专用服务器上没设时按无头模式（不连显示器；要在 AWT 初始化之前设）
+        if (server.isDedicatedServer() && System.getProperty("java.awt.headless") == null) {
+            System.setProperty("java.awt.headless", "true");
+        }
+        captcha = new CaptchaService(CaptchaStore.createDefault(), System::currentTimeMillis, CaptchaService.newDrawer());
+        startCaptchaLocal(captcha);
         loop.execute(() -> startHosts(hostAddresses, declByKey, tldDecls, yrRecords, comRecords, activeDcCopy, serial));
         loop.execute(this::scheduleOverflowLog);
 
@@ -258,6 +278,23 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机 {} 个；递归解析器 {}，NTP {}{}",
                 layout.prefix(), dims, activeDc.size(), hostAddresses.size(), resolverAddress, ntpAddress,
                 players == null ? "" : "；玩家临时地址 " + layout.playersPrefix() + "/96");
+    }
+
+    /** 验证码的本机端口（配置 {@code network.captchaLocal} 开关、{@code network.captchaLocalPort} 端口，默认 8094） */
+    private void startCaptchaLocal(CaptchaService service) {
+        int port = NetworkConfig.captchaLocalPort;
+        if (!NetworkConfig.captchaLocal) {
+            LOG.info("游戏内网络：验证码的本机端口没开（network.captchaLocal=false）");
+            return;
+        }
+        CaptchaLocalServer s = new CaptchaLocalServer(service, System::currentTimeMillis);
+        try {
+            s.start(port);
+            captchaLocal = s;
+            LOG.info("游戏内网络：验证码的本机端口开在 127.0.0.1:{}（给游戏外的网页面板后台用）", port);
+        } catch (java.io.IOException | RuntimeException e) {
+            LOG.error("游戏内网络：验证码的本机端口 127.0.0.1:{} 开不了：{}", port, e.toString());
+        }
     }
 
     /** 主线程：玩家上线，分临时地址 */
@@ -403,6 +440,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         resolver.start();
         new NtpServer(System::currentTimeMillis).start(hostStacks.get(HOST_NTP));
         TestWebsite.start(hostStacks.get(HOST_TEST), hostTls(HOST_TEST));
+        CaptchaService cs = captcha;
+        NetStack captchaStack = hostStacks.get(HOST_CAPTCHA);
+        if (cs != null && captchaStack != null) {
+            cs.start(captchaStack, hostTls(HOST_CAPTCHA));
+        }
 
         // 其他模组的顶级域：替它们跑权威 DNS
         Map<String, List<DnsZoneData>> zonesByHost = new LinkedHashMap<>();
@@ -457,6 +499,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         if (players != null) {
             players.clear();
+        }
+        if (captchaLocal != null) {
+            captchaLocal.stop();
+            captchaLocal = null;
+        }
+        if (captcha != null) {
+            captcha.stop();
+            captcha = null;
         }
         for (CompletableFuture<?> f : mainThreadTasks) {
             f.completeExceptionally(new IllegalStateException("服务器正在关"));
@@ -533,6 +583,13 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (p != null) {
             p.revoke(player, purpose);
         }
+    }
+
+    @Override
+    public DeviceLocation deviceLocation(Ipv6Address address) {
+        AddressBook b = book;
+        DeviceTable d = devices;
+        return b == null || d == null ? null : d.locate(b, address);
     }
 
     @Override

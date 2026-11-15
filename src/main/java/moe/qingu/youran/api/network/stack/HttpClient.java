@@ -8,8 +8,10 @@ import moe.qingu.youran.api.network.tls.TlsTrust;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -33,8 +35,10 @@ public final class HttpClient {
     public static final class Response {
         public final int status;
         public final String reason;
-        /** 首部（名字小写；同名的用逗号连起来） */
+        /** 首部（名字小写；同名的用逗号连起来）。{@code Set-Cookie} 这类不能用逗号连的看 {@link #headerValues} */
         public final Map<String, String> headers;
+        /** 首部（名字小写），同名的每条分开、按顺序 */
+        private final Map<String, List<String>> allHeaders;
         public final byte[] body;
         /** 对方的地址与端口（{@link #send} 填；单独解析响应时为 null / 0） */
         public final Ipv6Address remoteAddress;
@@ -42,14 +46,21 @@ public final class HttpClient {
         /** https 时的连接信息；http 为 null */
         public final TlsInfo tls;
 
-        Response(int status, String reason, Map<String, String> headers, byte[] body) {
-            this(status, reason, headers, body, null, 0, null);
+        Response(int status, String reason, Map<String, List<String>> allHeaders, byte[] body) {
+            this(status, reason, allHeaders, body, null, 0, null);
         }
 
-        Response(int status, String reason, Map<String, String> headers, byte[] body, Ipv6Address remoteAddress, int remotePort, TlsInfo tls) {
+        Response(int status, String reason, Map<String, List<String>> allHeaders, byte[] body, Ipv6Address remoteAddress, int remotePort, TlsInfo tls) {
             this.status = status;
             this.reason = reason;
-            this.headers = Collections.unmodifiableMap(headers);
+            Map<String, String> joined = new LinkedHashMap<>();
+            Map<String, List<String>> all = new LinkedHashMap<>();
+            for (Map.Entry<String, List<String>> e : allHeaders.entrySet()) {
+                joined.put(e.getKey(), String.join(", ", e.getValue()));
+                all.put(e.getKey(), Collections.unmodifiableList(new ArrayList<>(e.getValue())));
+            }
+            this.headers = Collections.unmodifiableMap(joined);
+            this.allHeaders = Collections.unmodifiableMap(all);
             this.body = body;
             this.remoteAddress = remoteAddress;
             this.remotePort = remotePort;
@@ -57,11 +68,17 @@ public final class HttpClient {
         }
 
         Response with(Ipv6Address address, int port, TlsInfo tls) {
-            return new Response(status, reason, headers, body, address, port, tls);
+            return new Response(status, reason, allHeaders, body, address, port, tls);
         }
 
         public String header(String name) {
             return headers.get(name.toLowerCase(Locale.ROOT));
+        }
+
+        /** 同名首部的每一条（按收到的顺序）；没有为空表。{@code Set-Cookie} 要用这个取（日期里有逗号，不能按逗号拆） */
+        public List<String> headerValues(String name) {
+            List<String> v = allHeaders.get(name.toLowerCase(Locale.ROOT));
+            return v == null ? Collections.<String>emptyList() : v;
         }
 
         /** 正文按 UTF-8 解码 */
@@ -433,7 +450,7 @@ public final class HttpClient {
         } catch (NumberFormatException e) {
             throw new NetworkException(NetworkException.Reason.BAD_RESPONSE, "状态码不对");
         }
-        Map<String, String> headers = new LinkedHashMap<>();
+        Map<String, List<String>> headers = new LinkedHashMap<>();
         for (int i = 1; i < lines.length; i++) {
             int colon = lines[i].indexOf(':');
             if (colon <= 0) {
@@ -441,13 +458,13 @@ public final class HttpClient {
             }
             String name = lines[i].substring(0, colon).trim().toLowerCase(Locale.ROOT);
             String value = lines[i].substring(colon + 1).trim();
-            headers.merge(name, value, (a, v) -> a + ", " + v);
+            headers.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
         }
         int bodyStart = headerEnd + 4;
         String reason = status.length > 2 ? status[2] : "";
         byte[] body;
-        String te = headers.get("transfer-encoding");
-        String cl = headers.get("content-length");
+        String te = headers.containsKey("transfer-encoding") ? String.join(", ", headers.get("transfer-encoding")) : null;
+        String cl = headers.containsKey("content-length") ? String.join(", ", headers.get("content-length")) : null;
         if (code / 100 == 1 || code == 204 || code == 304) {
             body = new byte[0];
         } else if (te != null && te.toLowerCase(Locale.ROOT).endsWith("chunked")) {
