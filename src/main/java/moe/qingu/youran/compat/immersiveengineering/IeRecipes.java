@@ -4,6 +4,7 @@ import blusunrize.immersiveengineering.api.crafting.ArcFurnaceRecipe;
 import blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe;
 import blusunrize.immersiveengineering.api.crafting.CrusherRecipe;
 import blusunrize.immersiveengineering.api.crafting.MetalPressRecipe;
+import blusunrize.immersiveengineering.api.crafting.MixerRecipe;
 import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
 import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.YouranMod;
@@ -171,6 +172,38 @@ public final class IeRecipes {
             YouranMod.LOG.error("沉浸工程粉碎机的硅粉配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
         } else {
             YouranMod.LOG.info("已加沉浸工程粉碎机配方：硅锭 → 硅粉");
+        }
+    }
+
+    /** 盐酸（SCP: Lockdown 注册） */
+    static final String HYDROCHLORIC_ACID = "h_cl_fluid";
+    /** 搅拌机一次的电耗：照沉浸工程的混凝土（500 mB、3200 Flux），1000 mB 记 6400 Flux */
+    static final int MIXER_ENERGY = 6400;
+
+    /**
+     * 搅拌机：1 硅粉 + 3000 mB 盐酸 → 1000 mB 三氯氢硅，纯度 90%（同装罐机富集模式的那条；不带纯度标记，见 fluid.FluidPurity）。
+     * 沉浸工程的搅拌机本来只能 1:1 换流体，比例由 {@link RatioMixerRecipe} 与 mixin.immersiveengineering 处理；
+     * 没有 Mixin 时不加这条（不然会按 1:1 出 3000 mB）。
+     */
+    public static void registerTrichlorosilaneMixer(boolean mixinActive) {
+        FluidStack acid = FluidRegistry.getFluidStack(HYDROCHLORIC_ACID, 3000);
+        if (acid == null) {
+            YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加沉浸工程搅拌机的三氯氢硅配方", HYDROCHLORIC_ACID);
+            return;
+        }
+        if (!mixinActive) {
+            YouranMod.LOG.warn("沉浸工程搅拌机的 Mixin 没有生效，不加三氯氢硅配方（搅拌机本来只能 1:1 换流体）");
+            return;
+        }
+        ItemStack dust = new ItemStack(ModItems.siliconDust);
+        RatioMixerRecipe recipe = new RatioMixerRecipe(new FluidStack(ModFluids.trichlorosilane, 1000), acid, new Object[]{dust}, MIXER_ENERGY);
+        MixerRecipe.recipeList.add(recipe);
+        NonNullList<ItemStack> components = NonNullList.withSize(1, dust.copy());
+        MixerRecipe found = MixerRecipe.findRecipe(acid, components);
+        if (found != recipe) {
+            YouranMod.LOG.error("沉浸工程搅拌机的三氯氢硅配方没生效：同样的输入找到的是 {}", found == null ? null : found.fluidOutput);
+        } else {
+            YouranMod.LOG.info("已加沉浸工程搅拌机配方：硅粉 + 3000 mB 盐酸 → 1000 mB 三氯氢硅");
         }
     }
 }

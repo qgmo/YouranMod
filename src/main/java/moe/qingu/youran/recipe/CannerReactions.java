@@ -7,6 +7,7 @@ import moe.qingu.youran.logic.reaction.ItemIngredient;
 import moe.qingu.youran.logic.reaction.ReactionTable;
 import moe.qingu.youran.logic.reaction.StackFacts;
 import net.minecraft.item.ItemStack;
+import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.oredict.OreDictionary;
 
@@ -30,6 +31,10 @@ public final class CannerReactions {
     public static final String CHLORINE = "chlorine_youran";
     /** 本模组的乙酸 */
     public static final String ACETIC_ACID = "acetic_acid";
+    /** 盐酸（SCP: Lockdown 注册的 h_cl_fluid，整合包里电解机、冶炼炉、液化器都做它） */
+    public static final String HYDROCHLORIC_ACID = "h_cl_fluid";
+    /** 本模组的三氯氢硅（纯度见 fluid.FluidPurity；装罐机做出来的不带标记，就是 90%） */
+    public static final String TRICHLOROSILANE = "trichlorosilane";
     /** 匠魂的熔融钴 */
     public static final String MOLTEN_COBALT = "cobalt";
     /** 炼金化学的元素物品、铁元素的元数据、化合物物品 */
@@ -106,6 +111,11 @@ public final class CannerReactions {
         if (Loader.isModLoaded("tconstruct")) {
             TABLE.add(cobaltMagnetic());
         }
+        if (FluidRegistry.isFluidRegistered(HYDROCHLORIC_ACID)) {
+            TABLE.add(CannerReactions.<ItemStack>trichlorosilane());
+        } else {
+            YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加装罐机的三氯氢硅配方", HYDROCHLORIC_ACID);
+        }
         YouranMod.LOG.info("装罐机反应配方：内置 {} 条", TABLE.reactions().size());
     }
 
@@ -131,6 +141,15 @@ public final class CannerReactions {
     static FluidItemReaction<ItemStack, ReactionItem> cobaltMagnetic() {
         return new FluidItemReaction<>(MOLTEN_COBALT, 10, ItemIngredient.item(YouranMod.MODID + ":magnetite_dust", 0, 1),
                 null, 0, new ReactionItem(YouranMod.MODID + ":cobalt_magnetic_dust", 0, 1, null));
+    }
+
+    /**
+     * 三氯氢硅（芯片线“硅”第 3 步，服主 11-15）：1 硅粉 + 3000 mB 盐酸 → 1000 mB 三氯氢硅，纯度 90%，不出物品。
+     * 纯度 90% 的三氯氢硅不带纯度标记（见 {@code fluid.FluidPurity}），所以输出就是普通的流体。
+     */
+    static <S> FluidItemReaction<S, ReactionItem> trichlorosilane() {
+        return new FluidItemReaction<>(HYDROCHLORIC_ACID, 3000, ItemIngredient.item(YouranMod.MODID + ":silicon_dust", 0, 1),
+                TRICHLOROSILANE, 1000, null);
     }
 
     /**

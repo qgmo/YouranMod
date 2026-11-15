@@ -76,3 +76,5 @@ item.pvc_sheet.name=PVC Sheet
 item.polyethylene_lump.name=Polyethylene Lump
 item.floppy_disk.name=5.25" Floppy Disk
 item.silicon_dust.name=Silicon Dust
+fluid.trichlorosilane=Trichlorosilane
+fluid.trichlorosilane.with_purity=%s (Purity %s%%)

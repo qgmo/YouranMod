@@ -76,3 +76,5 @@ item.pvc_sheet.name=聚氯乙烯片
 item.polyethylene_lump.name=聚乙烯團
 item.floppy_disk.name=軟碟
 item.silicon_dust.name=矽粉
+fluid.trichlorosilane=三氯矽烷
+fluid.trichlorosilane.with_purity=%s（純度 %s%%）

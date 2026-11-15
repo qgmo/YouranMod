@@ -20,6 +20,16 @@ class MixinSetupTest {
         assertEquals(Collections.emptyList(), MixinSetup.configs(false));
     }
 
+    /** 沉浸工程的配置要装了沉浸工程；沉浸原油的配置要沉浸工程、沉浸原油都在 */
+    @Test
+    void configsByInstalledMods() {
+        assertEquals(java.util.Arrays.asList("mixins.youranmod.ic2.json", "mixins.youranmod.ie.json", "mixins.youranmod.ip.json"),
+                MixinSetup.configs(true, true, true));
+        assertEquals(Collections.singletonList("mixins.youranmod.ie.json"), MixinSetup.configs(false, true, false));
+        assertEquals(Collections.singletonList("mixins.youranmod.ic2.json"), MixinSetup.configs(true, false, true));
+        assertEquals(Collections.emptyList(), MixinSetup.configs(false, false, false));
+    }
+
     /** 核心插件在 mods 与 mods/1.12.2 里按主类找 IC2 的 jar */
     @Test
     void findsIc2JarByMainClass() throws IOException {

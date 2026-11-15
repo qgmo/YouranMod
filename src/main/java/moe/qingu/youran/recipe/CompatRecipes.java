@@ -36,6 +36,11 @@ public final class CompatRecipes {
             // 硅粉（粉碎机）
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerSiliconCrusher();
         }
+        // 芯片线“硅”：三氯氢硅（搅拌机，要 Mixin 改它的流体比例）
+        if (ie) {
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerTrichlorosilaneMixer(
+                    moe.qingu.youran.compat.immersiveengineering.RatioMixerProcess.active());
+        }
         // 乙醇（沉浸工程）氧化成乙酸，氧气是 IC2 的
         if (ie && ic2) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerRefinery();

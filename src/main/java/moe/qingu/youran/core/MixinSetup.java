@@ -1,5 +1,6 @@
 package moe.qingu.youran.core;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -14,22 +15,52 @@ import java.util.List;
  * </ul>
  */
 public final class MixinSetup {
-    /** 修补 IC2 的类（装罐机反应配方）：没装 IC2 时不注册（目标类不存在） */
+    /** 修补 IC2 的类（装罐机反应配方、太阳能蒸馏机提纯三氯氢硅）：没装 IC2 时不注册（目标类不存在） */
     public static final String IC2_CONFIG = "mixins.youranmod.ic2.json";
+    /** 修补沉浸工程的类（搅拌机按比例换流体）：没装沉浸工程时不注册 */
+    public static final String IE_CONFIG = "mixins.youranmod.ie.json";
+    /** 修补沉浸原油的类（精馏塔提纯三氯氢硅）：要沉浸工程与沉浸原油都在 */
+    public static final String IP_CONFIG = "mixins.youranmod.ip.json";
     /** IC2 的主类，用来认出它的 jar */
     static final String IC2_MAIN_CLASS = "ic2/core/IC2.class";
+    /** 沉浸工程的主类 */
+    static final String IE_MAIN_CLASS = "blusunrize/immersiveengineering/ImmersiveEngineering.class";
+    /** 沉浸原油的主类 */
+    static final String IP_MAIN_CLASS = "flaxbeard/immersivepetroleum/ImmersivePetroleum.class";
+    /** 要修补的模组的主类，核心插件按这些找 jar（顺序同 {@link #configs(boolean, boolean, boolean)} 的参数） */
+    static final String[] MAIN_CLASSES = {IC2_MAIN_CLASS, IE_MAIN_CLASS, IP_MAIN_CLASS};
 
     private MixinSetup() {
     }
 
-    /** 要在 late 时机（模组上了类路径之后）注册的配置：装了 IC2 时是 {@link #IC2_CONFIG}（每次调用时现查） */
+    /** 要在 late 时机（模组上了类路径之后）注册的配置：按装了哪些模组（每次调用时现查） */
     public static List<String> lateConfigs() {
         ClassLoader loader = MixinSetup.class.getClassLoader();
-        return configs(loader.getResource(IC2_CONFIG) != null && loader.getResource(IC2_MAIN_CLASS) != null);
+        return configs(present(loader, IC2_CONFIG, IC2_MAIN_CLASS), present(loader, IE_CONFIG, IE_MAIN_CLASS),
+                present(loader, IP_CONFIG, IP_MAIN_CLASS));
+    }
+
+    private static boolean present(ClassLoader loader, String config, String mainClass) {
+        return loader.getResource(config) != null && loader.getResource(mainClass) != null;
     }
 
     static List<String> configs(boolean ic2) {
-        return ic2 ? Collections.singletonList(IC2_CONFIG) : Collections.<String>emptyList();
+        return configs(ic2, false, false);
+    }
+
+    /** 沉浸原油的配置要沉浸工程也在（它的类继承沉浸工程的类） */
+    static List<String> configs(boolean ic2, boolean ie, boolean ip) {
+        List<String> configs = new ArrayList<>();
+        if (ic2) {
+            configs.add(IC2_CONFIG);
+        }
+        if (ie) {
+            configs.add(IE_CONFIG);
+            if (ip) {
+                configs.add(IP_CONFIG);
+            }
+        }
+        return Collections.unmodifiableList(configs);
     }
 
     /** 有 MixinBooter（或带它的 Cleanroom）时由它注册配置 */

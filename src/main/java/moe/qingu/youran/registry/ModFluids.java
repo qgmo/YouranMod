@@ -1,5 +1,6 @@
 package moe.qingu.youran.registry;
 
+import moe.qingu.youran.fluid.FluidTrichlorosilane;
 import net.minecraft.item.EnumRarity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fluids.Fluid;
@@ -16,6 +17,8 @@ public final class ModFluids {
     public static Fluid chlorine;
     /** 乙酸（服主 11-14）：没有流体方块（倒不到世界里），只有通用桶 */
     public static Fluid aceticAcid;
+    /** 三氯氢硅（服主 11-15，芯片线“硅”）：纯度记在 NBT 里（见 fluid.FluidPurity），没有流体方块，只有通用桶 */
+    public static Fluid trichlorosilane;
 
     private ModFluids() {
     }
@@ -35,6 +38,15 @@ public final class ModFluids {
         aceticAcid = fluid("acetic_acid", "acetic_acid").setDensity(1049).setViscosity(1200);
         FluidRegistry.registerFluid(aceticAcid);
         FluidRegistry.addBucketForFluid(aceticAcid);
+        // 密度 1.342 g/cm³；黏度约 0.33 mPa·s（水为 1000 时记 330）；沸点 31.8 ℃，常温下按液体算
+        trichlorosilane = new FluidTrichlorosilane("trichlorosilane", texture("trichlorosilane_still"), texture("trichlorosilane_flow"))
+                .setDensity(1342).setViscosity(330).setLuminosity(0).setGaseous(false);
+        FluidRegistry.registerFluid(trichlorosilane);
+        FluidRegistry.addBucketForFluid(trichlorosilane);
+    }
+
+    private static ResourceLocation texture(String name) {
+        return new ResourceLocation("youranmod", "blocks/" + name);
     }
 
     private static Fluid fluid(String name, String texture) {

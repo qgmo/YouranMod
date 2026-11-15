@@ -1,0 +1,15 @@
+{
+	"package": "moe.qingu.youran.mixin.immersiveengineering",
+	"required": true,
+	"refmap": "mixins.youranmod.refmap.json",
+	"minVersion": "0.8",
+	"compatibilityLevel": "JAVA_8",
+	"mixins": [
+		"MultiblockProcessMixerMixin"
+	],
+	"client": [],
+	"server": [],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}
