@@ -5,7 +5,9 @@
 	"minVersion": "0.8",
 	"compatibilityLevel": "JAVA_8",
 	"mixins": [
+		"ConsumeBoatFuelPacketMixin",
 		"DistillationRecipeMixin",
+		"EntitySpeedboatMixin",
 		"TileEntityDistillationTowerMixin"
 	],
 	"client": [],
