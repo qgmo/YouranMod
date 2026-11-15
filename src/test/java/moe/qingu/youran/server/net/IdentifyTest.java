@@ -159,7 +159,11 @@ class IdentifyTest {
         assertNull(players.owner(new Ipv6Address(a.high(), a.low() ^ 1)), "别的临时地址没人用");
         assertNull(players.owner(devices.addressAt(0, 0, 64, 0)), "不是玩家临时地址");
         SourceIdentity id = new SourceIdentity(SourceIdentity.Kind.PLAYER, a, null, null, owner.getKey(), owner.getValue());
-        assertTrue(id.canOneClickLogin(), "玩家临时地址直接就是那个玩家");
+        assertTrue(id.hasOperator(), "玩家临时地址直接就是那个玩家");
+        assertFalse(id.canOneClickLogin(), "玩家临时地址不算有一键登录能力（服主 11-15）");
+        SourceIdentity claimed = new SourceIdentity(SourceIdentity.Kind.PLAYER, a, null,
+                java.util.EnumSet.of(DeviceCapability.ONE_CLICK_LOGIN), owner.getKey(), owner.getValue());
+        assertFalse(claimed.canOneClickLogin(), "能力只看设备，玩家临时地址带上能力也不算");
         players.detach(eve);
         loop.drain();
         assertNull(players.owner(a), "下线以后收回");

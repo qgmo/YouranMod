@@ -49,11 +49,11 @@ public final class SourceIdentity {
     }
 
     /**
-     * 能不能用游戏角色一键登录：设备声明了 {@link DeviceCapability#ONE_CLICK_LOGIN} 且现在有人操作；
-     * 玩家临时地址总是可以（来源就是那个玩家）。
+     * 能不能用游戏角色一键登录：设备声明了 {@link DeviceCapability#ONE_CLICK_LOGIN} 且现在有人操作。
+     * 玩家临时地址不算（服主 11-15）：它不是电脑网卡，没有这项能力；临时地址只能连放行的主机，本来也用不上。
      */
     public boolean canOneClickLogin() {
-        return operator != null && (kind == Kind.PLAYER || has(DeviceCapability.ONE_CLICK_LOGIN));
+        return operator != null && kind == Kind.DEVICE && has(DeviceCapability.ONE_CLICK_LOGIN);
     }
 
     public boolean hasOperator() {
