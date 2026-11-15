@@ -28,8 +28,11 @@ public final class CompatRecipes {
         if (ie && tic) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCobaltMagnetic();
         }
-        if (ie && Loader.isModLoaded(AlchemistryCompat.MODID)) {
+        boolean alchemistry = Loader.isModLoaded(AlchemistryCompat.MODID);
+        if (ie && alchemistry) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCelluloseAcetate();
+            // 芯片线“硅”：粗硅（电弧炉）
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerSiliconArcFurnace();
         }
         // 乙醇（沉浸工程）氧化成乙酸，氧气是 IC2 的
         if (ie && ic2) {

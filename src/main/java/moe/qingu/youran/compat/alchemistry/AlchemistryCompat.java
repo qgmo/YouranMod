@@ -39,6 +39,10 @@ public final class AlchemistryCompat {
     /** 炼金化学自带的纤维素 */
     public static final String CELLULOSE = "cellulose";
     static final String ITEM_COMPOUND = "alchemistry:compound";
+    /** 元素锭：元数据是原子序数（炼金化学的 {@code ItemElementIngot}；矿物词典 ingot + 元素名，如 ingotSilicon） */
+    static final String ITEM_INGOT = "alchemistry:ingot";
+    /** 硅的原子序数（硅锭 {@code alchemistry:ingot:14}） */
+    public static final int SILICON = 14;
 
     /** 要注册的化合物：名字、元数据、颜色、组成（元素名, 个数） */
     static final List<CompoundSpec> COMPOUNDS = Arrays.asList(
@@ -90,6 +94,12 @@ public final class AlchemistryCompat {
         int meta = meta(name);
         Item compound = ForgeRegistries.ITEMS.getValue(new ResourceLocation(ITEM_COMPOUND));
         return meta < 0 || compound == null ? ItemStack.EMPTY : new ItemStack(compound, count, meta);
+    }
+
+    /** 元素锭（元数据是原子序数）；没装炼金化学时为空物品 */
+    public static ItemStack ingot(int atomicNumber, int count) {
+        Item ingot = ForgeRegistries.ITEMS.getValue(new ResourceLocation(ITEM_INGOT));
+        return ingot == null ? ItemStack.EMPTY : new ItemStack(ingot, count, atomicNumber);
     }
 
     /**
