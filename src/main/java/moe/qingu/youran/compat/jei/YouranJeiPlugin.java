@@ -12,6 +12,7 @@ import moe.qingu.youran.YouranMod;
 import moe.qingu.youran.fluid.FluidPurity;
 import moe.qingu.youran.item.ItemSiliconWafer;
 import moe.qingu.youran.logic.purity.WaferMold;
+import moe.qingu.youran.registry.ModBlocks;
 import moe.qingu.youran.registry.ModItems;
 import moe.qingu.youran.logic.purity.Purity;
 import moe.qingu.youran.registry.ModFluids;
@@ -71,6 +72,10 @@ public final class YouranJeiPlugin implements IModPlugin {
 
     @Override
     public void register(IModRegistry registry) {
+        // 主城传送门方块的物品形式只为占住物品编号，没有模型、不该被拿到（同原版下界传送门），JEI 里不显示
+        if (ModBlocks.mainCityPortal != null) {
+            registry.getJeiHelpers().getIngredientBlacklist().addIngredientToBlacklist(new ItemStack(ModBlocks.mainCityPortal));
+        }
         if (ic2()) {
             registry.addRecipes(JeiRecipes.cannerReactions(), CANNER);
             registry.addRecipeCatalyst(Ic2Machines.canner(), CANNER);
