@@ -26,17 +26,34 @@ public final class DistillationHooks {
         }
     };
 
-    /** 输入罐里的余量（不到一份）放了这么多 tick 没变，就当一份蒸掉 */
-    public static final int IDLE_TICKS = 20;
-    /** 精馏塔这一 tick 允不允许蒸余量（由 {@code mixin.immersivepetroleum.TileEntityDistillationTowerMixin} 在 update 前后设） */
-    private static final ThreadLocal<Boolean> ALLOW_REMAINDER = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    /** 输入罐里的余量（不到一份）放了这么多 tick（5 秒）没变，就当一份蒸掉；等久一点，管道断断续续送来的也能先凑成整份 */
+    public static final int IDLE_TICKS = 100;
+
+    /** 找配方时的场合：量不到一份时怎么回答 */
+    public enum Lookup {
+        /**
+         * 不在精馏塔的 update 里（管道往输入口灌、界面放容器时比“是不是同一个配方”）：给整份的配方，
+         * 罐里只剩余量时同纯度的照样能补进来。这时不会开始处理。
+         */
+        COMPARE,
+        /** 精馏塔 update 里开始处理：余量没放够 {@link #IDLE_TICKS} tick，不给配方 */
+        UPDATE,
+        /** 精馏塔 update 里开始处理：余量放够了，给余量那么多的配方 */
+        UPDATE_REMAINDER,
+        /** 读档恢复处理中的配方（{@code DistillationRecipe.loadFromNBT}）：存的输入是多少就给多少的 */
+        EXACT
+    }
+
+    private static final ThreadLocal<Lookup> LOOKUP = ThreadLocal.withInitial(() -> Lookup.COMPARE);
 
     private DistillationHooks() {
     }
 
-    /** 精馏塔 update 开始、结束时调用：这一 tick 找配方时余量能不能当一份 */
-    public static void allowRemainder(boolean allow) {
-        ALLOW_REMAINDER.set(allow);
+    /** 设这个线程接下来找配方的场合，返回原来的（用完要设回去） */
+    public static Lookup lookup(Lookup lookup) {
+        Lookup old = LOOKUP.get();
+        LOOKUP.set(lookup);
+        return old;
     }
 
     /** 输入罐里是不是只剩余量（三氯氢硅、不到一份） */
@@ -50,17 +67,24 @@ public final class DistillationHooks {
     }
 
     /**
-     * 三氯氢硅的配方；量不够一份（{@value Purity#BATCH_INPUT} mB）时为 null，同原来 {@code containsFluid} 量不够的情况，
-     * 只有精馏塔放了一会儿的余量例外（{@link #allowRemainder}）。
+     * 三氯氢硅的配方。量够一份时是整份（{@value Purity#BATCH_INPUT} mB）的；不够一份时看场合（{@link Lookup}）：
+     * 比较时给整份的，开始处理时只有放够了的余量才给余量的配方（不然为 null，同原来 {@code containsFluid} 量不够），
+     * 读档时照存的量给。
      */
     @Nullable
     public static DistillationRecipe recipeFor(FluidStack input) {
         int amount = Purity.BATCH_INPUT;
+        if (input.amount <= 0) {
+            return null;
+        }
         if (input.amount < Purity.BATCH_INPUT) {
-            if (input.amount <= 0 || !ALLOW_REMAINDER.get()) {
+            Lookup lookup = LOOKUP.get();
+            if (lookup == Lookup.UPDATE) {
                 return null;
             }
-            amount = input.amount;
+            if (lookup != Lookup.COMPARE) {
+                amount = input.amount;
+            }
         }
         String key = (input.tag == null ? "" : input.tag.toString()) + "#" + amount;
         int batch = amount;

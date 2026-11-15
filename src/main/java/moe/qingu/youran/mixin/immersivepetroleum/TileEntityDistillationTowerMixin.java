@@ -22,7 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 不带 NBT 的流体（原油的产物）扣法不变。
  *
  * <p>另外记下输入罐里三氯氢硅的余量（不到一份）放了多久：放满 {@link DistillationHooks#IDLE_TICKS} tick 没变时，
- * 这一 tick 找配方允许把余量当一份蒸掉（{@link DistillationHooks#allowRemainder}），update 结束时收回。
+ * 这一 tick 找配方允许把余量当一份蒸掉（{@link DistillationHooks#lookup}），update 结束时设回原来的场合。
  * 计时不存档，读档后重新数。
  */
 @Mixin(value = TileEntityDistillationTower.class, remap = false)
@@ -36,6 +36,8 @@ public abstract class TileEntityDistillationTowerMixin {
     private int youran$remainderTicks;
     @Unique
     private int youran$remainderAmount;
+    @Unique
+    private DistillationHooks.Lookup youran$outerLookup;
 
     @Inject(method = "update", remap = true, at = @At("HEAD"))
     private void youran$beforeUpdate(CallbackInfo ci) {
@@ -46,12 +48,13 @@ public abstract class TileEntityDistillationTowerMixin {
             youran$remainderTicks = 0;
             youran$remainderAmount = in == null ? 0 : in.amount;
         }
-        DistillationHooks.allowRemainder(youran$remainderTicks >= DistillationHooks.IDLE_TICKS);
+        youran$outerLookup = DistillationHooks.lookup(youran$remainderTicks >= DistillationHooks.IDLE_TICKS
+                ? DistillationHooks.Lookup.UPDATE_REMAINDER : DistillationHooks.Lookup.UPDATE);
     }
 
     @Inject(method = "update", remap = true, at = @At("RETURN"))
     private void youran$afterUpdate(CallbackInfo ci) {
-        DistillationHooks.allowRemainder(false);
+        DistillationHooks.lookup(youran$outerLookup == null ? DistillationHooks.Lookup.COMPARE : youran$outerLookup);
     }
 
     @Redirect(method = "update", remap = true, at = @At(value = "INVOKE", ordinal = 0, remap = false,
