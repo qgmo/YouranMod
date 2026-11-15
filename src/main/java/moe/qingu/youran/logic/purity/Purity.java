@@ -62,6 +62,15 @@ public final class Purity {
         return BigDecimal.valueOf(sanitize(impurity)).movePointLeft(passes).doubleValue();
     }
 
+    /**
+     * 蒸 {@code input} mB（一份最多 {@value #BATCH_INPUT} mB）出多少 mB：九成，往下取整。整份 10 → 9；
+     * 罐里只剩不到一份、又一直没有新的进来时，机器把余量当一份蒸掉（9 → 8，5 → 4，1 → 0），免得余量卡在罐里，
+     * 挡住别的纯度的三氯氢硅进罐。
+     */
+    public static int outputFor(int input) {
+        return input <= 0 ? 0 : input * BATCH_OUTPUT / BATCH_INPUT;
+    }
+
     /** {@code volume} mB 能蒸几次（不够 {@value #BATCH_INPUT} mB 的余量留在罐里） */
     public static int batches(int volume) {
         return volume <= 0 ? 0 : volume / BATCH_INPUT;

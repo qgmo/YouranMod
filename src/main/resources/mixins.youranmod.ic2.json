@@ -6,7 +6,10 @@
 	"compatibilityLevel": "JAVA_8",
 	"mixins": [
 		"TileEntityCannerMixin",
-		"InvSlotProcessableCannerMixin"
+		"InvSlotProcessableCannerMixin",
+		"TileEntitySolarDestillerMixin",
+		"InvSlotConsumableLiquidByListAccessor",
+		"FluidsHandlerMixin"
 	],
 	"client": [],
 	"server": [],

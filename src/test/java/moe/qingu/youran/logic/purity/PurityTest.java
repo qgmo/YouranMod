@@ -49,6 +49,16 @@ class PurityTest {
         assertEquals(0.4305, Math.pow(0.9, 8), 1e-4);
     }
 
+    /** 一份最多 10 mB，出九成往下取整；余量当一份蒸时 9 → 8，1 → 0 */
+    @Test
+    void remainder() {
+        assertEquals(9, Purity.outputFor(10));
+        assertEquals(8, Purity.outputFor(9));
+        assertEquals(4, Purity.outputFor(5));
+        assertEquals(0, Purity.outputFor(1));
+        assertEquals(0, Purity.outputFor(0));
+    }
+
     @Test
     void conversions() {
         assertEquals(0.9, Purity.purity(0.1));

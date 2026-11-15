@@ -56,6 +56,12 @@ repositories {
     mavenCentral()
 }
 
+// 沉浸原油的 jar（只编译）：放在 libs/ 下，文件名见 gradle.properties 的 ip_jar
+def ipJar = file("libs/${property('ip_jar')}")
+if (!ipJar.isFile()) {
+    throw new GradleException("缺少沉浸原油：把整合包里的 ${property('ip_jar')} 放到 libs/（只编译，不进仓库，见 README）")
+}
+
 dependencies {
     // Mixin 注解与注解处理器（生成 refmap）用 MixinBooter 带的 Mixin 0.8；运行时服务端用 SpongeForge 自带的、客户端用 MixinBooter（见 core 包）
     String mixin = modUtils.enableMixins("zone.rong:mixinbooter:${property('mixin_booter_version')}", 'mixins.youranmod.refmap.json')
@@ -74,6 +80,9 @@ dependencies {
     // 沉浸工程（只编译、不打包）：整合包是 0.12-98，Maven 上最新只有 0.12-92（取开发版 deobf，不用反混淆）；用到的灌装机接口
     // BottlingMachineRecipe.addRecipe / findRecipe 与 output 字段两版相同。只有 compat.immersiveengineering 引用，没装时不加载
     compileOnly('blusunrize:ImmersiveEngineering:0.12-92-559:deobf') { transitive = false }
+    // 沉浸原油（只编译、不打包）：仓库没有许可证、也不在 Maven 上，不能放进本仓库；把整合包里的 jar 放到 libs/（不进仓库，见 README）。
+    // 只有 compat.immersivepetroleum 与 mixin.immersivepetroleum 引用，没装时不注册 Mixin、不加载这些类
+    compileOnly rfg.deobf(files(ipJar))
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
