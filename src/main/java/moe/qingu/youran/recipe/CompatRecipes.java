@@ -59,6 +59,13 @@ public final class CompatRecipes {
         if (tic && ic2) {
             moe.qingu.youran.compat.tconstruct.TicRecipes.registerMixture();
         }
+        // 芯片线第 8 步：混合气 + 掺杂铸模 → 硅晶圆（浇铸台、灌装机；装罐机的在反应配方表里）
+        if (tic) {
+            moe.qingu.youran.compat.tconstruct.WaferCasting.register();
+        }
+        if (ie) {
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerWaferBottling();
+        }
         // 炼金化学的化合机、液化器、蒸发器（在它载入完成时应用 CraftTweaker 的删改之前加；没装时什么都不做）
         AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
         AlchemistryCompat.registerAceticAcidConversion(ModFluids.aceticAcid);

@@ -55,4 +55,18 @@ class WaferRulesTest {
         assertEquals(9, FluidPurity.nines(FluidPurity.tagFor(mixture)));
         assertEquals(9, FluidPurity.tagFor(mixture).getInteger(FluidPurity.TAG_NINES));
     }
+
+    /** 灌装机按 NBT 比，要登记的纯度：没有标记的 1 个 9 与 9–32 个 9，共 25 种；晶圆纯度同混合气 */
+    @Test
+    void castingGrades() {
+        int[] grades = WaferRules.castingGrades();
+        assertEquals(25, grades.length);
+        assertEquals(Purity.DEFAULT_NINES, grades[0]);
+        assertEquals(9, grades[1]);
+        assertEquals(Purity.MAX_NINES, grades[24]);
+        for (int g : grades) {
+            assertEquals(g, WaferRules.waferNines(g));
+        }
+        assertEquals(1000, WaferRules.MIXTURE_PER_WAFER);
+    }
 }

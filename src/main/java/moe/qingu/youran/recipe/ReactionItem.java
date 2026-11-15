@@ -4,6 +4,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.ResourceLocation;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fml.common.registry.ForgeRegistries;
 
 import javax.annotation.Nullable;
@@ -12,11 +13,21 @@ import javax.annotation.Nullable;
  * 反应的输出物品：按注册名记，用到时再找物品（内置配方在物品注册之前就登记了）。
  */
 public final class ReactionItem {
+    /**
+     * 按这次反应的输入改输出（如晶圆的纯度随输入的混合气）：{@code made} 是照注册名做出来的物品（可以直接改），
+     * {@code fluid}、{@code item} 是这次的输入（只读）。
+     */
+    public interface Finisher {
+        ItemStack finish(ItemStack made, @Nullable FluidStack fluid, ItemStack item);
+    }
+
     private final String itemId;
     private final int meta;
     private final int count;
     @Nullable
     private final NBTTagCompound tag;
+    @Nullable
+    private Finisher finisher;
 
     public ReactionItem(String itemId, int meta, int count, @Nullable NBTTagCompound tag) {
         if (itemId == null || itemId.isEmpty()) {
@@ -41,6 +52,22 @@ public final class ReactionItem {
 
     public String itemId() {
         return itemId;
+    }
+
+    /** 设上按输入改输出的办法，返回自己 */
+    public ReactionItem finishedBy(Finisher finisher) {
+        this.finisher = finisher;
+        return this;
+    }
+
+    /** 这次反应做出来的物品：照注册名做，再按输入改（有 {@link Finisher} 时）；物品不存在时为空物品 */
+    public ItemStack toStack(@Nullable FluidStack fluid, ItemStack item) {
+        ItemStack made = toStack();
+        if (made.isEmpty() || finisher == null) {
+            return made;
+        }
+        ItemStack finished = finisher.finish(made, fluid, item);
+        return finished == null ? ItemStack.EMPTY : finished;
     }
 
     /** 做出来的物品；这个注册名的物品不存在时为空物品 */

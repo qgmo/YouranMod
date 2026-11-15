@@ -8,6 +8,7 @@ import moe.qingu.youran.item.ItemIceArmor;
 import moe.qingu.youran.item.ItemPrimogemSword;
 import moe.qingu.youran.item.ItemPrimogemTools;
 import moe.qingu.youran.item.ItemRedBloodGem;
+import moe.qingu.youran.item.ItemSiliconWafer;
 import moe.qingu.youran.item.ItemWaterBottle;
 import moe.qingu.youran.item.ItemWithTooltip;
 import moe.qingu.youran.item.ItemYouranLogo;
@@ -66,6 +67,10 @@ public final class ModItems {
     /** 掺杂硅晶圆铸模（服主 11-15，芯片线第 7 步）：金、粘土各一种 */
     public static Item dopedWaferMoldGold;
     public static Item dopedWaferMoldClay;
+    /** 硅晶圆、高精硅晶圆（一个一组，NBT 记纯度与铸模材质）、报废硅晶圆（芯片线第 8、9 步） */
+    public static Item siliconWafer;
+    public static Item precisionSiliconWafer;
+    public static Item scrapSiliconWafer;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -127,6 +132,9 @@ public final class ModItems {
         borosilicateSlag = add(registry, new ItemWithTooltip("borosilicate_slag", 64, "电气石分出金属后剩下的渣，含硼和硅"));
         dopedWaferMoldGold = add(registry, new ItemDopedWaferMold(WaferMold.GOLD));
         dopedWaferMoldClay = add(registry, new ItemDopedWaferMold(WaferMold.CLAY));
+        siliconWafer = add(registry, new ItemSiliconWafer("silicon_wafer", "浇注出来的硅晶圆，要在洗矿机里洗过才能用"));
+        precisionSiliconWafer = add(registry, new ItemSiliconWafer("precision_silicon_wafer", "洗干净的硅晶圆，可以拿去做芯片"));
+        scrapSiliconWafer = add(registry, new ItemWithTooltip("scrap_silicon_wafer", 64, "洗坏了的硅晶圆，放进熔炉或电弧炉烧回硅锭，从头再来"));
     }
 
     private static Item itemBlock(Block block) {

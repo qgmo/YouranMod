@@ -285,6 +285,29 @@ public final class IeRecipes {
         }
     }
 
+    /**
+     * 灌装机：1000 mB 混合气 + 1 掺杂硅晶圆铸模（消耗）→ 1 硅晶圆（服主 11-15，芯片线第 8 步），晶圆带混合气的纯度与铸模材质。
+     * 灌装机按 NBT 比配方，所以每种纯度（没有标记的与 9–32 个 9）、每种铸模各一条，共 50 条；JEI 里只列 9 个 9 的两条。
+     */
+    public static void registerWaferBottling() {
+        int added = 0;
+        for (WaferMold mold : WaferMold.values()) {
+            ItemStack input = new ItemStack(ModItems.dopedWaferMold(mold));
+            for (int nines : WaferRules.castingGrades()) {
+                FluidStack fluid = FluidPurity.mixture(WaferRules.MIXTURE_PER_WAFER, nines);
+                ItemStack wafer = moe.qingu.youran.item.ItemSiliconWafer.make(ModItems.siliconWafer, WaferRules.waferNines(nines), mold);
+                BottlingMachineRecipe.recipeList.add(new PurityBottlingRecipe(wafer, input, fluid, nines == Purity.WAFER_GRADE_NINES));
+                BottlingMachineRecipe found = BottlingMachineRecipe.findRecipe(input, fluid);
+                if (found == null || !ItemStack.areItemStackTagsEqual(found.output, wafer) || found.output.getItem() != wafer.getItem()) {
+                    YouranMod.LOG.error("沉浸工程灌装机的硅晶圆配方（{}，{} 个 9）没生效：找到的是 {}", mold.id, nines, found == null ? null : found.output);
+                } else {
+                    added++;
+                }
+            }
+        }
+        YouranMod.LOG.info("已加沉浸工程灌装机配方：{} mB 混合气 + 掺杂硅晶圆铸模 → 硅晶圆（{} 条）", WaferRules.MIXTURE_PER_WAFER, added);
+    }
+
     /** 粉碎机电耗：同沉浸工程自己把锭粉碎成粉（3000 Flux） */
     static final int CRUSHER_ENERGY = 3000;
 
