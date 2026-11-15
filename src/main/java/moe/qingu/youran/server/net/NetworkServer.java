@@ -124,6 +124,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private volatile LocationSigner locationSigner;
     /** pay.yr 的账本与给模组的接口；没开（配置关掉、读不了账本）为 null */
     private moe.qingu.youran.server.net.pay.PayServer pay;
+    /** 浏览器主页 180.yr、广告平台、帮助（服主 11-15）；没开为 null */
+    private moe.qingu.youran.server.net.nav.NavServer nav;
     /** 每个玩家请位置的频率（主线程） */
     private final SourceLimiter locationLimit = new SourceLimiter(0.5, 3, 4096);
     /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
@@ -196,6 +198,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (moe.qingu.youran.server.net.pay.PayConfig.enabled) {
             hostRequests.add(new AllocationTable.Request(HOST_PAY, -1, dc));
         }
+        if (moe.qingu.youran.server.net.nav.NavConfig.enabled) {
+            hostRequests.add(new AllocationTable.Request(moe.qingu.youran.server.net.nav.NavServer.HOST, -1, dc));
+        }
         for (NetworkRegistry.HostDecl h : hostDecls) {
             if (h.datacenter.equals(YouranNetworkApi.PLAYERS_DATACENTER)) {
                 problems.add("主机 " + h.key + " 不能登记在玩家临时地址的 /96（" + h.datacenter + "）里，拒绝");
@@ -246,6 +251,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         if (hostAddresses.containsKey(HOST_PAY)) {
             yrRecords.put(PAY_NAME, hostAddresses.get(HOST_PAY));
+        }
+        if (hostAddresses.containsKey(moe.qingu.youran.server.net.nav.NavServer.HOST)) {
+            for (String n : moe.qingu.youran.server.net.nav.NavServer.NAMES) {
+                yrRecords.put(n, hostAddresses.get(moe.qingu.youran.server.net.nav.NavServer.HOST));
+            }
         }
         for (NetworkRegistry.NameDecl n : NetworkRegistry.names()) {
             Ipv6Address a = hostAddresses.get(n.hostKey);
@@ -316,6 +326,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             pay = moe.qingu.youran.server.net.pay.PayServer.start(server);
         } else {
             LOG.info("游戏内网络：pay.yr 在配置里关掉了（pay.enabled=false）");
+        }
+        if (moe.qingu.youran.server.net.nav.NavConfig.enabled) {
+            nav = moe.qingu.youran.server.net.nav.NavServer.start(server);
+        } else {
+            LOG.info("游戏内网络：180.yr 在配置里关掉了（nav.enabled=false）");
         }
         loop.execute(() -> startHosts(hostAddresses, declByKey, tldDecls, yrRecords, comRecords, activeDcCopy, serial));
         loop.execute(this::scheduleOverflowLog);
@@ -536,6 +551,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                     () -> idName != null && nameAddresses.containsKey(idName));
         }
 
+        moe.qingu.youran.server.net.nav.NavServer ns = nav;
+        NetStack navStack = hostStacks.get(moe.qingu.youran.server.net.nav.NavServer.HOST);
+        if (ns != null && navStack != null) {
+            String idName = DomainNames.tryToAscii(moe.qingu.youran.server.net.nav.NavConfig.idDomain.trim().toLowerCase(java.util.Locale.ROOT));
+            ns.startWeb(new Context(moe.qingu.youran.server.net.nav.NavServer.HOST, hosts.get(moe.qingu.youran.server.net.nav.NavServer.HOST), navStack),
+                    resolverAddress, () -> idName != null && nameAddresses.containsKey(idName), n -> nameAddresses.containsKey(n));
+        }
+
         // 其他模组的顶级域：替它们跑权威 DNS
         Map<String, List<DnsZoneData>> zonesByHost = new LinkedHashMap<>();
         for (Map.Entry<String, DnsZoneData> e : modZones.entrySet()) {
@@ -580,6 +603,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (pay != null) {
             pay.stop();
             pay = null;
+        }
+        if (nav != null) {
+            nav.stop();
+            nav = null;
         }
         if (events != null) {
             MinecraftForge.EVENT_BUS.unregister(events);
