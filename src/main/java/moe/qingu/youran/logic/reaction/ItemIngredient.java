@@ -1,7 +1,10 @@
 package moe.qingu.youran.logic.reaction;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * 反应的输入物品：矿物词典名、具体物品（注册名 + 元数据）或调用方给的判断（CraftTweaker 的配料），加上每次消耗的数量。
@@ -18,8 +21,15 @@ public final class ItemIngredient<S> {
     private final Predicate<S> custom;
     private final int count;
     private final String description;
+    /** 调用方给的判断配料的例子（JEI 显示用）；别的配料为 null */
+    private final Supplier<List<S>> examples;
 
     private ItemIngredient(String ore, String itemId, int meta, Predicate<S> custom, int count, String description) {
+        this(ore, itemId, meta, custom, count, description, null);
+    }
+
+    private ItemIngredient(String ore, String itemId, int meta, Predicate<S> custom, int count, String description,
+                           Supplier<List<S>> examples) {
         if (count <= 0) {
             throw new IllegalArgumentException("输入物品的数量要大于 0：" + count);
         }
@@ -29,6 +39,7 @@ public final class ItemIngredient<S> {
         this.custom = custom;
         this.count = count;
         this.description = description;
+        this.examples = examples;
     }
 
     /** 矿物词典名下的任意物品 */
@@ -53,6 +64,13 @@ public final class ItemIngredient<S> {
         return new ItemIngredient<>(null, null, 0, test, count, description);
     }
 
+    /** 同上，再给出这种配料的例子（如 CraftTweaker 配料能列出的物品），JEI 显示用；用到时才取 */
+    public static <S> ItemIngredient<S> custom(Predicate<S> test, int count, String description, Supplier<List<S>> examples) {
+        Objects.requireNonNull(test, "test");
+        Objects.requireNonNull(examples, "examples");
+        return new ItemIngredient<>(null, null, 0, test, count, description, examples);
+    }
+
     /** 是不是这种物品（不看数量） */
     public boolean matchesType(S stack, StackFacts<S> facts) {
         if (stack == null || facts.isEmpty(stack)) {
@@ -75,6 +93,25 @@ public final class ItemIngredient<S> {
     /** 每次消耗的数量 */
     public int count() {
         return count;
+    }
+
+    /** 具体物品的注册名；不是具体物品配料时为 null */
+    public String itemId() {
+        return itemId;
+    }
+
+    /** 具体物品的元数据（{@link #ANY_META} 为任意）；不是具体物品配料时不看 */
+    public int meta() {
+        return meta;
+    }
+
+    /** 调用方给的判断配料的例子；别的配料、没给例子时为空 */
+    public List<S> examples() {
+        if (examples == null) {
+            return Collections.emptyList();
+        }
+        List<S> list = examples.get();
+        return list == null ? Collections.<S>emptyList() : list;
     }
 
     /** 矿物词典名；不是矿物词典配料时为 null */

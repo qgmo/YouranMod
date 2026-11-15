@@ -118,7 +118,9 @@ public final class CannerReactionTweaker {
             ingredient = ItemIngredient.ore(((IOreDictEntry) item).getName(), item.getAmount());
         } else {
             IIngredient one = item.amount(1);
-            ingredient = ItemIngredient.custom(stack -> one.matches(CraftTweakerMC.getIItemStack(stack)), item.getAmount(), item.toCommandString());
+            int count = item.getAmount();
+            ingredient = ItemIngredient.custom(stack -> one.matches(CraftTweakerMC.getIItemStack(stack)), count, item.toCommandString(),
+                    () -> examples(one, count));
         }
         ReactionItem out = null;
         if (outputItem != null) {
@@ -127,5 +129,19 @@ public final class CannerReactionTweaker {
         }
         return new FluidItemReaction<>(input.getName(), input.getAmount(), ingredient,
                 output == null ? null : output.getName(), output == null ? 0 : output.getAmount(), out);
+    }
+
+    /** CraftTweaker 配料能列出的物品（JEI 显示装罐机反应配方用），数量改成每次消耗的数量 */
+    static java.util.List<ItemStack> examples(IIngredient ingredient, int count) {
+        java.util.List<ItemStack> stacks = new java.util.ArrayList<>();
+        for (IItemStack s : ingredient.getItems()) {
+            ItemStack stack = CraftTweakerMC.getItemStack(s);
+            if (!stack.isEmpty()) {
+                stack = stack.copy();
+                stack.setCount(count);
+                stacks.add(stack);
+            }
+        }
+        return stacks;
     }
 }
