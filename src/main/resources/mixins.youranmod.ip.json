@@ -9,6 +9,9 @@
 		"DistillationRecipeMixin",
 		"EntitySpeedboatMixin",
 		"IpEventHandlerMixin",
+		"IPSaveDataMixin",
+		"OilWorldInfoMixin",
+		"PumpjackHandlerMixin",
 		"TileEntityDistillationTowerMixin"
 	],
 	"client": [],
