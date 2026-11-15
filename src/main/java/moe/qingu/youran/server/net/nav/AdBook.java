@@ -165,6 +165,8 @@ final class AdBook {
     private final Listener listener;
     private final Map<Integer, Ad> ads = new LinkedHashMap<>();
     private final Map<UUID, Ban> bans = new LinkedHashMap<>();
+    /** 帐号设置“操作前必须验证身份”打开了的玩家（服主 11-15；默认关闭） */
+    private final java.util.Set<UUID> verify = new java.util.LinkedHashSet<>();
     private int nextId = 1;
 
     AdBook(AdRules rules, Listener listener) {
@@ -470,6 +472,16 @@ final class AdBook {
         return true;
     }
 
+    synchronized boolean verifyRequired(UUID player) {
+        return verify.contains(player);
+    }
+
+    synchronized void setVerifyRequired(UUID player, boolean on) {
+        if (on ? verify.add(player) : verify.remove(player)) {
+            listener.changed(this);
+        }
+    }
+
     synchronized void ban(UUID player, String name, String reason, String by, long nowMs) {
         bans.put(player, new Ban(player, name, reason, by, nowMs));
         listener.changed(this);
@@ -551,6 +563,11 @@ final class AdBook {
             bl.add(j);
         }
         o.add("bans", bl);
+        JsonArray vl = new JsonArray();
+        for (UUID u : verify) {
+            vl.add(u.toString());
+        }
+        o.add("verify", vl);
         return o;
     }
 
@@ -558,6 +575,16 @@ final class AdBook {
     synchronized void load(JsonObject o, List<String> problems) {
         ads.clear();
         bans.clear();
+        verify.clear();
+        if (o.has("verify")) {
+            for (JsonElement e : o.getAsJsonArray("verify")) {
+                try {
+                    verify.add(UUID.fromString(e.getAsString()));
+                } catch (RuntimeException ex) {
+                    problems.add("跳过一条读不了的帐号设置：" + ex);
+                }
+            }
+        }
         nextId = o.has("next_id") ? o.get("next_id").getAsInt() : 1;
         if (o.has("ads")) {
             for (JsonElement e : o.getAsJsonArray("ads")) {

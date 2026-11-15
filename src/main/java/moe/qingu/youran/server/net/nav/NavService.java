@@ -1,7 +1,10 @@
 package moe.qingu.youran.server.net.nav;
 
 import moe.qingu.youran.api.image.DyePng;
+import moe.qingu.youran.api.network.ConfirmRequest;
 import moe.qingu.youran.api.network.Ipv6Address;
+import moe.qingu.youran.api.network.idyr.IdYrClient;
+import moe.qingu.youran.api.network.idyr.IdYrException;
 import moe.qingu.youran.api.network.http.HttpRequest;
 import moe.qingu.youran.api.network.http.HttpResponse;
 import moe.qingu.youran.server.net.service.captcha.SourceLimiter;
@@ -22,6 +25,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -32,10 +38,12 @@ import java.util.regex.Pattern;
  * 180.yr            GET /  主页；GET /s?q=  搜索；GET /logo.png；GET /ad/编号.png（只给在播的）
  * platform.180.yr   GET /  价格与我的广告；GET|POST /buy  投放；GET /ad/编号  一条广告；POST /ad/编号/again  用同样的内容重新下单；
  *                   GET|POST /report  举报；GET /admin、POST /admin/remove、/admin/ban、/admin/unban  管理；
- *                   GET /login、/login/callback、POST /logout  用 id.yr 游戏角色一键登录
- * help.180.yr       GET /、/home、/ads、/rules、/canvas
+ *                   GET /login、/login/callback、POST /logout  用 id.yr 游戏角色一键登录；
+ *                   POST /account/security  打开、关闭“操作前必须验证身份”；GET /verified/编号  id.yr 验证身份后跳回来
+ * help.180.yr       GET /、/home、/ads、/rules、/canvas、/verify
  * </pre>
  * 登录是 Cookie {@code yr180}（只在 platform.180.yr 上；跟着电脑走，同 pay.yr）。坐在电脑前的人就能用这台电脑上登录着的帐号（服主 11-15）。
+ * 帐号开了“操作前必须验证身份”时，投放、重新下单、管理操作前先请 id.yr 验证身份（只有登录的角色本人同意才做）；打开、关闭这一项本身总要验证身份。
  */
 final class NavService {
     static final Logger LOG = LogManager.getLogger("YouranMod");
@@ -49,8 +57,14 @@ final class NavService {
     static final int MAX_LOGINS = 512;
     static final int MAX_BODY = 96 * 1024;
     static final int SEARCH_MAX = 30;
+    /** 等验证身份的操作最多记几个、多久（id.yr 的请求 2 分钟内要打开、确认框 1 分钟） */
+    static final int MAX_GATES = 512;
+    static final long GATE_TTL = 5 * 60_000L;
+    /** 登录时向 id.yr 要的能力 */
+    static final String SCOPE = "verify";
     private static final Pattern AD_IMG = Pattern.compile("/ad/([0-9]{1,9})\\.png");
     private static final Pattern AD_PAGE = Pattern.compile("/ad/([0-9]{1,9})(/again)?");
+    private static final Pattern GATE_PAGE = Pattern.compile("/verified/(g_[A-Za-z0-9_-]{16,40})");
 
     /** 要动游戏、查 pay.yr 的事（实现在 {@link NavServer}） */
     interface Env {
@@ -89,15 +103,43 @@ final class NavService {
         final String name;
         final String csrf;
         final long created;
+        /** id.yr 的访问令牌（验证身份用）、什么时候过期；登录用的协议（client_id 的协议） */
+        final String accessToken;
+        final long tokenExpires;
+        final String scheme;
         volatile long lastSeen;
 
-        Session(String id, UUID player, String name, String csrf, long now) {
+        Session(String id, UUID player, String name, String csrf, long now, String accessToken, long tokenExpires, String scheme) {
             this.id = id;
             this.player = player;
             this.name = name;
             this.csrf = csrf;
             this.created = now;
             this.lastSeen = now;
+            this.accessToken = accessToken;
+            this.tokenExpires = tokenExpires;
+            this.scheme = scheme;
+        }
+    }
+
+    /**
+     * 一个等 id.yr 验证身份的操作：通过了照原样做（{@link #action}），没通过回原来的页面、填的原样带回（{@link #refused}）。
+     */
+    static final class Gate {
+        final String id;
+        final String sessionId;
+        final long created;
+        final Supplier<CompletableFuture<HttpResponse>> action;
+        final Function<String, HttpResponse> refused;
+        volatile String confirmId;
+        final AtomicBoolean checking = new AtomicBoolean();
+
+        Gate(String id, String sessionId, long created, Supplier<CompletableFuture<HttpResponse>> action, Function<String, HttpResponse> refused) {
+            this.id = id;
+            this.sessionId = sessionId;
+            this.created = created;
+            this.action = action;
+            this.refused = refused;
         }
     }
 
@@ -121,12 +163,13 @@ final class NavService {
     private final AdStore store;
     private final NavDirectory directory;
     private final Env env;
-    private final NavIdClient id;
+    private final IdYrClient id;
     private final byte[] logo;
     private final long idleMs;
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
     private final Map<String, Login> logins = new ConcurrentHashMap<>();
+    private final Map<String, Gate> gates = new ConcurrentHashMap<>();
     private final SourceLimiter pageLimit = new SourceLimiter(10, 40, 8192);
     private final SourceLimiter loginLimit = new SourceLimiter(0.5, 10, 8192);
     private final SourceLimiter buyLimit = new SourceLimiter(0.2, 5, 8192);
@@ -134,7 +177,7 @@ final class NavService {
     /** 举报过的（来源 + 广告），同一来源同一条只记一次 */
     private final Set<String> reported = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
-    NavService(AdBook book, AdStore store, NavDirectory directory, Env env, NavIdClient id, byte[] logo, long idleMs) {
+    NavService(AdBook book, AdStore store, NavDirectory directory, Env env, IdYrClient id, byte[] logo, long idleMs) {
         this.book = book;
         this.store = store;
         this.directory = directory;
@@ -285,9 +328,15 @@ final class NavService {
             case "/admin/ban":
                 return post ? adminBan(r, s, scheme, now) : done(notAllowed("POST"));
             case "/admin/unban":
-                return done(post ? adminUnban(r, s, scheme) : notAllowed("POST"));
+                return post ? adminUnban(r, s, scheme, now) : done(notAllowed("POST"));
+            case "/account/security":
+                return post ? security(r, s, scheme, now) : done(notAllowed("POST"));
             default:
                 break;
+        }
+        Matcher g = GATE_PAGE.matcher(r.path);
+        if (g.matches()) {
+            return get ? verified(s, scheme, g.group(1)) : done(notAllowed("GET"));
         }
         Matcher m = AD_IMG.matcher(r.path);
         if (m.matches()) {
@@ -346,6 +395,9 @@ final class NavService {
                 b.append("<p class=\"err\">你已被禁止投放广告。</p>");
             }
             b.append("<h3>我的广告</h3>");
+            if ("security_on".equals(msg) || "security_off".equals(msg)) {
+                b.insert(0, "<p class=\"ok\">" + ("security_on".equals(msg) ? "已打开“操作前必须验证身份”。" : "已关闭“操作前必须验证身份”。") + "</p>");
+            }
             List<AdBook.Ad> mine = book.byOwner(s.player);
             if (mine.isEmpty()) {
                 b.append("<p class=\"gray\">还没有。</p>");
@@ -357,6 +409,12 @@ final class NavService {
                 }
                 b.append("</table>");
             }
+            boolean on = book.verifyRequired(s.player);
+            b.append("<h3>帐号设置</h3><form method=\"post\" action=\"/account/security\"><div><input type=\"hidden\" name=\"csrf\" value=\"")
+                    .append(NavPages.esc(s.csrf)).append("\" /><input type=\"hidden\" name=\"verify\" value=\"").append(on ? "0" : "1").append("\" />")
+                    .append("操作前必须验证身份：<b>").append(on ? "已打开" : "已关闭").append("</b> <input type=\"submit\" value=\"").append(on ? "关闭" : "打开")
+                    .append("\" /> <span class=\"small gray\">打开后投放、管理前要你本人确认。<a href=\"").append(NavPages.esc(NavPages.url(scheme, HELP, "/verify")))
+                    .append("\">说明</a></span></div></form>\n");
         }
         return frame("广告平台", s, scheme, b.toString());
     }
@@ -383,7 +441,7 @@ final class NavService {
             return redirect("/");
         }
         if (s == null) {
-            return redirect("/login?next=" + NavIdClient.enc("/buy?slot=" + slot.code));
+            return redirect("/login?next=" + IdYrClient.enc("/buy?slot=" + slot.code));
         }
         return ok(buyPage(s, scheme, slot, null, "1", "", "", ""));
     }
@@ -459,7 +517,11 @@ final class NavService {
         } catch (AdInput.Bad e) {
             return done(page(422, buyPage(s, scheme, slot, e.getMessage(), days, link, text, echo)));
         }
-        return order(s, scheme, slot, d, okText, okLink, png, now, p -> page(p.status, buyPage(s, scheme, slot, p.message, days, link, text, echo)));
+        byte[] img = png;
+        return gated(r, s, "投放" + slot.label, java.util.Arrays.asList(d + " 游戏天，" + (book.rules().emeraldsPerDay.get(slot) * (long) d) + " 绿宝石", "链接：" + okLink),
+                () -> order(s, scheme, slot, d, okText, okLink, img, System.currentTimeMillis(),
+                        p -> page(p.status, buyPage(s, scheme, slot, p.message, days, link, text, echo))),
+                why -> page(403, buyPage(s, scheme, slot, why + "没有下单。填的内容都在，可以再提交。", days, link, text, echo)));
     }
 
     /** 下单失败时给什么页面 */
@@ -509,7 +571,7 @@ final class NavService {
     private HttpResponse adPage(Session s, String scheme, int adId, String msg) {
         AdBook.Ad a = book.get(adId);
         if (s == null) {
-            return redirect("/login?next=" + NavIdClient.enc("/ad/" + adId));
+            return redirect("/login?next=" + IdYrClient.enc("/ad/" + adId));
         }
         if (a == null || !canSee(s, a)) {
             return page(404, frame("没有这条广告", s, scheme, "<p>没有这条广告。<a href=\"/\">回首页</a></p>"));
@@ -570,8 +632,11 @@ final class NavService {
         if (!buyLimit.tryAcquire(s.player.toString(), now)) {
             return done(page(429, frame("太快了", s, scheme, "<p class=\"err\">提交太快了，过一会再试。</p>")));
         }
-        return order(s, scheme, a.slot, a.days, a.text, a.link, png, now,
-                p -> page(p.status, frame("不能重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(p.message) + "</p>")));
+        byte[] img = png;
+        return gated(r, s, "重新下单广告 #" + a.id, java.util.Arrays.asList(a.slot.label + "，" + a.days + " 游戏天", "链接：" + a.link),
+                () -> order(s, scheme, a.slot, a.days, a.text, a.link, img, System.currentTimeMillis(),
+                        p -> page(p.status, frame("不能重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(p.message) + "</p>"))),
+                why -> page(403, frame("没有重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "</p><p><a href=\"/ad/" + a.id + "\">回广告 #" + a.id + "</a></p>")));
     }
 
     // ---------------------------------------------------------------- 举报
@@ -736,7 +801,7 @@ final class NavService {
         }
         AdBook.Ad a = parseAd(f.get("ad"));
         if (a == null || (a.state != AdBook.State.LIVE && a.state != AdBook.State.QUEUED)) {
-            return done(redirect("/admin?msg=" + NavIdClient.enc("这条广告已经不在了")));
+            return done(redirect("/admin?msg=" + IdYrClient.enc("这条广告已经不在了")));
         }
         String reason;
         try {
@@ -745,14 +810,15 @@ final class NavService {
             return done(page(422, frame("管理", s, scheme, "<p class=\"err\">" + NavPages.esc(e.getMessage()) + "</p>")));
         }
         String mode = nz(f.get("refund"));
-        return takeDown(a, s, mode, reason).handle((done, e) -> {
-            if (e != null) {
-                Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
-                return page(502, frame("管理", s, scheme, "<p class=\"err\">没有下架：退款失败（" + NavPages.esc(c.getMessage()) + "）。可以选“不退”再下架。</p>"
-                        + "<p><a href=\"/admin\">回管理页</a></p>"));
-            }
-            return redirect("/admin?msg=" + NavIdClient.enc(done));
-        });
+        return gated(r, s, "下架广告 #" + a.id, java.util.Arrays.asList("投放者：" + a.ownerName, "退款：" + ("full".equals(mode) ? "全退" : "unused".equals(mode) ? "退没播的" : "不退")),
+                () -> takeDown(a, s, mode, reason).handle((done, e) -> {
+                    if (e != null) {
+                        Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
+                        return page(502, frame("管理", s, scheme, "<p class=\"err\">没有下架：退款失败（" + NavPages.esc(c.getMessage()) + "）。可以选“不退”再下架。</p>"
+                                + "<p><a href=\"/admin\">回管理页</a></p>"));
+                    }
+                    return redirect("/admin?msg=" + IdYrClient.enc(done));
+                }), why -> adminRefused(s, scheme, why + "没有下架 #" + a.id));
     }
 
     /** 先退款（在主线程上），退好了再下架；完成时给一句结果 */
@@ -783,10 +849,16 @@ final class NavService {
         } catch (AdInput.Bad e) {
             return done(page(422, frame("管理", s, scheme, "<p class=\"err\">" + NavPages.esc(e.getMessage()) + "</p>")));
         }
-        book.ban(a.owner, a.ownerName, reason, s.name, now);
+        boolean all = "1".equals(f.get("remove_all"));
+        return gated(r, s, "封禁投放者 " + a.ownerName, java.util.Collections.singletonList(all ? "同时下架他的广告（退没播的）" : "不下架已有的广告"),
+                () -> ban(a, s, reason, all), why -> adminRefused(s, scheme, why + "没有封禁 " + a.ownerName));
+    }
+
+    private CompletableFuture<HttpResponse> ban(AdBook.Ad a, Session s, String reason, boolean all) {
+        book.ban(a.owner, a.ownerName, reason, s.name, System.currentTimeMillis());
         LOG.info("180.yr：{} 封禁了投放者 {}：{}", s.name, a.ownerName, reason);
-        if (!"1".equals(f.get("remove_all"))) {
-            return done(redirect("/admin?msg=" + NavIdClient.enc("已封禁 " + a.ownerName)));
+        if (!all) {
+            return done(redirect("/admin?msg=" + IdYrClient.enc("已封禁 " + a.ownerName)));
         }
         CompletableFuture<Integer> chain = CompletableFuture.completedFuture(0);
         for (AdBook.Ad x : book.byOwner(a.owner)) {
@@ -797,29 +869,144 @@ final class NavService {
         return chain.handle((n, e) -> {
             if (e != null) {
                 Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
-                return redirect("/admin?msg=" + NavIdClient.enc("已封禁 " + a.ownerName + "，但有广告没下架：" + c.getMessage()));
+                return redirect("/admin?msg=" + IdYrClient.enc("已封禁 " + a.ownerName + "，但有广告没下架：" + c.getMessage()));
             }
-            return redirect("/admin?msg=" + NavIdClient.enc("已封禁 " + a.ownerName + "，下架 " + n + " 条"));
+            return redirect("/admin?msg=" + IdYrClient.enc("已封禁 " + a.ownerName + "，下架 " + n + " 条"));
         });
     }
 
-    private HttpResponse adminUnban(HttpRequest r, Session s, String scheme) {
+    private CompletableFuture<HttpResponse> adminUnban(HttpRequest r, Session s, String scheme, long now) {
         Map<String, String> f = r.form();
         HttpResponse bad = adminCheck(s, f, scheme);
         if (bad != null) {
-            return bad;
+            return done(bad);
         }
+        UUID p;
         try {
-            UUID p = UUID.fromString(nz(f.get("player")));
-            AdBook.Ban ban = book.ban(p);
-            if (book.unban(p)) {
-                LOG.info("180.yr：{} 解封了投放者 {}", s.name, ban == null ? p : ban.name);
-                return redirect("/admin?msg=" + NavIdClient.enc("已解封 " + (ban == null ? p.toString() : ban.name)));
-            }
+            p = UUID.fromString(nz(f.get("player")));
         } catch (IllegalArgumentException ignored) {
-            // 写法不对：当作没有
+            return done(redirect("/admin"));
         }
-        return redirect("/admin");
+        AdBook.Ban ban = book.ban(p);
+        if (ban == null) {
+            return done(redirect("/admin"));
+        }
+        return gated(r, s, "解封投放者 " + ban.name, java.util.Collections.<String>emptyList(), () -> {
+            if (book.unban(p)) {
+                LOG.info("180.yr：{} 解封了投放者 {}", s.name, ban.name);
+                return done(redirect("/admin?msg=" + IdYrClient.enc("已解封 " + ban.name)));
+            }
+            return done(redirect("/admin"));
+        }, why -> adminRefused(s, scheme, why + "没有解封 " + ban.name));
+    }
+
+    // ---------------------------------------------------------------- 操作前必须验证身份
+
+    private HttpResponse adminRefused(Session s, String scheme, String why) {
+        return page(403, frame("管理", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "。点浏览器的“后退”回去，填的理由还在。</p><p><a href=\"/admin\">回管理页</a></p>"));
+    }
+
+    /**
+     * 帐号开了“操作前必须验证身份”时：先请 id.yr 验证身份（只有登录的角色本人同意才通过），通过了才做 {@code action}；
+     * 没开时直接做。建请求失败、没通过时给 {@code refused}（一句原因）。
+     */
+    private CompletableFuture<HttpResponse> gated(HttpRequest r, Session s, String title, List<String> items,
+                                                  Supplier<CompletableFuture<HttpResponse>> action, Function<String, HttpResponse> refused) {
+        if (!book.verifyRequired(s.player)) {
+            return action.get();
+        }
+        return verify(r, s, title, items, action, refused);
+    }
+
+    /** 请 id.yr 验证身份，把浏览器 303 过去；回来时（{@code /verified/编号}）通过了做 {@code action} */
+    private CompletableFuture<HttpResponse> verify(HttpRequest r, Session s, String title, List<String> items,
+                                                   Supplier<CompletableFuture<HttpResponse>> action, Function<String, HttpResponse> refused) {
+        if (id == null) {
+            return done(refused.apply("验证不了身份（id.yr 没开）。"));
+        }
+        long now = System.currentTimeMillis();
+        sweepGates(now);
+        if (gates.size() >= MAX_GATES) {
+            return done(refused.apply("现在太忙，请稍后再试。"));
+        }
+        Gate g = new Gate("g_" + random(18), s.id, now, action, refused);
+        gates.put(g.id, g);
+        String back = s.scheme + "://" + PLATFORM + "/verified/" + g.id;
+        List<String> lines = new ArrayList<>();
+        for (String i : items) {
+            lines.add(i.codePointCount(0, i.length()) > ConfirmRequest.MAX_ITEM ? i.substring(0, i.offsetByCodePoints(0, ConfirmRequest.MAX_ITEM - 1)) + "…" : i);
+        }
+        String t = title.codePointCount(0, title.length()) > ConfirmRequest.MAX_TITLE ? title.substring(0, title.offsetByCodePoints(0, ConfirmRequest.MAX_TITLE - 1)) + "…" : title;
+        return id.ask(s.accessToken, IdYrClient.Ask.verify(t, lines, ConfirmRequest.Purpose.ACTION, r.remoteAddress, back, g.id)).handle((ticket, e) -> {
+            if (ticket == null) {
+                gates.remove(g.id);
+                return refused.apply(askError(e));
+            }
+            g.confirmId = ticket.id;
+            return redirect(ticket.url);
+        });
+    }
+
+    private String askError(Throwable e) {
+        Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
+        if (c instanceof IdYrException) {
+            IdYrException x = (IdYrException) c;
+            LOG.warn("180.yr：向 {} 建验证请求失败：{}", id.domain(), x.getMessage());
+            return x.tokenExpired() ? "登录过期了，请重新登录。" : x.insufficientScope() ? "登录时没有授权“验证身份”，请退出后重新登录。" : "验证不了身份（" + x.code + "）。";
+        }
+        LOG.warn("180.yr：向 {} 建验证请求失败：{}", id == null ? "id.yr" : id.domain(), c == null ? "?" : c.toString());
+        return "连不上 id.yr，请稍后再试。";
+    }
+
+    /** id.yr 验证完跳回来：向 id.yr 核对（网址里带的结果不算数），通过了照原样做 */
+    private CompletableFuture<HttpResponse> verified(Session s, String scheme, String gateId) {
+        Gate g = gates.get(gateId);
+        if (g == null || s == null || !g.sessionId.equals(s.id) || g.confirmId == null) {
+            return done(page(404, frame("验证身份", s, scheme, "<p class=\"err\">这次验证已经结束或过期了，请回去重新操作。</p><p><a href=\"/\">回首页</a></p>")));
+        }
+        if (!g.checking.compareAndSet(false, true)) {
+            return done(waitingGate(s, scheme, g));
+        }
+        return id.result(s.accessToken, g.confirmId).thenCompose(out -> {
+            if (out.status == IdYrClient.Outcome.Status.PENDING) {
+                g.checking.set(false);
+                return done(waitingGate(s, scheme, g));
+            }
+            gates.remove(g.id);
+            if (out.approved()) {
+                return g.action.get();
+            }
+            return done(g.refused.apply(out.text(true)));
+        }).exceptionally(e -> {
+            gates.remove(g.id);
+            return g.refused.apply(askError(e));
+        });
+    }
+
+    private HttpResponse waitingGate(Session s, String scheme, Gate g) {
+        return ok(NavPages.frame("验证身份", "广告平台", s.name, s.csrf, isAdmin(s), scheme, "<h1>等验证结果</h1><p>要在游戏弹出的确认框里验证身份。</p>"
+                + "<p><a href=\"/verified/" + g.id + "\">刷新</a></p>", 2, "/verified/" + g.id));
+    }
+
+    private void sweepGates(long now) {
+        gates.values().removeIf(g -> now - g.created > GATE_TTL);
+    }
+
+    /** 打开、关闭“操作前必须验证身份”：两个方向都要验证身份（只有帐号本人能改） */
+    private CompletableFuture<HttpResponse> security(HttpRequest r, Session s, String scheme, long now) {
+        if (s == null) {
+            return done(redirect("/login?next=/"));
+        }
+        if (!s.csrf.equals(r.form().get("csrf"))) {
+            return done(page(403, frame("页面过期了", s, scheme, "<p class=\"err\">页面过期了，请回去刷新后再试。</p>")));
+        }
+        boolean on = "1".equals(r.form().get("verify"));
+        return verify(r, s, (on ? "打开" : "关闭") + "操作前验证身份", java.util.Arrays.asList("platform.180.yr 帐号：" + s.name,
+                on ? "打开后投放广告、管理前要 " + s.name + " 本人确认" : "关闭后，坐在这台电脑前的人就能操作"), () -> {
+            book.setVerifyRequired(s.player, on);
+            LOG.info("180.yr：{} {}了“操作前必须验证身份”", s.name, on ? "打开" : "关闭");
+            return done(redirect("/?msg=" + (on ? "security_on" : "security_off")));
+        }, why -> page(403, frame("没有改", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "设置没有改。</p><p><a href=\"/\">回首页</a></p>")));
     }
 
     // ---------------------------------------------------------------- 登录（同 pay.yr）
@@ -839,7 +1026,7 @@ final class NavService {
         String state = random(24);
         String verifier = random(48);
         logins.put(state, new Login(verifier, scheme, next, r.remoteAddress, now));
-        return redirect(id.authorizeUrl(scheme, state, verifier));
+        return redirect(id.authorizeUrl(scheme, state, verifier, SCOPE));
     }
 
     private CompletableFuture<HttpResponse> callback(HttpRequest r, long now) {
@@ -855,7 +1042,7 @@ final class NavService {
         if (!id.issuerOk(q.get("iss"))) {
             return done(page(400, frame("登录失败", null, scheme, "<p class=\"err\">登录服务对不上。</p>")));
         }
-        String again = "<p><a href=\"/login?next=" + NavPages.esc(NavIdClient.enc(l.next)) + "\">重新登录</a></p>";
+        String again = "<p><a href=\"/login?next=" + NavPages.esc(IdYrClient.enc(l.next)) + "\">重新登录</a></p>";
         String err = q.get("error");
         if (err != null) {
             return done(page(400, frame("登录失败", null, scheme, "<p class=\"err\">" + NavPages.esc(loginError(err, q.get("error_description"))) + "</p>" + again)));
@@ -873,7 +1060,7 @@ final class NavService {
             if (sessions.size() >= MAX_SESSIONS) {
                 return page(503, frame("太忙了", null, scheme, "<p class=\"err\">现在太忙，请稍后再试。</p>"));
             }
-            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis());
+            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis(), who.accessToken, who.expiresAt, l.scheme);
             sessions.put(s.id, s);
             LOG.info("180.yr：{} 登录了广告平台（来源 {}）", who.name, r.remoteAddress);
             return redirect(l.next).withHeader("Set-Cookie", cookie(s.id, l.scheme.equals("https"), -1));
@@ -922,7 +1109,7 @@ final class NavService {
                 if (s == null) {
                     return null;
                 }
-                if (now - s.lastSeen > idleMs || now - s.created > SESSION_MAX) {
+                if (now - s.lastSeen > idleMs || now - s.created > SESSION_MAX || now >= s.tokenExpires) {
                     sessions.remove(s.id);
                     return null;
                 }
@@ -935,7 +1122,7 @@ final class NavService {
 
     /** 测试用：直接放一个登录 */
     Session addSession(UUID player, String name, long now) {
-        Session s = new Session(random(32), player, name, random(24), now);
+        Session s = new Session(random(32), player, name, random(24), now, "test-token", Long.MAX_VALUE, "http");
         sessions.put(s.id, s);
         return s;
     }
@@ -955,7 +1142,8 @@ final class NavService {
             return;
         }
         logins.values().removeIf(l -> now - l.created > LOGIN_TTL);
-        sessions.values().removeIf(s -> now - s.lastSeen > idleMs || now - s.created > SESSION_MAX);
+        sessions.values().removeIf(s -> now - s.lastSeen > idleMs || now - s.created > SESSION_MAX || now >= s.tokenExpires);
+        sweepGates(now);
     }
 
     private String random(int bytes) {

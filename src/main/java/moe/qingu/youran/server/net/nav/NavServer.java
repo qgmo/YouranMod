@@ -140,8 +140,8 @@ public final class NavServer implements NavService.Env {
         }
         this.idAvailable = idAvailable;
         https = ctx.tls() != null;
-        NavIdClient id = new NavIdClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), NavConfig.idDomain.trim().toLowerCase(Locale.ROOT),
-                https, NavService.PLATFORM);
+        moe.qingu.youran.api.network.idyr.IdYrClient id = new moe.qingu.youran.api.network.idyr.IdYrClient(ctx.stack(),
+                new DnsResolver(ctx.stack(), resolver), NavConfig.idDomain, https, NavService.PLATFORM);
         NavService service = new NavService(book, store, dir, this, id, logo(), NavConfig.sessionIdleMinutes * 60_000L);
         HttpServer.Options o = new HttpServer.Options().maxBodyBytes(NavService.MAX_BODY).handlerTimeoutMillis(20_000)
                 .errorPages(st -> HttpResponse.xhtml(st, NavPages.frame("出错了", "", null, null, false, "http",

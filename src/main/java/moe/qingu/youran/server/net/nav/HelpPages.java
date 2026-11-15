@@ -12,6 +12,7 @@ final class HelpPages {
             {"/ads", "投放广告"},
             {"/rules", "广告规则与审核"},
             {"/report", "举报广告"},
+            {"/verify", "操作前必须验证身份"},
             {"/canvas", "画板控件（给网站作者）"},
     };
 
@@ -33,6 +34,8 @@ final class HelpPages {
                 return wrap(scheme, "举报广告", report());
             case "/canvas":
                 return wrap(scheme, "画板控件", canvas());
+            case "/verify":
+                return wrap(scheme, "操作前必须验证身份", verify());
             default:
                 return null;
         }
@@ -51,6 +54,15 @@ final class HelpPages {
     private static String wrap(String scheme, String title, String body) {
         return NavPages.frame(title, "帮助中心", null, null, false, scheme,
                 "<p class=\"small\"><a href=\"/\">帮助中心</a> &gt; " + NavPages.esc(title) + "</p>\n<h1>" + NavPages.esc(title) + "</h1>\n" + body, 0, null);
+    }
+
+    private static String verify() {
+        return "<p>登录着的电脑，谁坐在前面谁就能用你的帐号投放广告（和真电脑一样，用完请退出）。不想这样，就在 platform.180.yr 首页的“帐号设置”里"
+                + "打开“操作前必须验证身份”。</p>\n"
+                + "<h3>打开以后</h3>\n<p>投放广告、重新下单，以及管理员的下架、封禁、解封之前，游戏会弹出 id.yr 的确认框“确认你是 X”。只有你本人同意才继续；"
+                + "别人坐在前面同意了也不算，填的内容不会丢。</p>\n"
+                + "<h3>打开、关闭</h3>\n<p>两样都要你本人验证身份，别人关不掉。默认关闭。</p>\n"
+                + "<p class=\"gray small\">验证身份由 id.yr 做，180 只知道通过了没有。登录时要同意“验证身份”这一项。</p>\n";
     }
 
     private static String home() {

@@ -6,6 +6,8 @@ import moe.qingu.youran.api.network.SiteInfo;
 import moe.qingu.youran.api.network.http.HttpHeaders;
 import moe.qingu.youran.api.network.http.HttpRequest;
 import moe.qingu.youran.api.network.http.HttpResponse;
+import moe.qingu.youran.api.network.idyr.IdYrClient;
+import moe.qingu.youran.api.network.idyr.IdYrException;
 import org.junit.jupiter.api.Test;
 
 import java.net.URLEncoder;
@@ -110,6 +112,46 @@ class NavServiceTest {
     final AdBook book = new AdBook(new AdRules(1, 2, 2, 2, 4, 2, 1, 1, 2, 10), b -> { });
     final AdStore store;
     final NavService service;
+    final NavDirectory directory;
+
+    /** 假的 id.yr：记下建的验证请求，结果由测试定 */
+    static final class FakeId extends IdYrClient {
+        final List<IdYrClient.Ask> asks = new ArrayList<>();
+        final List<String> checked = new ArrayList<>();
+        IdYrClient.Outcome next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, "fd00::1:2");
+        RuntimeException failAsk;
+
+        FakeId() {
+            super(null, null, "id.yr", false, NavService.PLATFORM);
+        }
+
+        @Override
+        public CompletableFuture<IdYrClient.Ticket> ask(String accessToken, IdYrClient.Ask ask) {
+            CompletableFuture<IdYrClient.Ticket> f = new CompletableFuture<>();
+            if (failAsk != null) {
+                f.completeExceptionally(failAsk);
+                return f;
+            }
+            asks.add(ask);
+            f.complete(new IdYrClient.Ticket("cr_" + asks.size(), "http://id.yr/confirm?request=cr_" + asks.size(), "secret"));
+            return f;
+        }
+
+        @Override
+        public CompletableFuture<IdYrClient.Outcome> result(String accessToken, String requestId) {
+            checked.add(requestId);
+            return CompletableFuture.completedFuture(next);
+        }
+
+        /** 最近一次请求跳回的路径（/verified/编号） */
+        String back() {
+            String u = asks.get(asks.size() - 1).redirectUri;
+            return u.substring(u.indexOf("/verified/"));
+        }
+    }
+
+    final FakeId fakeId = new FakeId();
+    final NavService gatedService;
 
     NavServiceTest() throws java.io.IOException {
         env.book = book;
@@ -123,6 +165,8 @@ class NavServiceTest {
         NavDirectory d = NavDirectory.build(decls, new String[0], new String[0], new HashSet<>(Arrays.asList("minebay.yr", "pay.yr", "captcha.yr"))::contains,
                 new ArrayList<>());
         service = new NavService(book, store, d, env, null, new byte[]{1, 2, 3}, 600_000);
+        directory = d;
+        gatedService = new NavService(book, store, d, env, fakeId, new byte[]{1, 2, 3}, 600_000);
     }
 
     HttpResponse get(String host, String path, NavService.Session s) {
@@ -134,6 +178,10 @@ class NavServiceTest {
     }
 
     HttpResponse send(String method, String host, String path, String form, NavService.Session s, Ipv6Address from) {
+        return send(service, method, host, path, form, s, from);
+    }
+
+    HttpResponse send(NavService svc, String method, String host, String path, String form, NavService.Session s, Ipv6Address from) {
         HttpHeaders h = new HttpHeaders().add("Host", host);
         if (s != null) {
             h.add("Cookie", NavService.COOKIE + "=" + s.id);
@@ -144,7 +192,7 @@ class NavServiceTest {
             body = form.getBytes(StandardCharsets.US_ASCII);
         }
         HttpRequest r = new HttpRequest(method, path, "HTTP/1.1", h, body, from, 40000, Ipv6Address.parse("fd00::180"), 80, false);
-        return service.handle(r).join();
+        return svc.handle(r).join();
     }
 
     static String text(HttpResponse r) {
@@ -351,13 +399,123 @@ class NavServiceTest {
         for (Object[] p : new Object[][]{{"platform.180.yr", "/", null}, {"platform.180.yr", "/", s}, {"platform.180.yr", "/buy?slot=banner", s},
                 {"platform.180.yr", "/ad/1", s}, {"platform.180.yr", "/admin", root}, {"platform.180.yr", "/report?ad=1", null},
                 {"help.180.yr", "/", null}, {"help.180.yr", "/home", null}, {"help.180.yr", "/ads", null}, {"help.180.yr", "/rules", null},
-                {"help.180.yr", "/report", null}, {"help.180.yr", "/canvas", null}, {"180.yr", "/", null}}) {
+                {"help.180.yr", "/report", null}, {"help.180.yr", "/canvas", null}, {"help.180.yr", "/verify", null}, {"180.yr", "/", null}}) {
             HttpResponse r = get((String) p[0], (String) p[1], (NavService.Session) p[2]);
             assertEquals(200, r.status, p[0] + "" + p[1]);
             javax.xml.parsers.DocumentBuilderFactory f = javax.xml.parsers.DocumentBuilderFactory.newInstance();
             f.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
             f.newDocumentBuilder().parse(new java.io.ByteArrayInputStream(r.body));
         }
+    }
+
+    /** 打开“操作前必须验证身份”要验证身份；打开以后投放先验证，没通过不下单、填的原样带回，通过了照原样下单；结果只能用一次 */
+    @Test
+    void verifyBeforeBuy() throws Exception {
+        NavService.Session s = gatedService.addSession(alice, "Alice", System.currentTimeMillis());
+        assertTrue(text(send(gatedService, "GET", "platform.180.yr", "/", null, s, PC)).contains("操作前必须验证身份：<b>已关闭</b>"));
+        // 打开：要验证身份
+        HttpResponse r = send(gatedService, "POST", "platform.180.yr", "/account/security", "csrf=" + s.csrf + "&verify=1", s, PC);
+        assertEquals(303, r.status);
+        assertEquals("http://id.yr/confirm?request=cr_1", r.headers.get("Location"));
+        IdYrClient.Ask ask = fakeId.asks.get(0);
+        assertTrue(ask.verify, "改设置总是验证身份");
+        assertEquals("打开操作前验证身份", ask.title);
+        assertEquals(PC, ask.source, "只能在这台电脑上打开");
+        assertTrue(ask.redirectUri.startsWith("http://platform.180.yr/verified/g_"));
+        assertFalse(book.verifyRequired(alice), "还没验证");
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
+        assertEquals("/?msg=security_on", r.headers.get("Location"));
+        assertTrue(book.verifyRequired(alice));
+        assertEquals(Arrays.asList("cr_1"), fakeId.checked, "向 id.yr 核对了");
+        assertEquals(404, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC).status, "同一个结果不能再用");
+
+        // 投放：先验证；不是本人（id.yr 回 denied）→ 不下单，图和字原样带回
+        String img = squareImage();
+        String form = "csrf=" + s.csrf + "&slot=square&days=2&link=wood.yr&text=" + enc("好木头") + "&image=" + enc(img);
+        r = send(gatedService, "POST", "platform.180.yr", "/buy", form, s, PC);
+        assertEquals("http://id.yr/confirm?request=cr_2", r.headers.get("Location"));
+        assertTrue(env.orders.isEmpty(), "验证前不开单");
+        assertTrue(fakeId.asks.get(1).verify);
+        assertEquals("投放侧栏方块", fakeId.asks.get(1).title);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.DENIED, "denied", "fd00::1:2");
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
+        assertEquals(403, r.status);
+        assertTrue(text(r).contains("身份验证没有通过"), text(r));
+        assertTrue(text(r).contains("value=\"" + img + "\""), "画的图带回表单");
+        assertTrue(text(r).contains("value=\"好木头\""));
+        assertTrue(env.orders.isEmpty());
+        assertTrue(book.all().isEmpty(), "也没占位置");
+        // 再交一次，这回通过：照原样下单、跳到付款页
+        send(gatedService, "POST", "platform.180.yr", "/buy", form, s, PC);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, "fd00::1:2");
+        // 别的登录拿着这个地址没用
+        NavService.Session other = gatedService.addSession(admin, "Admin", System.currentTimeMillis());
+        assertEquals(404, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, other, PC).status);
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
+        assertEquals(303, r.status, text(r));
+        assertEquals("http://pay.yr/c/ord_1", r.headers.get("Location"));
+        assertEquals(Arrays.asList(1), env.orders);
+        assertEquals("http://wood.yr/", book.get(1).link);
+
+        // 还没确认完就回来：等结果（自动刷新），不做
+        send(gatedService, "POST", "platform.180.yr", "/buy", "csrf=" + s.csrf + "&slot=text&days=1&link=a.yr&text=hi", s, PC);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.PENDING, null, null);
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
+        assertEquals(200, r.status);
+        assertTrue(text(r).contains("等验证结果"));
+        assertEquals(1, env.orders.size());
+
+        // 建不了验证请求（登录过期）：不下单，填的带回
+        fakeId.failAsk = new java.util.concurrent.CompletionException(new IdYrException(401, "invalid_token", "过期"));
+        r = send(gatedService, "POST", "platform.180.yr", "/buy", "csrf=" + s.csrf + "&slot=text&days=1&link=a.yr&text=" + enc("再来"), s, PC);
+        assertEquals(403, r.status);
+        assertTrue(text(r).contains("登录过期了"));
+        assertTrue(text(r).contains("value=\"再来\""));
+        fakeId.failAsk = null;
+
+        // 关闭：也要验证身份；没通过就还开着
+        send(gatedService, "POST", "platform.180.yr", "/account/security", "csrf=" + s.csrf + "&verify=0", s, PC);
+        assertEquals("关闭操作前验证身份", fakeId.asks.get(fakeId.asks.size() - 1).title);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.DENIED, "denied", null);
+        assertEquals(403, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC).status);
+        assertTrue(book.verifyRequired(alice));
+        send(gatedService, "POST", "platform.180.yr", "/account/security", "csrf=" + s.csrf + "&verify=0", s, PC);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, null);
+        assertEquals("/?msg=security_off", send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC).headers.get("Location"));
+        assertFalse(book.verifyRequired(alice));
+        // 关了：投放直接去付款
+        int before = fakeId.asks.size();
+        r = send(gatedService, "POST", "platform.180.yr", "/buy", "csrf=" + s.csrf + "&slot=text&days=1&link=a.yr&text=hi", s, PC);
+        assertTrue(r.headers.get("Location").startsWith("http://pay.yr/c/"));
+        assertEquals(before, fakeId.asks.size());
+    }
+
+    /** 管理员开了“操作前必须验证身份”：下架、封禁前要验证；设置随广告账本存下来 */
+    @Test
+    void verifyBeforeAdmin() throws Exception {
+        NavService.Session root = gatedService.addSession(admin, "Admin", System.currentTimeMillis());
+        AdBook.Ad a = book.draft(AdSlot.BANNER, alice, "Alice", 4, "", "http://a.yr/", 0, 1);
+        book.paid(a, "pay_1", 0, 1);
+        book.setVerifyRequired(admin, true);
+        HttpResponse r = send(gatedService, "POST", "platform.180.yr", "/admin/remove", "csrf=" + root.csrf + "&ad=1&refund=none&reason=" + enc("违规"), root, PC);
+        assertEquals("http://id.yr/confirm?request=cr_1", r.headers.get("Location"));
+        assertEquals("下架广告 #1", fakeId.asks.get(0).title);
+        assertEquals(AdBook.State.LIVE, a.state);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.DENIED, "timeout", null);
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, root, PC);
+        assertEquals(403, r.status);
+        assertTrue(text(r).contains("超时") && text(r).contains("后退"), text(r));
+        assertEquals(AdBook.State.LIVE, a.state);
+        send(gatedService, "POST", "platform.180.yr", "/admin/remove", "csrf=" + root.csrf + "&ad=1&refund=none&reason=" + enc("违规"), root, PC);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, null);
+        assertEquals(303, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, root, PC).status);
+        assertEquals(AdBook.State.REMOVED, a.state);
+        // 存档往返
+        AdBook copy = new AdBook(book.rules(), b -> { });
+        copy.load(book.toJson(), new ArrayList<>());
+        assertTrue(copy.verifyRequired(admin));
+        assertFalse(copy.verifyRequired(alice));
+        assertTrue(text(get("help.180.yr", "/verify", null)).contains("确认你是"));
     }
 
     @Test
