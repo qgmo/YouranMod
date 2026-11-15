@@ -76,6 +76,7 @@ item.pvc_sheet.name=PVC Sheet
 item.polyethylene_lump.name=Polyethylene Lump
 item.floppy_disk.name=5.25" Floppy Disk
 item.silicon_dust.name=Silicon Dust
+item.borosilicate_slag.name=Borosilicate Slag
 fluid.trichlorosilane=Trichlorosilane
 youranmod.fluid.with_purity=%s (%s)
 youranmod.purity=Purity %s%%, %s nines

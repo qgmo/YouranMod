@@ -76,6 +76,7 @@ item.pvc_sheet.name=聚氯乙烯片
 item.polyethylene_lump.name=聚乙烯团
 item.floppy_disk.name=软盘
 item.silicon_dust.name=硅粉
+item.borosilicate_slag.name=硼硅酸盐渣
 fluid.trichlorosilane=三氯氢硅
 youranmod.fluid.with_purity=%s（%s）
 youranmod.purity=纯度 %s%%，%s 个 9

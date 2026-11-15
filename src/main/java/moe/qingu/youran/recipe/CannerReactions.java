@@ -113,8 +113,9 @@ public final class CannerReactions {
         }
         if (FluidRegistry.isFluidRegistered(HYDROCHLORIC_ACID)) {
             TABLE.add(CannerReactions.<ItemStack>trichlorosilane());
+            TABLE.add(CannerReactions.<ItemStack>silicaFromSlag());
         } else {
-            YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加装罐机的三氯氢硅配方", HYDROCHLORIC_ACID);
+            YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加装罐机的三氯氢硅、硼硅酸盐渣配方", HYDROCHLORIC_ACID);
         }
         YouranMod.LOG.info("装罐机反应配方：内置 {} 条", TABLE.reactions().size());
     }
@@ -150,6 +151,18 @@ public final class CannerReactions {
     static <S> FluidItemReaction<S, ReactionItem> trichlorosilane() {
         return new FluidItemReaction<>(HYDROCHLORIC_ACID, 3000, ItemIngredient.item(YouranMod.MODID + ":silicon_dust", 0, 1),
                 TRICHLOROSILANE, 1000, null);
+    }
+
+    /** IC2 的二氧化硅粉 */
+    static final String IC2_DUST = "ic2:dust";
+    static final int IC2_SILICON_DIOXIDE = 13;
+
+    /**
+     * 硼硅酸盐渣去硼（服主 11-15）：2 渣 + 500 mB 盐酸 → 1 IC2 二氧化硅粉，不出流体、不产硼（电气石也算二氧化硅的原料，接回硅线第 1 步）。
+     */
+    static <S> FluidItemReaction<S, ReactionItem> silicaFromSlag() {
+        return new FluidItemReaction<>(HYDROCHLORIC_ACID, 500, ItemIngredient.item(YouranMod.MODID + ":borosilicate_slag", 0, 2),
+                null, 0, new ReactionItem(IC2_DUST, IC2_SILICON_DIOXIDE, 1, null));
     }
 
     /**

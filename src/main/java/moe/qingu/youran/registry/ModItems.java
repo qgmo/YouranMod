@@ -59,6 +59,8 @@ public final class ModItems {
     public static Item floppyDisk;
     /** 硅粉（芯片线“硅”，服主 11-15）：炼金化学硅锭打成的粉，做三氯氢硅的原料 */
     public static Item siliconDust;
+    /** 硼硅酸盐渣（服主 11-15，硼的来源）：热能离心机分出电气石里的金属后剩下的渣 */
+    public static Item borosilicateSlag;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -112,6 +114,7 @@ public final class ModItems {
         polyethyleneLump = add(registry, new ItemWithTooltip("polyethylene_lump", 64, "聚乙烯（PE）"));
         floppyDisk = add(registry, new ItemFloppyDisk());
         siliconDust = add(registry, new ItemWithTooltip("silicon_dust", 64, "粗硅（Si）打成的粉，加盐酸做成三氯氢硅"));
+        borosilicateSlag = add(registry, new ItemWithTooltip("borosilicate_slag", 64, "电气石分出金属后剩下的渣，含硼和硅"));
     }
 
     private static Item itemBlock(Block block) {

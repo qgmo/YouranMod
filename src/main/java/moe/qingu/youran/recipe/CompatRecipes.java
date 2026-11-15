@@ -35,6 +35,8 @@ public final class CompatRecipes {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerSiliconArcFurnace();
             // 硅粉（粉碎机）
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerSiliconCrusher();
+            // 硼的来源：5 硼硅酸盐渣 → 硼锭 + 二氧化硅粉（电弧炉）
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerBoronArcFurnace();
         }
         // 芯片线“硅”：三氯氢硅（搅拌机，要 Mixin 改它的流体比例）
         if (ie) {
@@ -54,6 +56,7 @@ public final class CompatRecipes {
         // 硼的来源：洞穴水晶（电气石）进溶解机（要夸克）
         if (alchemistry) {
             BoronRecipes.registerCrystalDissolver();
+            BoronRecipes.registerSlagDissolver(new ItemStack(ModItems.borosilicateSlag));
         }
     }
 }

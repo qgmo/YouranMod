@@ -39,4 +39,14 @@ public final class BoronRecipes {
             YouranMod.LOG.info("已加炼金化学溶解机配方：{} 种洞穴水晶（电气石）", added);
         }
     }
+
+    /**
+     * 炼金化学溶解机：1 硼硅酸盐渣 → 偏硅酸根 6、硼酸根 3、氢氧根 4、钠 1（{@link Tourmaline#structuralUnits()}，
+     * 热能离心机已经把金属分出去了，所以没有铝和特征元素）。后初始化时调用。
+     */
+    public static void registerSlagDissolver(ItemStack slag) {
+        if (AlchemistryCompat.addDissolverRecipe(slag, java.util.Collections.singletonList(Tourmaline.structuralUnits()))) {
+            YouranMod.LOG.info("已加炼金化学溶解机配方：硼硅酸盐渣");
+        }
+    }
 }

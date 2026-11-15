@@ -156,6 +156,35 @@ public final class IeRecipes {
         }
     }
 
+    /** 电弧炉：5 硼硅酸盐渣 → 1 炼金化学硼锭 + 3 二氧化硅粉（二氧化硅粉放在炉渣格里出） */
+    static final int SLAG_PER_BORON = 5;
+    static final int SLAG_SILICA = 3;
+
+    /**
+     * 电弧炉：5 硼硅酸盐渣 → 1 硼锭 + 3 IC2 二氧化硅粉（服主 11-15）。电弧炉只有一个产物格，二氧化硅粉放在炉渣格（沉浸工程的炉渣格能出任意物品），
+     * 时间、电耗同粗硅。要装了炼金化学（硼锭）；二氧化硅粉按矿物词典 dustSiliconDioxide（IC2），没有时只出硼锭。
+     */
+    public static void registerBoronArcFurnace() {
+        ItemStack boron = AlchemistryCompat.ingot(AlchemistryCompat.BORON, 1);
+        if (boron.isEmpty()) {
+            YouranMod.LOG.info("没有炼金化学的硼锭，不加沉浸工程电弧炉的硼硅酸盐渣配方");
+            return;
+        }
+        ItemStack silica = ItemStack.EMPTY;
+        if (!OreDictionary.getOres(SILICON_DIOXIDE_DUST, false).isEmpty()) {
+            silica = OreDictionary.getOres(SILICON_DIOXIDE_DUST, false).get(0).copy();
+            silica.setCount(SLAG_SILICA);
+        }
+        ItemStack slag = new ItemStack(ModItems.borosilicateSlag, SLAG_PER_BORON);
+        ArcFurnaceRecipe.addRecipe(boron, slag, silica, ARC_TIME, ARC_ENERGY_PER_TICK);
+        ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(slag, NonNullList.withSize(4, ItemStack.EMPTY));
+        if (found == null || !ItemStack.areItemStacksEqual(found.output, boron)) {
+            YouranMod.LOG.error("沉浸工程电弧炉的硼硅酸盐渣配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
+        } else {
+            YouranMod.LOG.info("已加沉浸工程电弧炉配方：5 硼硅酸盐渣 → 硼锭 + {} 二氧化硅粉", silica.getCount());
+        }
+    }
+
     /** 粉碎机电耗：同沉浸工程自己把锭粉碎成粉（3000 Flux） */
     static final int CRUSHER_ENERGY = 3000;
 
