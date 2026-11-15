@@ -1,6 +1,11 @@
 package moe.qingu.youran.compat.jei;
 
 import moe.qingu.youran.fluid.FluidPurity;
+import moe.qingu.youran.item.ItemSiliconWafer;
+import moe.qingu.youran.logic.purity.WashWater;
+import moe.qingu.youran.logic.purity.WaferMold;
+import moe.qingu.youran.logic.purity.WaferRules;
+import moe.qingu.youran.registry.ModItems;
 import moe.qingu.youran.logic.purity.Purity;
 import moe.qingu.youran.logic.reaction.FluidItemReaction;
 import moe.qingu.youran.logic.reaction.ItemIngredient;
@@ -93,6 +98,40 @@ final class JeiRecipes {
             return null;
         }
         return FluidItemRecipe.fluids(input, output, Collections.singletonList(I18n.format(noteKey, noteArgs)));
+    }
+
+    /**
+     * 洗矿机洗硅晶圆：整合包里有的每种水一条（1000 mB 水 + 9 个 9 的硅晶圆 → 高精硅晶圆），说明里写纯净率与 9 个 9 时
+     * 金、粘土铸模的报废率。
+     */
+    static List<FluidItemRecipe> waferWashing(List<String> waters) {
+        List<FluidItemRecipe> list = new ArrayList<>();
+        for (String name : waters) {
+            FluidStack water = FluidRegistry.getFluidStack(name, WaferRules.WASH_WATER);
+            if (water == null) {
+                continue;
+            }
+            int rate = WashWater.rate(name);
+            List<ItemStack> wafers = new ArrayList<>();
+            for (WaferMold mold : WaferMold.values()) {
+                wafers.add(ItemSiliconWafer.make(ModItems.siliconWafer, Purity.WAFER_GRADE_NINES, mold));
+            }
+            String note = I18n.format("youranmod.jei.ore_washing_wafer.note", rate,
+                    percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.GOLD)),
+                    percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.CLAY)));
+            list.add(new FluidItemRecipe(water, wafers, null,
+                    ItemSiliconWafer.make(ModItems.precisionSiliconWafer, Purity.WAFER_GRADE_NINES, WaferMold.GOLD), Collections.singletonList(note)));
+        }
+        return list;
+    }
+
+    /** 概率写成百分数，最多一位小数：0.075 →“7.5%”，0.4 →“40%” */
+    static String percent(double p) {
+        String s = String.format(java.util.Locale.ROOT, "%.1f", p * 100);
+        if (s.endsWith(".0")) {
+            s = s.substring(0, s.length() - 2);
+        }
+        return s + "%";
     }
 
     /** 按注册名与元数据取物品；没有时为空物品 */
