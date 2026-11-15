@@ -95,7 +95,6 @@ public final class IeRecipes {
         ItemStack plateMold = new ItemStack(moldItem, 1, 0);
         press(new ItemStack(ModItems.refinedPlatter), new ItemStack(ModItems.polishedPlatter), plateMold);
         press(new ItemStack(ModItems.pvcLump), new ItemStack(ModItems.pvcSheet), plateMold);
-        press(new ItemStack(ModItems.polyethyleneLump), new ItemStack(ModItems.polyethyleneSheet), plateMold);
     }
 
     private static void press(ItemStack input, ItemStack output, ItemStack mold) {

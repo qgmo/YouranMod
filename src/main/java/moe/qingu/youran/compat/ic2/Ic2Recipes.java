@@ -31,11 +31,10 @@ public final class Ic2Recipes {
         }
     }
 
-    /** 金属成型机辊压（同锭压成板）：精制盘片 → 抛光盘片，聚氯乙烯团 → 聚氯乙烯片，聚乙烯团 → 聚乙烯片 */
+    /** 金属成型机辊压（同锭压成板）：精制盘片 → 抛光盘片，聚氯乙烯团 → 聚氯乙烯片 */
     static void registerRolling() {
         rolling(new ItemStack(ModItems.refinedPlatter), new ItemStack(ModItems.polishedPlatter));
         rolling(new ItemStack(ModItems.pvcLump), new ItemStack(ModItems.pvcSheet));
-        rolling(new ItemStack(ModItems.polyethyleneLump), new ItemStack(ModItems.polyethyleneSheet));
     }
 
     private static void rolling(ItemStack input, ItemStack output) {
@@ -45,15 +44,13 @@ public final class Ic2Recipes {
     }
 
     /**
-     * 流体/固体装罐机的固体装罐模式（容器放“罐子”槽，填充物放输入槽）：1 抛光盘片 + 6 聚氯乙烯片 → 1 软盘；
-     * 1 抛光盘片 + 6 聚乙烯片 → 1 软盘。
+     * 流体/固体装罐机的固体装罐模式（容器放“罐子”槽，填充物放输入槽）：1 抛光盘片 + 6 聚氯乙烯片 → 1 软盘。
+     * 套子只用聚氯乙烯（服主 11-15：聚乙烯太软、标签和衬布粘不牢，不做套子；聚乙烯可以先加氯气变成聚氯乙烯）。
      */
     static void registerFloppy() {
-        for (ItemStack sheet : new ItemStack[]{new ItemStack(ModItems.pvcSheet), new ItemStack(ModItems.polyethyleneSheet)}) {
-            if (!Recipes.cannerBottle.addRecipe(Recipes.inputFactory.forStack(new ItemStack(ModItems.polishedPlatter), 1),
-                    Recipes.inputFactory.forStack(sheet, 6), new ItemStack(ModItems.floppyDisk), false)) {
-                YouranMod.LOG.error("IC2 固体装罐配方（抛光盘片 + 6 {} → 软盘）没加上：已有输入相同的配方", sheet.getItem().getRegistryName());
-            }
+        if (!Recipes.cannerBottle.addRecipe(Recipes.inputFactory.forStack(new ItemStack(ModItems.polishedPlatter), 1),
+                Recipes.inputFactory.forStack(new ItemStack(ModItems.pvcSheet), 6), new ItemStack(ModItems.floppyDisk), false)) {
+            YouranMod.LOG.error("IC2 固体装罐配方（抛光盘片 + 6 聚氯乙烯片 → 软盘）没加上：已有输入相同的配方");
         }
     }
 }

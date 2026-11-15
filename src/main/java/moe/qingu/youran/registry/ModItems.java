@@ -56,7 +56,6 @@ public final class ModItems {
     public static Item pvcLump;
     public static Item pvcSheet;
     public static Item polyethyleneLump;
-    public static Item polyethyleneSheet;
     public static Item floppyDisk;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
@@ -109,7 +108,6 @@ public final class ModItems {
         pvcLump = add(registry, new ItemWithTooltip("pvc_lump", 64, "聚氯乙烯（PVC）"));
         pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做软盘的软套"));
         polyethyleneLump = add(registry, new ItemWithTooltip("polyethylene_lump", 64, "聚乙烯（PE）"));
-        polyethyleneSheet = add(registry, new ItemWithTooltip("polyethylene_sheet", 64, "聚乙烯（PE）薄片，可以做软盘的软套"));
         floppyDisk = add(registry, new ItemFloppyDisk());
     }
 
