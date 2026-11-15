@@ -264,4 +264,28 @@ class LedgerTest {
         l.snapshotNow(T0 + 2 * 24 * 3600_000L, Ledger.MAX_RECORDS * 1000L * 3600 * 24);
         assertNull(l.order(o.id));
     }
+
+    /** 虚拟账户的显示名：建时带上、改名、重开账本还在；收款单与付款人的记录里用它，不用登记名 */
+    @Test
+    void virtualDisplayName() throws Exception {
+        Ledger l = open();
+        AccountRef v = AccountRef.virtual("test:shop");
+        l.ensureVirtual("test:shop");
+        assertEquals("test:shop", l.name(v), "没起名时显示登记名");
+        l.ensureVirtual("test:shop", "小店");
+        assertEquals("小店", l.name(v));
+        l.ensureVirtual("test:shop");
+        assertEquals("小店", l.name(v), "不给名字时不改回登记名");
+        Ledger.Order o = l.createOrder(draft(v, 10, T0 + 60_000), T0);
+        assertEquals("小店", l.info(o, T0, id -> "/c/" + id).receiverName);
+        pay(l, o, ALICE, T0 + 1);
+        assertEquals("小店", l.records(AccountRef.player(ALICE), 1).get(0).counterparty);
+        l.ensureVirtual("test:shop", "大店");
+        l.close();
+        Ledger again = open();
+        assertEquals("大店", again.name(v), "改名记进账本");
+        assertEquals("小店", again.records(AccountRef.player(ALICE), 1).get(0).counterparty, "已经记下的不改");
+        again.ensureVirtual("test:new", "新店");
+        assertEquals("新店", again.name(AccountRef.virtual("test:new")), "建时带上");
+    }
 }

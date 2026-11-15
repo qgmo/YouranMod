@@ -132,8 +132,10 @@ final class PayDocs {
                 + "<h2>模组（服务端 Java）</h2>\n<pre>OrderInfo o = PayApi.createOrder(new OrderSpec(AccountRef.virtual(\"mymod:shop\"), \"shop.yr\")\n"
                 + "        .emeralds(20).description(\"钻石剑\").reference(\"A-123\")\n"
                 + "        .payer(buyerUuid).returnUrl(\"https://shop.yr/done\"));\n"
-                + "PayApi.addListener(AccountRef.virtual(\"mymod:shop\"), (order, payment) -&gt; { /* 发货 */ });</pre>\n"
-                + "<p class=\"hint\">模组收款进虚拟账户，不用密钥；回调在服务端主线程上。</p>\n";
+                + "PayApi.addListener(AccountRef.virtual(\"mymod:shop\"), (order, payment) -&gt; { /* 发货 */ });\n"
+                + "PayApi.setDisplayName(\"mymod:shop\", \"我的小店\");</pre>\n"
+                + "<p class=\"hint\">模组收款进虚拟账户，不用密钥；回调在服务端主线程上。显示名是付款页、确认框、收支记录里给人看的名字（不起时显示登记名）。"
+                + "<code>reference</code> 不显示在付款页上。</p>\n";
     }
 
     private static String help() {
