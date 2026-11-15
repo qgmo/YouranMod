@@ -49,6 +49,14 @@ public final class ClientConfirms {
         });
     }
 
+    /**
+     * 给别的模组的客户端：现在有没有系统确认框开着（单独一个界面，或盖在别的界面上）。开着时鼠标、键盘都归这个框；
+     * 模拟输入的东西（例如 YouranSCP 的 SCP-6468 连点）据此不去点它，也不去点它下面的界面。只在客户端主线程上调用。
+     */
+    public static boolean isShowing() {
+        return current != null;
+    }
+
     /** 现在开着的框（测试、界面用）；没有为 null */
     public static ConfirmDialog current() {
         return current;
