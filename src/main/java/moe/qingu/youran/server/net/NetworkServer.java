@@ -1,12 +1,17 @@
 package moe.qingu.youran.server.net;
 
+import moe.qingu.youran.api.network.ConfirmRequest;
+import moe.qingu.youran.api.network.ConfirmResult;
 import moe.qingu.youran.api.network.DefaultDimensionNetwork;
+import moe.qingu.youran.net.ConfirmMessages;
+import moe.qingu.youran.net.YouranNetwork;
 import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.HostContext;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
 import moe.qingu.youran.api.network.NetworkLayout;
+import moe.qingu.youran.api.network.SourceIdentity;
 import moe.qingu.youran.api.network.YouranNetworkApi;
 import moe.qingu.youran.api.network.packet.Ipv6Packet;
 import moe.qingu.youran.api.network.stack.ExecutorEventLoop;
@@ -95,6 +100,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     /** captcha.yr 与它的本机端口（没开为 null） */
     private CaptchaService captcha;
     private CaptchaLocalServer captchaLocal;
+    /** 系统确认框（主线程） */
+    private ConfirmPrompts prompts;
+    /** 主线程上的拒绝日志（{@link #rejects} 只给网络线程用） */
+    private RejectLog mainRejects;
     /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
     private volatile Map<String, Ipv6Address> nameAddresses = Collections.emptyMap();
     private final Map<String, NetStack> hostStacks = new LinkedHashMap<>();
@@ -267,11 +276,13 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             System.setProperty("java.awt.headless", "true");
         }
         captcha = new CaptchaService(CaptchaStore.createDefault(), System::currentTimeMillis, CaptchaService.newDrawer());
+        mainRejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
+        prompts = new ConfirmPrompts(new PromptEnv(), new SecureRandom());
         startCaptchaLocal(captcha);
         loop.execute(() -> startHosts(hostAddresses, declByKey, tldDecls, yrRecords, comRecords, activeDcCopy, serial));
         loop.execute(this::scheduleOverflowLog);
 
-        events = new NetworkEvents(devices, testDevices, this::playerLoggedIn, this::playerLoggedOut);
+        events = new NetworkEvents(devices, testDevices, this::playerLoggedIn, this::playerLoggedOut, this::serverTick);
         MinecraftForge.EVENT_BUS.register(events);
         event.registerServerCommand(new NetCommand(this));
         NetworkHooks.setBackend(this);
@@ -317,7 +328,19 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         });
     }
 
+    /** 主线程，每 tick：系统确认框的超时、操作者变了 */
+    private void serverTick() {
+        ConfirmPrompts p = prompts;
+        if (p != null) {
+            p.tick();
+        }
+    }
+
     private void playerLoggedOut(UUID player) {
+        ConfirmPrompts cp = prompts;
+        if (cp != null) {
+            cp.playerLeft(player);
+        }
         PlayerNics p = players;
         if (p != null) {
             p.detach(player);
@@ -508,6 +531,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             captcha.stop();
             captcha = null;
         }
+        if (prompts != null) {
+            prompts.clear();
+            prompts = null;
+        }
         for (CompletableFuture<?> f : mainThreadTasks) {
             f.completeExceptionally(new IllegalStateException("服务器正在关"));
         }
@@ -590,6 +617,120 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         AddressBook b = book;
         DeviceTable d = devices;
         return b == null || d == null ? null : d.locate(b, address);
+    }
+
+    // ---- 系统确认框 ----
+
+    @Override
+    public CompletableFuture<ConfirmResult> confirm(Ipv6Address source, UUID player, ConfirmRequest request) {
+        MinecraftServer s = server;
+        ConfirmPrompts p = prompts;
+        if (s == null || p == null) {
+            return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.UNAVAILABLE, null, null));
+        }
+        CompletableFuture<ConfirmResult> out = new CompletableFuture<>();
+        s.addScheduledTask(() -> {
+            if (prompts != p) {
+                out.complete(new ConfirmResult(ConfirmResult.Outcome.UNAVAILABLE, null, null));
+                return;
+            }
+            CompletableFuture<ConfirmResult> f = source != null ? confirmSource(p, source, request) : confirmPlayer(p, player, request);
+            f.whenComplete((r, e) -> out.complete(r != null ? r : new ConfirmResult(ConfirmResult.Outcome.UNAVAILABLE, null, null)));
+        });
+        return out;
+    }
+
+    /** 主线程：问这个来源的当前操作者 */
+    private CompletableFuture<ConfirmResult> confirmSource(ConfirmPrompts p, Ipv6Address source, ConfirmRequest request) {
+        AddressBook b = book;
+        DeviceTable dt = devices;
+        DeviceTable.Device d = b == null || dt == null ? null : dt.deviceAt(b, source);
+        if (d != null) {
+            return confirmDevice(p, d, request);
+        }
+        PlayerNics pn = players;
+        Map.Entry<UUID, String> owner = pn == null ? null : pn.owner(source);
+        if (owner == null) {
+            return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
+        }
+        UUID id = owner.getKey();
+        return p.open(id, owner.getValue(), () -> source.equals(pn.address(id)) ? id : null, request);
+    }
+
+    /** 主线程：问设备现在的操作者；设备拿掉、断电、换人时作废 */
+    private CompletableFuture<ConfirmResult> confirmDevice(ConfirmPrompts p, DeviceTable.Device d, ConfirmRequest request) {
+        DeviceTable.Operator op = d.operator();
+        if (op == null || !d.powered) {
+            return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
+        }
+        return p.open(op.id, op.name, () -> d.removed || !d.powered ? null : d.operatorId(), request);
+    }
+
+    private CompletableFuture<ConfirmResult> confirmPlayer(ConfirmPrompts p, UUID player, ConfirmRequest request) {
+        MinecraftServer s = server;
+        EntityPlayerMP e = s == null ? null : s.getPlayerList().getPlayerByUUID(player);
+        if (e == null) {
+            return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
+        }
+        return p.open(player, e.getName(), () -> player, request);
+    }
+
+    @Override
+    public void onConfirmAnswer(EntityPlayerMP player, long id, boolean approve) {
+        ConfirmPrompts p = prompts;
+        if (p != null && !p.answer(player.getUniqueID(), id, approve)) {
+            mainRejects.reject("玩家 " + player.getName(), "系统确认框的回应对不上（不是问他的、过时了或伪造的）", System.currentTimeMillis());
+        }
+    }
+
+    /** 确认框要的东西（主线程） */
+    private final class PromptEnv implements ConfirmPrompts.Env {
+        @Override
+        public long nowMillis() {
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public boolean isOnline(UUID player) {
+            MinecraftServer s = server;
+            return s != null && s.getPlayerList().getPlayerByUUID(player) != null;
+        }
+
+        @Override
+        public void show(UUID player, long id, ConfirmRequest request, int secondsLeft) {
+            EntityPlayerMP e = server == null ? null : server.getPlayerList().getPlayerByUUID(player);
+            if (e != null) {
+                YouranNetwork.CHANNEL.sendTo(new ConfirmMessages.Show(id, request, secondsLeft), e);
+            }
+        }
+
+        @Override
+        public void close(UUID player, long id) {
+            EntityPlayerMP e = server == null ? null : server.getPlayerList().getPlayerByUUID(player);
+            if (e != null) {
+                YouranNetwork.CHANNEL.sendTo(new ConfirmMessages.Close(id), e);
+            }
+        }
+    }
+
+    ConfirmPrompts prompts() {
+        return prompts;
+    }
+
+    @Override
+    public SourceIdentity identify(Ipv6Address address) {
+        AddressBook b = book;
+        DeviceTable d = devices;
+        if (b == null || d == null || address == null) {
+            return null;
+        }
+        SourceIdentity id = d.identify(b, address);
+        if (id != null) {
+            return id;
+        }
+        PlayerNics p = players;
+        Map.Entry<UUID, String> owner = p == null ? null : p.owner(address);
+        return owner == null ? null : new SourceIdentity(SourceIdentity.Kind.PLAYER, address, null, null, owner.getKey(), owner.getValue());
     }
 
     @Override

@@ -104,3 +104,10 @@ youranmod.jei.trichlorosilane_hydrogen.info=Trichlorosilane-hydrogen mixture is 
 youranmod.jei.wafer.info=A silicon wafer keeps the purity of the mixture it was cast from and whether the cast was gold or clay. Wash it in an IC2 Ore Washing Plant (1000 mB of water each) to get a precision wafer (same purity and cast) or a scrapped one. Scrap chance = (1 - water purity) x cast factor (gold 1, clay 1.5) x 0.8^(nines - 9), capped at 100%; wafers under 9 nines are always scrapped. See "Ore Washing Plant: Wafers" for each water.
 youranmod.jei.scrap_wafer.info=A wafer ruined in washing. Smelt it in a furnace or an Immersive Engineering Arc Furnace back into an Alchemistry silicon ingot and start the silicon line again.
 tile.home_portal.name=Main City Portal
+youranmod.confirm.header=System confirmation (shown by the game)
+youranmod.confirm.site=Website: %s
+youranmod.confirm.items=Will share:
+youranmod.confirm.countdown=Denied automatically in %s s
+youranmod.confirm.note=This is not a web page; programs on the computer cannot see or click it.
+youranmod.confirm.approve=Allow
+youranmod.confirm.deny=Deny

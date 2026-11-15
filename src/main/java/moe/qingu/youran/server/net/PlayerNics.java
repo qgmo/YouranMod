@@ -80,6 +80,8 @@ final class PlayerNics {
 
     /** 任意线程读：玩家 → 临时地址 */
     private final Map<UUID, Ipv6Address> addresses = new ConcurrentHashMap<>();
+    /** 任意线程读：玩家 → 名字（有临时地址的才有） */
+    private final Map<UUID, String> names = new ConcurrentHashMap<>();
     /** 已经分出去的主机号（分配时用 putIfAbsent 保证不重复；网络线程上拿掉网卡以后才放回） */
     private final Map<Long, UUID> parts = new ConcurrentHashMap<>();
 
@@ -120,6 +122,7 @@ final class PlayerNics {
         int gen = generations.incrementAndGet();
         Nic n = new Nic(player, name, address, part, link, gen);
         addresses.put(player, address);
+        names.put(player, name);
         loop.execute(() -> {
             Nic old = byPlayer.put(player, n);
             if (old != null) {
@@ -137,6 +140,7 @@ final class PlayerNics {
         if (a == null) {
             return;
         }
+        names.remove(player);
         long part = NetworkLayout.hostPartOf(a);
         loop.execute(() -> {
             Nic n = byPart.get(part);
@@ -163,6 +167,7 @@ final class PlayerNics {
     /** 关服：全部收回（不发消息，连接都要断了） */
     void clear() {
         addresses.clear();
+        names.clear();
         loop.execute(() -> {
             byPlayer.clear();
             byPart.clear();
@@ -172,6 +177,19 @@ final class PlayerNics {
 
     Ipv6Address address(UUID player) {
         return addresses.get(player);
+    }
+
+    /** 临时地址 → 现在用着它的玩家（UUID 与名字）；不是谁的临时地址时为 null。任意线程 */
+    Map.Entry<UUID, String> owner(Ipv6Address a) {
+        if (a == null || !layout.isPlayerAddress(a)) {
+            return null;
+        }
+        UUID id = parts.get(NetworkLayout.hostPartOf(a));
+        if (id == null || !a.equals(addresses.get(id))) {
+            return null;
+        }
+        String name = names.get(id);
+        return name == null ? null : new java.util.AbstractMap.SimpleImmutableEntry<>(id, name);
     }
 
     int online() {

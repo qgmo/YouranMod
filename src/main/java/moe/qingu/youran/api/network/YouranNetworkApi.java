@@ -159,6 +159,22 @@ public final class YouranNetworkApi {
         return b == null || address == null ? null : b.deviceLocation(address);
     }
 
+    /**
+     * 服务端：按来源地址认人（“运营商一键登录”的那一层，服主 11-15）。给一个 IPv6 来源地址（例如 TCP 连接的对方地址），返回：
+     * <ul>
+     * <li>它是设备表里一台设备（家具电脑、SCP 电脑等）的地址时：哪个维度哪一格、设备声明的能力（{@link DeviceCapability}，
+     * 如有没有一键登录能力）、现在操作它的玩家（网卡接着玩家客户端时是那个玩家，否则是电脑模组用 {@link DeviceHandle#setOperator} 告诉的）；</li>
+     * <li>它是玩家临时地址（{@link PlayerAddresses}）时：直接就是那个玩家（{@link SourceIdentity.Kind#PLAYER}，没有位置）；</li>
+     * <li>都不是（机房主机、没登记设备的格子、不在这个服务器内网里）或网络没在运行时：null。</li>
+     * </ul>
+     * 不读世界，只查主线程在变化时更新的表（快照），任意线程都可以调用（例如在网络线程上处理请求时）。
+     * 来源可以信：路由器只收设备当前操作者发来的包、源地址必须是设备地址。
+     */
+    public static SourceIdentity identify(Ipv6Address address) {
+        NetworkBackend b = NetworkHooks.backend();
+        return b == null || address == null ? null : b.identify(address);
+    }
+
     /** NTP 服务器的地址 */
     public static Ipv6Address ntpAddress() {
         NetworkBackend b = NetworkHooks.backend();

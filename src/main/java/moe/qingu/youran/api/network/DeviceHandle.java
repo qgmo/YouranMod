@@ -42,6 +42,28 @@ public interface DeviceHandle {
     EntityPlayerMP attachedPlayer();
 
     /**
+     * 声明（或去掉）一项网卡附带的可选硬件能力（{@link DeviceCapability}），如游戏角色一键登录、定位模块。
+     * 新登记的设备什么能力都没有。随时可以改（例如玩家把定位模块放进、拿出电脑的卡槽）。
+     */
+    void setCapability(DeviceCapability capability, boolean present);
+
+    boolean hasCapability(DeviceCapability capability);
+
+    /**
+     * 告诉 YouranMod 现在是谁在操作这台设备（{@code null} 清空）。给网卡接服务端端点（{@link #attachEndpoint}）或还没接网卡的设备用，
+     * 例如服务端模拟的 SCP 电脑：玩家打开界面时设成他，关界面时清空。
+     * 网卡接着玩家客户端（{@link #attachPlayer}）时操作者就是那个玩家，这里设的不算。
+     * 设备拿掉时一起清空。玩家下线时由 YouranMod 自己清掉。
+     */
+    void setOperator(EntityPlayerMP player);
+
+    /** 现在的操作者（接着玩家客户端时是那个玩家，否则是 {@link #setOperator} 设的）；没有为 null */
+    java.util.UUID operatorId();
+
+    /** 操作者的名字；没有为 null */
+    String operatorName();
+
+    /**
      * 设备发一个原始 IPv6 包（任意线程；在网络线程上校验）：源地址必须是设备地址、不超过 1280 字节、不超过速率上限，
      * 设备要能收发；不合格的丢掉并记日志。接着玩家客户端时，客户端发来的包走同样的校验。
      */

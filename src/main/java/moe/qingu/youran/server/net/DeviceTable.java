@@ -1,10 +1,12 @@
 package moe.qingu.youran.server.net;
 
+import moe.qingu.youran.api.network.DeviceCapability;
 import moe.qingu.youran.api.network.DeviceEndpoint;
 import moe.qingu.youran.api.network.DeviceHandle;
 import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
+import moe.qingu.youran.api.network.SourceIdentity;
 import moe.qingu.youran.net.NicChannel;
 import moe.qingu.youran.net.NicMessages;
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -15,6 +17,7 @@ import net.minecraftforge.common.DimensionManager;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -116,11 +119,17 @@ public final class DeviceTable implements NetworkDevices {
         }
     }
 
-    /** 玩家退出：他接着的设备断开 */
+    /** 玩家退出：他接着的设备断开；电脑模组告诉过的操作者是他的也清掉 */
     void onPlayerLeft(UUID player) {
         Device d = byPlayer.get(player);
         if (d != null) {
             d.detach();
+        }
+        for (Device x : byPosition.values()) {
+            Operator o = x.declared;
+            if (o != null && o.id.equals(player)) {
+                x.declared = null;
+            }
         }
     }
 
@@ -152,12 +161,54 @@ public final class DeviceTable implements NetworkDevices {
         return d == null || d.removed || !d.address().equals(address) ? null : l;
     }
 
+    /** 地址 → 那一格上登记着的设备（地址要完全一样）；不是设备地址时为 null。任意线程 */
+    Device deviceAt(AddressBook book, Ipv6Address address) {
+        DeviceLocation l = book.locate(address);
+        if (l == null) {
+            return null;
+        }
+        Device d = byPosition.get(new PosKey(l.dimension, l.x, l.y, l.z));
+        return d == null || d.removed || !d.address().equals(address) ? null : d;
+    }
+
+    /** 地址 → 设备的身份快照（哪一格、能力、操作者）；不是设备地址时为 null。任意线程 */
+    SourceIdentity identify(AddressBook book, Ipv6Address address) {
+        Device d = deviceAt(book, address);
+        if (d == null) {
+            return null;
+        }
+        Operator o = d.operator();
+        return new SourceIdentity(SourceIdentity.Kind.DEVICE, d.address, new DeviceLocation(d.key.dimension, d.key.x, d.key.y, d.key.z),
+                d.capabilitySet(), o == null ? null : o.id, o == null ? null : o.name);
+    }
+
     Device byPosition(int dimension, int x, int y, int z) {
         return byPosition.get(new PosKey(dimension, x, y, z));
     }
 
     Device byPlayer(UUID player) {
         return byPlayer.get(player);
+    }
+
+    /** 操作者（不可变） */
+    static final class Operator {
+        final UUID id;
+        final String name;
+
+        Operator(UUID id, String name) {
+            this.id = id;
+            this.name = name;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Operator && ((Operator) o).id.equals(id);
+        }
+
+        @Override
+        public int hashCode() {
+            return id.hashCode();
+        }
     }
 
     /** 网卡接到哪里（不可变；换的时候整个换掉） */
@@ -226,6 +277,10 @@ public final class DeviceTable implements NetworkDevices {
         volatile boolean loaded;
         volatile boolean removed;
         volatile Attachment attachment;
+        /** 网卡附带的能力（按 {@link DeviceCapability#ordinal()} 的位） */
+        volatile int capabilities;
+        /** 电脑模组告诉的操作者（{@link #setOperator}；接着玩家客户端时不算） */
+        volatile Operator declared;
         /** 只在网络线程上用 */
         RateLimiter limiter;
 
@@ -350,6 +405,68 @@ public final class DeviceTable implements NetworkDevices {
             return bridge.player(((PlayerAttachment) a).player);
         }
 
+        @Override
+        public void setCapability(DeviceCapability c, boolean present) {
+            if (c == null) {
+                return;
+            }
+            int bit = 1 << c.ordinal();
+            capabilities = present ? capabilities | bit : capabilities & ~bit;
+        }
+
+        @Override
+        public boolean hasCapability(DeviceCapability c) {
+            return c != null && (capabilities & (1 << c.ordinal())) != 0;
+        }
+
+        Set<DeviceCapability> capabilitySet() {
+            int bits = capabilities;
+            EnumSet<DeviceCapability> set = EnumSet.noneOf(DeviceCapability.class);
+            for (DeviceCapability c : DeviceCapability.values()) {
+                if ((bits & (1 << c.ordinal())) != 0) {
+                    set.add(c);
+                }
+            }
+            return set;
+        }
+
+        @Override
+        public void setOperator(EntityPlayerMP player) {
+            if (removed) {
+                return;
+            }
+            declared = player == null ? null : new Operator(player.getUniqueID(), player.getName());
+        }
+
+        /** 设置操作者（单元测试用，不要玩家实体） */
+        void setOperator(UUID id, String name) {
+            if (!removed) {
+                declared = id == null ? null : new Operator(id, name);
+            }
+        }
+
+        /** 现在的操作者：接着玩家客户端时是那个玩家，否则是电脑模组告诉的；任意线程 */
+        Operator operator() {
+            Attachment a = attachment;
+            if (a instanceof PlayerAttachment) {
+                PlayerAttachment pa = (PlayerAttachment) a;
+                return new Operator(pa.player, pa.name);
+            }
+            return declared;
+        }
+
+        @Override
+        public UUID operatorId() {
+            Operator o = operator();
+            return o == null ? null : o.id;
+        }
+
+        @Override
+        public String operatorName() {
+            Operator o = operator();
+            return o == null ? null : o.name;
+        }
+
         public String attachmentDescription() {
             Attachment a = attachment;
             return a == null ? "没接" : a.describe();
@@ -367,6 +484,7 @@ public final class DeviceTable implements NetworkDevices {
             }
             detach();
             removed = true;
+            declared = null;
             byPosition.remove(key, this);
             Set<Device> set = byChunk.get(key.chunk());
             if (set != null) {

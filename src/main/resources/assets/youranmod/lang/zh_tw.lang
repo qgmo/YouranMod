@@ -104,3 +104,10 @@ youranmod.jei.trichlorosilane_hydrogen.info=三氯矽烷氫氣混合氣：達到
 youranmod.jei.wafer.info=矽晶圓的純度隨澆注用的混合氣，還記著用的是金鑄模還是黏土鑄模。矽晶圓要在 IC2 洗礦機裡洗（每片 1000 mB 水），洗成高精矽晶圓（純度、鑄模照抄）或者報廢。報廢率 = (1 − 水的純淨率) × 鑄模倍數（金 1，黏土 1.5）× 0.8^(幾個 9 − 9)，超過 100% 按 100%；不到 9 個 9 的一定報廢。各種水的純淨率見「洗礦機：洗矽晶圓」。
 youranmod.jei.scrap_wafer.info=洗壞了的矽晶圓。放進熔爐或沉浸工程電弧爐燒回煉金化學矽錠，從頭再走一遍矽線。
 tile.home_portal.name=主城傳送門
+youranmod.confirm.header=系統確認（遊戲顯示）
+youranmod.confirm.site=網站：%s
+youranmod.confirm.items=將會提供：
+youranmod.confirm.countdown=%s 秒後自動拒絕
+youranmod.confirm.note=這個框不是網頁，電腦裡的程式看不到也點不到。
+youranmod.confirm.approve=同意
+youranmod.confirm.deny=拒絕

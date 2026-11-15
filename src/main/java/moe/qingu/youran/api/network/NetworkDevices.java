@@ -13,6 +13,19 @@ public interface NetworkDevices {
      */
     DeviceHandle register(int dimension, int x, int y, int z);
 
+    /** 同上，登记时就声明网卡附带的能力（如 {@link DeviceCapability#ONE_CLICK_LOGIN}） */
+    default DeviceHandle register(int dimension, int x, int y, int z, DeviceCapability... capabilities) {
+        DeviceHandle h = register(dimension, x, y, z);
+        if (h != null && capabilities != null) {
+            for (DeviceCapability c : capabilities) {
+                if (c != null) {
+                    h.setCapability(c, true);
+                }
+            }
+        }
+        return h;
+    }
+
     /** 这一格上登记的设备；没有为 null */
     DeviceHandle at(int dimension, int x, int y, int z);
 

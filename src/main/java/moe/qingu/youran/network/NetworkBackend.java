@@ -1,13 +1,17 @@
 package moe.qingu.youran.network;
 
+import moe.qingu.youran.api.network.ConfirmRequest;
+import moe.qingu.youran.api.network.ConfirmResult;
 import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkDevices;
+import moe.qingu.youran.api.network.SourceIdentity;
 import moe.qingu.youran.api.network.tls.TlsServerContext;
 import net.minecraft.entity.player.EntityPlayerMP;
 
 import java.util.Collection;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 /**
@@ -50,4 +54,13 @@ public interface NetworkBackend {
 
     /** 这个地址是设备表里一台设备的地址时，它在哪；否则 null。任意线程（不读世界） */
     DeviceLocation deviceLocation(Ipv6Address address);
+
+    /** 按来源地址认人（设备或玩家临时地址）；认不出为 null。任意线程（不读世界） */
+    SourceIdentity identify(Ipv6Address address);
+
+    /** 系统确认框：问来源 {@code source} 的操作者（{@code source} 为 null 时直接问在线玩家 {@code player}）。任意线程；future 在主线程上完成 */
+    CompletableFuture<ConfirmResult> confirm(Ipv6Address source, UUID player, ConfirmRequest request);
+
+    /** 主线程：客户端对确认框的回应 */
+    void onConfirmAnswer(EntityPlayerMP player, long id, boolean approve);
 }

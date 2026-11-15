@@ -53,7 +53,7 @@ final class NetCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/ynet <table|stats|device|ping|dns|get|ntp|sim|stress|flush>";
+        return "/ynet <table|stats|device|identify|confirm|ping|dns|get|ntp|sim|stress|flush>";
     }
 
     @Override
@@ -71,6 +71,10 @@ final class NetCommand extends CommandBase {
             "§6/ynet device bind <玩家> <x> <y> <z> [维度] §f把玩家当成这一格上的电脑（协议栈在他的客户端上）",
             "§6/ynet device unbind <玩家>",
             "§6/ynet device power <x> <y> <z> on|off [维度]",
+            "§6/ynet device operator <x> <y> <z> <玩家>|none §f告诉设备表现在谁在操作（模拟服务端电脑的操作者）",
+            "§6/ynet device cap <x> <y> <z> login|location on|off §f声明、去掉设备的能力（一键登录、定位模块）",
+            "§6/ynet identify <地址> | <x> <y> <z> [维度] §f按来源地址认人：哪台设备、什么能力、谁在操作",
+            "§6/ynet confirm <玩家> §f给他弹一个测试用的系统确认框，回应后显示结果",
             "§6/ynet ping <x> <y> <z> <目标> [次数] [字节数] §f目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名",
             "§6/ynet dns <x> <y> <z> <域名> §f经递归解析器查 AAAA",
             "§6/ynet get <x> <y> <z> <网址> §f用 TCP 取网页（如 http://test.yr/）",
@@ -98,6 +102,12 @@ final class NetCommand extends CommandBase {
                 break;
             case "device":
                 device(server, sender, args);
+                break;
+            case "identify":
+                identify(sender, args);
+                break;
+            case "confirm":
+                confirm(server, sender, args);
                 break;
             case "ping":
                 ping(sender, args);
@@ -274,9 +284,80 @@ final class NetCommand extends CommandBase {
                 }
                 break;
             }
+            case "operator": {
+                if (args.length < 6) {
+                    throw new WrongUsageException("/ynet device operator <x> <y> <z> <玩家>|none");
+                }
+                Place p = place(sender, args, 2, false);
+                DeviceHandle h = net.deviceTable().at(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+                if (h == null) {
+                    tell(sender, "§c" + p + " 没有设备");
+                } else if (args[5].equals("none")) {
+                    h.setOperator(null);
+                    tell(sender, "§a" + p + " 的设备现在没人操作");
+                } else {
+                    EntityPlayerMP player = getPlayer(server, sender, args[5]);
+                    h.setOperator(player);
+                    tell(sender, "§a" + p + " 的设备现在由 " + player.getName() + " 操作" + (h.attachedPlayer() != null ? "（§e网卡接着玩家客户端，这个不算§a）" : ""));
+                }
+                break;
+            }
+            case "cap": {
+                if (args.length < 7) {
+                    throw new WrongUsageException("/ynet device cap <x> <y> <z> login|location on|off");
+                }
+                Place p = place(sender, args, 2, false);
+                DeviceHandle h = net.deviceTable().at(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+                moe.qingu.youran.api.network.DeviceCapability c = args[5].equals("login") ? moe.qingu.youran.api.network.DeviceCapability.ONE_CLICK_LOGIN
+                        : args[5].equals("location") ? moe.qingu.youran.api.network.DeviceCapability.LOCATION : null;
+                if (h == null || c == null) {
+                    tell(sender, "§c" + (h == null ? p + " 没有设备" : "能力只有 login、location"));
+                } else {
+                    h.setCapability(c, args[6].equals("on"));
+                    tell(sender, "§a" + p + " 的设备能力：" + ((DeviceTable.Device) h).capabilitySet());
+                }
+                break;
+            }
             default:
-                throw new WrongUsageException("/ynet device add|remove|list|bind|unbind|power ...");
+                throw new WrongUsageException("/ynet device add|remove|list|bind|unbind|power|operator|cap ...");
         }
+    }
+
+    // ---- 认人、确认框、位置 ----
+
+    private void identify(ICommandSender sender, String[] args) throws CommandException {
+        if (args.length < 2) {
+            throw new WrongUsageException("/ynet identify <地址> | <x> <y> <z> [维度]");
+        }
+        Ipv6Address a;
+        if (args.length >= 4) {
+            Place p = place(sender, args, 1);
+            a = net.deviceTable().addressAt(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+            if (a == null) {
+                tell(sender, "§c" + p + " 没有地址");
+                return;
+            }
+        } else {
+            try {
+                a = Ipv6Address.parse(args[1]);
+            } catch (IllegalArgumentException e) {
+                throw new CommandException("不是 IPv6 地址：" + args[1]);
+            }
+        }
+        moe.qingu.youran.api.network.SourceIdentity id = net.identify(a);
+        tell(sender, id == null ? "§e" + a + "：认不出（不是设备、不是在线玩家的临时地址）"
+                : "§a" + a + "：" + id + "；一键登录" + (id.canOneClickLogin() ? "可以" : "不行"));
+    }
+
+    private void confirm(MinecraftServer server, ICommandSender sender, String[] args) throws CommandException {
+        if (args.length < 2) {
+            throw new WrongUsageException("/ynet confirm <玩家>");
+        }
+        EntityPlayerMP player = getPlayer(server, sender, args[1]);
+        moe.qingu.youran.api.network.ConfirmRequest r = new moe.qingu.youran.api.network.ConfirmRequest("测试确认框", "test.yr",
+                Arrays.asList("这是 /ynet confirm 发的测试", "点同意或拒绝都可以"), 30);
+        net.confirm(null, player.getUniqueID(), r).thenAccept(res -> tell(sender, "§e测试确认框的结果：" + res));
+        tell(sender, "§a已给 " + player.getName() + " 弹框（30 秒）");
     }
 
     // ---- ping、DNS、HTTP、NTP ----
