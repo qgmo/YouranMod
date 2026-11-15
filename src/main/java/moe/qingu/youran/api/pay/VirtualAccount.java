@@ -14,6 +14,9 @@ import java.util.List;
 public interface VirtualAccount {
     AccountRef ref();
 
+    /** 给人看的名字（{@link PayApi#setDisplayName}）；没起过时是登记名（“模组 ID:名字”） */
+    String displayName();
+
     /** 现在的余额 */
     Amount balance();
 

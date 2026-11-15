@@ -13,6 +13,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class PayHooks {
     private static volatile PayBackend backend;
     private static final Map<AccountRef, List<PaymentListener>> LISTENERS = new ConcurrentHashMap<>();
+    /** 虚拟账户（“模组 ID:名字”）→ 给人看的名字；加载阶段就能登记，pay.yr 开着时马上记进账本 */
+    private static final Map<String, String> DISPLAY_NAMES = new ConcurrentHashMap<>();
 
     private PayHooks() {
     }
@@ -34,6 +36,23 @@ public final class PayHooks {
         if (list != null) {
             list.remove(l);
         }
+    }
+
+    public static void setDisplayName(String key, String name) {
+        DISPLAY_NAMES.put(key, name);
+        PayBackend b = backend;
+        if (b != null) {
+            b.applyDisplayName(key, name);
+        }
+    }
+
+    /** 登记过的显示名；没有为 null */
+    public static String displayName(String key) {
+        return key == null ? null : DISPLAY_NAMES.get(key);
+    }
+
+    public static Map<String, String> displayNames() {
+        return Collections.unmodifiableMap(new java.util.HashMap<>(DISPLAY_NAMES));
     }
 
     public static List<PaymentListener> listeners(AccountRef account) {

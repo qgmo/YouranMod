@@ -366,12 +366,18 @@ final class Ledger {
 
     /** 虚拟账户（没有时建） */
     synchronized Account ensureVirtual(String key) throws IOException {
+        return ensureVirtual(key, null);
+    }
+
+    /** 虚拟账户（没有时建）；{@code displayName} 不为 null 时把名字记成它（显示名，见 {@code PayApi.setDisplayName}），为 null 时没有名字的用登记名 */
+    synchronized Account ensureVirtual(String key, String displayName) throws IOException {
         AccountRef ref = AccountRef.virtual(key);
         Account a = accounts.get(ref);
-        if (a == null) {
+        String name = displayName != null ? displayName : a == null || a.name == null ? key : a.name;
+        if (a == null || !name.equals(a.name)) {
             JsonObject e = entry("acct");
             e.addProperty("acct", ref.id());
-            e.addProperty("name", key);
+            e.addProperty("name", name);
             commitEntry(e);
             a = accounts.get(ref);
         }

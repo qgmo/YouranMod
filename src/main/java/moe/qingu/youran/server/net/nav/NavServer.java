@@ -51,6 +51,8 @@ public final class NavServer implements NavService.Env {
     public static final List<String> NAMES = Collections.unmodifiableList(Arrays.asList(NavService.NAV, NavService.PLATFORM, NavService.HELP));
     /** 广告收款进 YouranMod 在 pay.yr 的这个虚拟账户（回收货币，服主 11-15） */
     public static final String ACCOUNT = "youranmod:180";
+    /** 收款账户给人看的名字（付款页、确认框里） */
+    public static final String DISPLAY_NAME = "180 广告";
     /** 收款单多久过期（秒） */
     static final int ORDER_TTL = 900;
 
@@ -120,6 +122,7 @@ public final class NavServer implements NavService.Env {
         s.snapshot();
         MinecraftForge.EVENT_BUS.register(s.events);
         PayApi.addListener(AccountRef.virtual(ACCOUNT), s.payListener);
+        PayApi.setDisplayName(ACCOUNT, DISPLAY_NAME);
         NavService.LOG.info("180.yr：广告账本 {} 已读（{} 条）", dir, book.all().size());
         return s;
     }

@@ -66,6 +66,47 @@ public final class PayApi {
         return need().virtual(key);
     }
 
+    /** 虚拟账户（没有时创建），同时起显示名（同 {@link #setDisplayName}） */
+    public static VirtualAccount virtualAccount(String key, String displayName) throws PayException {
+        try {
+            setDisplayName(key, displayName);
+        } catch (IllegalArgumentException e) {
+            throw new PayException("invalid_account", e.getMessage());
+        }
+        return need().virtual(key);
+    }
+
+    /** 显示名最长几个字 */
+    public static final int MAX_DISPLAY_NAME = 24;
+
+    /**
+     * 给虚拟账户起一个给人看的名字（如 {@code cfm:minebay} → “MineBay”）：付款页、系统确认框、付款人的收支记录里显示它，不显示登记名。
+     * 模组加载阶段就能调用（pay.yr 开服时记进账本），之后任何时候、任意线程调用也行；改名后新的记录用新名字，已经记下的不改。
+     * 名字 1–{@value #MAX_DISPLAY_NAME} 个字，不能有控制字符、格式代码（§）；不对时抛 {@link IllegalArgumentException}。
+     */
+    public static void setDisplayName(String key, String displayName) {
+        AccountRef.virtual(key);
+        PayHooks.setDisplayName(key, checkDisplayName(displayName));
+    }
+
+    /** 检查显示名，返回去掉首尾空白的写法；不合格时抛 {@link IllegalArgumentException} */
+    public static String checkDisplayName(String name) {
+        String n = name == null ? "" : name.trim();
+        if (n.isEmpty() || n.codePointCount(0, n.length()) > MAX_DISPLAY_NAME) {
+            throw new IllegalArgumentException("显示名要 1–" + MAX_DISPLAY_NAME + " 个字：" + name);
+        }
+        for (int i = 0; i < n.length(); ) {
+            int c = n.codePointAt(i);
+            if (Character.isISOControl(c) || c == '\u00a7' || c == 0xFFFD || c == 0xFFFE || c == 0xFFFF
+                    || Character.getType(c) == Character.FORMAT || Character.getType(c) == Character.SURROGATE
+                    || Character.getType(c) == Character.LINE_SEPARATOR || Character.getType(c) == Character.PARAGRAPH_SEPARATOR) {
+                throw new IllegalArgumentException("显示名里不能有控制字符、格式代码：" + name);
+            }
+            i += Character.charCount(c);
+        }
+        return n;
+    }
+
     /** 账户余额（玩家账户、虚拟账户都行）；不可用为 null */
     public static Amount balance(AccountRef account) {
         PayBackend b = PayHooks.backend();

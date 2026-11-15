@@ -29,5 +29,8 @@ public interface PayBackend {
 
     VirtualAccount virtual(String key) throws PayException;
 
+    /** 把虚拟账户的显示名记进账本（{@link PayHooks#setDisplayName} 调用；账户没有时先建）。写不进去只记日志 */
+    void applyDisplayName(String key, String name);
+
     String checkoutUrl(String orderId);
 }

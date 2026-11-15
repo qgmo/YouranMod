@@ -88,6 +88,12 @@ public final class PayServer implements PayBackend {
         }
         MinecraftForge.EVENT_BUS.register(s.events);
         PayHooks.setBackend(s);
+        // 加载阶段登记的显示名：账户已经有的改名（新建的账户在第一次用到时带上）
+        for (java.util.Map.Entry<String, String> e : PayHooks.displayNames().entrySet()) {
+            if (ledger.account(AccountRef.virtual(e.getKey())) != null) {
+                s.applyDisplayName(e.getKey(), e.getValue());
+            }
+        }
         Ledger.LOG.info("pay.yr：账本 {} 已读", dir);
         return s;
     }
@@ -163,7 +169,7 @@ public final class PayServer implements PayBackend {
                     ledger.touchPlayer(d.receiver.player, gp.getName());
                 }
             } else {
-                ledger.ensureVirtual(d.receiver.virtual);
+                ledger.ensureVirtual(d.receiver.virtual, PayHooks.displayName(d.receiver.virtual));
             }
             return ledger.createOrder(d, now);
         } catch (IOException e) {
@@ -352,11 +358,20 @@ public final class PayServer implements PayBackend {
             throw new PayException("invalid_account", e.getMessage());
         }
         try {
-            ledger.ensureVirtual(key);
+            ledger.ensureVirtual(key, PayHooks.displayName(key));
         } catch (IOException e) {
             throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
         }
         return new Virtual(ref);
+    }
+
+    @Override
+    public void applyDisplayName(String key, String name) {
+        try {
+            ledger.ensureVirtual(key, name);
+        } catch (IOException | RuntimeException e) {
+            Ledger.LOG.error("pay.yr：写账本失败，虚拟账户 {} 的显示名没记下", key, e);
+        }
     }
 
     private void firePaid(Ledger.Paid paid) {
@@ -757,6 +772,11 @@ public final class PayServer implements PayBackend {
         @Override
         public AccountRef ref() {
             return ref;
+        }
+
+        @Override
+        public String displayName() {
+            return ledger.name(ref);
         }
 
         @Override

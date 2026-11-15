@@ -444,7 +444,7 @@ final class PayService {
         }
         b.append("<table class=\"info\">\n")
                 .append("<tr><th>收款方</th><td><b>").append(esc(o.receiverName)).append("</b>")
-                .append(o.receiver.isPlayer() ? "（玩家角色）" : o.receiver.virtual.equals(o.receiverName) ? "" : "（" + esc(o.receiver.virtual) + "）").append("</td></tr>\n")
+                .append(o.receiver.isPlayer() ? "（玩家角色）" : "").append("</td></tr>\n")
                 .append("<tr><th>网站</th><td><b>").append(esc(PayPages.site(o.site))).append("</b></td></tr>\n");
         if (o.description != null) {
             b.append("<tr><th>内容</th><td>").append(esc(o.description)).append("</td></tr>\n");
@@ -458,7 +458,8 @@ final class PayService {
             b.append("<table class=\"list\">").append(PayPages.amountRows(o.price, o.unit)).append("</table>");
         }
         b.append("</td></tr>\n")
-                .append("<tr><th>单号</th><td>").append(esc(o.id)).append(o.reference == null ? "" : "（网站单号 " + esc(o.reference) + "）").append("</td></tr>\n")
+                // 网站单号（reference）是网站自己用的，可能带内部编号，付款页不显示（接口照样带回）
+                .append("<tr><th>单号</th><td>").append(esc(o.id)).append("</td></tr>\n")
                 .append("<tr><th>状态</th><td>").append(PayPages.statusName(o.status))
                 .append(o.status == OrderInfo.Status.OPEN ? "，" + PayPages.time(o.expiresAt) + " 前有效，只能付一次" : "").append("</td></tr>\n")
                 .append("</table>\n");
