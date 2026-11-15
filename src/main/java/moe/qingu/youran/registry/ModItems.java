@@ -6,12 +6,14 @@ import moe.qingu.youran.item.ItemFloppyDisk;
 import moe.qingu.youran.item.ItemHome;
 import moe.qingu.youran.item.ItemIceArmor;
 import moe.qingu.youran.item.ItemPrimogemSword;
+import moe.qingu.youran.item.ItemPeripheral;
 import moe.qingu.youran.item.ItemPrimogemTools;
 import moe.qingu.youran.item.ItemRedBloodGem;
 import moe.qingu.youran.item.ItemSiliconWafer;
 import moe.qingu.youran.item.ItemWaterBottle;
 import moe.qingu.youran.item.ItemWithTooltip;
 import moe.qingu.youran.item.ItemYouranLogo;
+import moe.qingu.youran.api.peripheral.Peripherals;
 import moe.qingu.youran.logic.purity.WaferMold;
 import net.minecraft.block.Block;
 import net.minecraft.inventory.EntityEquipmentSlot;
@@ -71,6 +73,9 @@ public final class ModItems {
     public static Item siliconWafer;
     public static Item precisionSiliconWafer;
     public static Item scrapSiliconWafer;
+    /** 外设（服主 11-15；接口见 api.peripheral）：5.25 英寸软驱（个人电脑出厂带一个）、汉卡（普通电脑出厂带一块） */
+    public static Item floppyDrive;
+    public static Item hanziCard;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -135,6 +140,10 @@ public final class ModItems {
         siliconWafer = add(registry, new ItemSiliconWafer("silicon_wafer", "浇注出来的硅晶圆，要在洗矿机里洗过才能用"));
         precisionSiliconWafer = add(registry, new ItemSiliconWafer("precision_silicon_wafer", "洗干净的硅晶圆，可以拿去做芯片"));
         scrapSiliconWafer = add(registry, new ItemWithTooltip("scrap_silicon_wafer", 64, "洗坏了的硅晶圆，放进熔炉或电弧炉烧回硅锭，从头再来"));
+        floppyDrive = add(registry, new ItemPeripheral("floppy_drive", Peripherals.KIND_FLOPPY));
+        hanziCard = add(registry, new ItemPeripheral("hanzi_card", Peripherals.KIND_HANZI));
+        Peripherals.register(floppyDrive);
+        Peripherals.register(hanziCard);
     }
 
     private static Item itemBlock(Block block) {
