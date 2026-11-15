@@ -91,6 +91,30 @@ public final class YouranNetworkApi {
         NetworkRegistry.addName(n, checkKey(hostKey));
     }
 
+    /**
+     * 同上，并登记这个网站在浏览器主页 {@code 180.yr} 上的导航信息（名字、分类、一句话，见 {@link SiteInfo}）。
+     */
+    public static void registerDomainName(String name, String hostKey, SiteInfo nav) {
+        registerDomainName(name, hostKey);
+        registerNavigation(name, nav);
+    }
+
+    /**
+     * 给一个域名登记导航信息（{@code 180.yr} 上的名字、分类、一句话）。域名可以是别处登记的（例如家具模组用自己的接口登记的 MineBay）；
+     * 开服时这个名字在 YouranMod 的 {@code .yr} / {@code .com} 区里查不到就不显示。同一个名字登记了两次时先登记的算。
+     * 模组加载阶段调用。
+     */
+    public static void registerNavigation(String name, SiteInfo nav) {
+        if (nav == null) {
+            throw new IllegalArgumentException("nav 不能为 null");
+        }
+        String n = DomainNames.toAscii(name);
+        if (!(n.endsWith(".yr") || n.endsWith(".com")) || !n.matches("[a-z0-9]([a-z0-9.-]*[a-z0-9])?") || n.contains("..")) {
+            throw new IllegalArgumentException("只能给 .yr 或 .com 下的名字登记导航信息：" + name);
+        }
+        NetworkRegistry.addNav(n, nav, false);
+    }
+
     /** 给维度换一种 /72 划分与路由器（不登记就用 {@link DefaultDimensionNetwork}）。维度要在配置的全局 Wi-Fi 清单里才有地址 */
     public static void registerDimensionNetwork(int dimension, DimensionNetwork network) {
         if (network == null) {
