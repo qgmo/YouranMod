@@ -9,7 +9,8 @@
 		"InvSlotProcessableCannerMixin",
 		"TileEntitySolarDestillerMixin",
 		"InvSlotConsumableLiquidByListAccessor",
-		"FluidsHandlerMixin"
+		"FluidsHandlerMixin",
+		"TileEntityOreWashingMixin"
 	],
 	"client": [],
 	"server": [],

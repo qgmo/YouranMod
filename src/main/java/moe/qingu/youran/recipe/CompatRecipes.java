@@ -27,6 +27,8 @@ public final class CompatRecipes {
         }
         if (ie && tic) {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerCobaltMagnetic();
+            // 芯片线第 7 步：匠魂“盘”铸模 + 硼锭 + 萤石粉 → 掺杂硅晶圆铸模（电弧炉；硼锭要炼金化学）
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerDopedMolds();
         }
         boolean alchemistry = Loader.isModLoaded(AlchemistryCompat.MODID);
         if (ie && alchemistry) {
@@ -35,6 +37,10 @@ public final class CompatRecipes {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerSiliconArcFurnace();
             // 硅粉（粉碎机）
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerSiliconCrusher();
+            // 硼的来源：5 硼硅酸盐渣 → 硼锭 + 二氧化硅粉（电弧炉）
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerBoronArcFurnace();
+            // 芯片线第 9 步：报废硅晶圆烧回硅锭（电弧炉）
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerScrapWafer();
         }
         // 芯片线“硅”：三氯氢硅（搅拌机，要 Mixin 改它的流体比例）
         if (ie) {
@@ -48,8 +54,32 @@ public final class CompatRecipes {
         if (tic && ie && ic2) {
             moe.qingu.youran.compat.tconstruct.TicRecipes.registerAceticAcid();
         }
+        // 芯片线第 6 步：三氯氢硅（9 个 9）+ 氢气（IC2）→ 混合气
+        if (ie && ic2) {
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerMixtureRefinery();
+        }
+        if (tic && ic2) {
+            moe.qingu.youran.compat.tconstruct.TicRecipes.registerMixture();
+        }
+        // 芯片线第 8 步：混合气 + 掺杂铸模 → 硅晶圆（浇铸台、灌装机；装罐机的在反应配方表里）
+        if (tic) {
+            moe.qingu.youran.compat.tconstruct.WaferCasting.register();
+        }
+        if (ie) {
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerWaferBottling();
+        }
         // 炼金化学的化合机、液化器、蒸发器（在它载入完成时应用 CraftTweaker 的删改之前加；没装时什么都不做）
         AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
         AlchemistryCompat.registerAceticAcidConversion(ModFluids.aceticAcid);
+        // 芯片线第 9 步：报废硅晶圆在熔炉里烧回炼金化学硅锭
+        ItemStack silicon = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
+        if (!silicon.isEmpty()) {
+            net.minecraftforge.fml.common.registry.GameRegistry.addSmelting(ModItems.scrapSiliconWafer, silicon, 0.1F);
+        }
+        // 硼的来源：洞穴水晶（电气石）进溶解机（要夸克）
+        if (alchemistry) {
+            BoronRecipes.registerCrystalDissolver();
+            BoronRecipes.registerSlagDissolver(new ItemStack(ModItems.borosilicateSlag));
+        }
     }
 }

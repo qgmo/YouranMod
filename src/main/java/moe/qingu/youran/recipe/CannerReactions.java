@@ -2,6 +2,11 @@ package moe.qingu.youran.recipe;
 
 import moe.qingu.youran.YouranMod;
 import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
+import moe.qingu.youran.fluid.FluidPurity;
+import moe.qingu.youran.item.WaferNbt;
+import moe.qingu.youran.logic.purity.Purity;
+import moe.qingu.youran.logic.purity.WaferMold;
+import moe.qingu.youran.logic.purity.WaferRules;
 import moe.qingu.youran.logic.reaction.FluidItemReaction;
 import moe.qingu.youran.logic.reaction.ItemIngredient;
 import moe.qingu.youran.logic.reaction.ReactionTable;
@@ -111,10 +116,14 @@ public final class CannerReactions {
         if (Loader.isModLoaded("tconstruct")) {
             TABLE.add(cobaltMagnetic());
         }
+        for (WaferMold mold : WaferMold.values()) {
+            TABLE.add(wafer(mold));
+        }
         if (FluidRegistry.isFluidRegistered(HYDROCHLORIC_ACID)) {
             TABLE.add(CannerReactions.<ItemStack>trichlorosilane());
+            TABLE.add(CannerReactions.<ItemStack>silicaFromSlag());
         } else {
-            YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加装罐机的三氯氢硅配方", HYDROCHLORIC_ACID);
+            YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加装罐机的三氯氢硅、硼硅酸盐渣配方", HYDROCHLORIC_ACID);
         }
         YouranMod.LOG.info("装罐机反应配方：内置 {} 条", TABLE.reactions().size());
     }
@@ -150,6 +159,36 @@ public final class CannerReactions {
     static <S> FluidItemReaction<S, ReactionItem> trichlorosilane() {
         return new FluidItemReaction<>(HYDROCHLORIC_ACID, 3000, ItemIngredient.item(YouranMod.MODID + ":silicon_dust", 0, 1),
                 TRICHLOROSILANE, 1000, null);
+    }
+
+    /** 本模组的三氯氢硅氢气混合气 */
+    public static final String MIXTURE = "trichlorosilane_hydrogen";
+
+    /**
+     * 硅晶圆（芯片线第 8 步，服主 11-15）：1000 mB 混合气 + 1 掺杂硅晶圆铸模（消耗）→ 1 硅晶圆，不出流体。
+     * 配方表按流体种类比（不看 NBT）；做出来的晶圆带这次输入的混合气的纯度与铸模材质（{@link ReactionItem.Finisher}）。
+     * 配方里写的产物是 9 个 9 的（JEI 显示用）。
+     */
+    static FluidItemReaction<ItemStack, ReactionItem> wafer(WaferMold mold) {
+        ReactionItem out = new ReactionItem(YouranMod.MODID + ":silicon_wafer", 0, 1, WaferNbt.tag(Purity.WAFER_GRADE_NINES, mold))
+                .finishedBy((made, fluid, item) -> {
+                    made.setTagCompound(WaferNbt.tag(WaferRules.waferNines(fluid == null ? Purity.DEFAULT_NINES : FluidPurity.nines(fluid)), mold));
+                    return made;
+                });
+        return new FluidItemReaction<>(MIXTURE, WaferRules.MIXTURE_PER_WAFER,
+                ItemIngredient.item(YouranMod.MODID + ":doped_wafer_mold_" + mold.id, 0, 1), null, 0, out);
+    }
+
+    /** IC2 的二氧化硅粉 */
+    static final String IC2_DUST = "ic2:dust";
+    static final int IC2_SILICON_DIOXIDE = 13;
+
+    /**
+     * 硼硅酸盐渣去硼（服主 11-15）：2 渣 + 500 mB 盐酸 → 1 IC2 二氧化硅粉，不出流体、不产硼（电气石也算二氧化硅的原料，接回硅线第 1 步）。
+     */
+    static <S> FluidItemReaction<S, ReactionItem> silicaFromSlag() {
+        return new FluidItemReaction<>(HYDROCHLORIC_ACID, 500, ItemIngredient.item(YouranMod.MODID + ":borosilicate_slag", 0, 2),
+                null, 0, new ReactionItem(IC2_DUST, IC2_SILICON_DIOXIDE, 1, null));
     }
 
     /**

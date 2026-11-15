@@ -3,9 +3,14 @@ package moe.qingu.youran.compat.immersiveengineering;
 import blusunrize.immersiveengineering.api.crafting.ArcFurnaceRecipe;
 import blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe;
 import blusunrize.immersiveengineering.api.crafting.CrusherRecipe;
+import blusunrize.immersiveengineering.api.crafting.IngredientStack;
 import blusunrize.immersiveengineering.api.crafting.MetalPressRecipe;
 import blusunrize.immersiveengineering.api.crafting.MixerRecipe;
 import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
+import moe.qingu.youran.fluid.FluidPurity;
+import moe.qingu.youran.logic.purity.Purity;
+import moe.qingu.youran.logic.purity.WaferMold;
+import moe.qingu.youran.logic.purity.WaferRules;
 import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.YouranMod;
 import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
@@ -49,6 +54,40 @@ public final class IeRecipes {
         } else {
             YouranMod.LOG.info("已加沉浸工程炼油厂配方：500 mB {} + 325 mB {} → 500 mB 乙酸", ETHANOL, OXYGEN);
         }
+    }
+
+    /** IC2 电解出来的氢气 */
+    static final String HYDROGEN = "ic2hydrogen";
+
+    /**
+     * 炼油厂：每 tick 10 mB 三氯氢硅 + 40 mB 氢气 → 50 mB 三氯氢硅氢气混合气（芯片线第 6 步，比例 Claude 定，见 logic.purity.WaferRules）。
+     * 只有到了 9 个 9 的三氯氢硅能做；炼油厂按 NBT 比配方，所以 9–32 个 9 每种各一条，混合气的纯度同输入的三氯氢硅。要装了 IC2（氢气）。
+     */
+    public static void registerMixtureRefinery() {
+        FluidStack hydrogen = FluidRegistry.getFluidStack(HYDROGEN, WaferRules.REFINERY_HYDROGEN);
+        if (hydrogen == null) {
+            YouranMod.LOG.info("没有流体 {}（IC2 的氢气），不加沉浸工程炼油厂的混合气配方", HYDROGEN);
+            return;
+        }
+        int added = 0;
+        for (int nines : WaferRules.mixtureGrades()) {
+            FluidStack tcs = FluidPurity.trichlorosilane(WaferRules.REFINERY_TRICHLOROSILANE, nines);
+            FluidStack mixture = FluidPurity.mixture(WaferRules.REFINERY_MIXTURE, WaferRules.mixtureNines(nines));
+            RefineryRecipe.recipeList.add(new PurityRefineryRecipe(mixture, tcs, hydrogen.copy(), WaferRules.REFINERY_ENERGY,
+                    nines == Purity.WAFER_GRADE_NINES));
+            RefineryRecipe found = RefineryRecipe.findRecipe(hydrogen, tcs);
+            if (found == null || !mixture.isFluidStackIdentical(found.output)) {
+                YouranMod.LOG.error("沉浸工程炼油厂的混合气配方（{} 个 9）没生效：同样的输入找到的是 {}", nines, found == null ? null : found.output);
+            } else {
+                added++;
+            }
+        }
+        RefineryRecipe below = RefineryRecipe.findRecipe(FluidPurity.trichlorosilane(WaferRules.REFINERY_TRICHLOROSILANE, Purity.WAFER_GRADE_NINES - 1), hydrogen);
+        if (below != null) {
+            YouranMod.LOG.error("不到 9 个 9 的三氯氢硅在炼油厂里也找到了配方：{}", below.output);
+        }
+        YouranMod.LOG.info("已加沉浸工程炼油厂配方：{} mB 三氯氢硅（{}–{} 个 9，{} 条）+ {} mB 氢气 → {} mB 混合气", WaferRules.REFINERY_TRICHLOROSILANE,
+                Purity.WAFER_GRADE_NINES, Purity.MAX_NINES, added, WaferRules.REFINERY_HYDROGEN, WaferRules.REFINERY_MIXTURE);
     }
 
     /** 灌装机：1 磁粉 + 10 mB 熔融钴 → 1 钴改性磁粉（同装罐机富集模式的那条） */
@@ -121,16 +160,18 @@ public final class IeRecipes {
         }
     }
 
-    /** IC2 的二氧化硅粉（ic2:dust:13）；沉浸工程的焦炭（immersiveengineering:material:6） */
+    /** IC2 的二氧化硅粉（ic2:dust:13）；沉浸工程的焦炭（immersiveengineering:material:6）与焦炭粉（material:17） */
     static final String SILICON_DIOXIDE_DUST = "dustSiliconDioxide";
     static final String COKE = "fuelCoke";
+    static final String COKE_DUST = "dustCoke";
     /** 电弧炉：时间、每 tick 电耗同沉浸工程自己的钢（铁锭 + 焦炭粉 → 钢锭：400 tick、512 Flux/tick） */
     static final int ARC_TIME = 400;
     static final int ARC_ENERGY_PER_TICK = 512;
 
     /**
-     * 电弧炉：1 二氧化硅粉（IC2）+ 辅料 1 焦炭 → 1 炼金化学硅锭（服主 11-15，芯片线“硅”第 1 步，粗硅）。不出炉渣。
-     * 要装了炼金化学；二氧化硅粉按矿物词典 dustSiliconDioxide（IC2 注册），焦炭按 fuelCoke（沉浸工程注册）。
+     * 电弧炉：1 二氧化硅粉（IC2）+ 辅料 1 焦炭或焦炭粉 → 1 炼金化学硅锭（服主 11-15，芯片线“硅”第 1 步，粗硅）。不出炉渣。
+     * 要装了炼金化学；二氧化硅粉按矿物词典 dustSiliconDioxide（IC2 注册），辅料认 fuelCoke 与 dustCoke（沉浸工程注册；
+     * 沉浸工程按矿物词典名的列表合成一种辅料，两种都能放进辅料槽）。
      */
     public static void registerSiliconArcFurnace() {
         ItemStack silicon = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
@@ -142,17 +183,144 @@ public final class IeRecipes {
             YouranMod.LOG.info("矿物词典里没有 {}（没装 IC2？），不加沉浸工程电弧炉的粗硅配方", SILICON_DIOXIDE_DUST);
             return;
         }
-        ArcFurnaceRecipe.addRecipe(silicon, SILICON_DIOXIDE_DUST, ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK, COKE);
+        ArcFurnaceRecipe.addRecipe(silicon, SILICON_DIOXIDE_DUST, ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK,
+                java.util.Arrays.asList(COKE, COKE_DUST));
         ItemStack dust = OreDictionary.getOres(SILICON_DIOXIDE_DUST, false).get(0);
-        NonNullList<ItemStack> additives = NonNullList.withSize(4, ItemStack.EMPTY);
-        if (!OreDictionary.getOres(COKE, false).isEmpty()) {
-            additives.set(0, OreDictionary.getOres(COKE, false).get(0).copy());
+        for (String coke : new String[]{COKE, COKE_DUST}) {
+            if (OreDictionary.getOres(coke, false).isEmpty()) {
+                continue;
+            }
+            NonNullList<ItemStack> additives = NonNullList.withSize(4, ItemStack.EMPTY);
+            additives.set(0, OreDictionary.getOres(coke, false).get(0).copy());
+            ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(dust, additives);
+            if (found == null || !ItemStack.areItemStacksEqual(found.output, silicon)) {
+                YouranMod.LOG.error("沉浸工程电弧炉的粗硅配方（辅料 {}）没生效：同样的输入找到的是 {}", coke, found == null ? null : found.output);
+            } else {
+                YouranMod.LOG.info("已加沉浸工程电弧炉配方：二氧化硅粉 + {} → 硅锭", coke);
+            }
         }
-        ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(dust, additives);
-        if (found == null || !ItemStack.areItemStacksEqual(found.output, silicon)) {
-            YouranMod.LOG.error("沉浸工程电弧炉的粗硅配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
+    }
+
+    /** 电弧炉：5 硼硅酸盐渣 → 1 炼金化学硼锭 + 3 二氧化硅粉（二氧化硅粉放在炉渣格里出） */
+    static final int SLAG_PER_BORON = 5;
+    static final int SLAG_SILICA = 3;
+
+    /**
+     * 电弧炉：5 硼硅酸盐渣 → 1 硼锭 + 3 IC2 二氧化硅粉（服主 11-15）。电弧炉只有一个产物格，二氧化硅粉放在炉渣格（沉浸工程的炉渣格能出任意物品），
+     * 时间、电耗同粗硅。要装了炼金化学（硼锭）；二氧化硅粉按矿物词典 dustSiliconDioxide（IC2），没有时只出硼锭。
+     */
+    public static void registerBoronArcFurnace() {
+        ItemStack boron = AlchemistryCompat.ingot(AlchemistryCompat.BORON, 1);
+        if (boron.isEmpty()) {
+            YouranMod.LOG.info("没有炼金化学的硼锭，不加沉浸工程电弧炉的硼硅酸盐渣配方");
+            return;
+        }
+        ItemStack silica = ItemStack.EMPTY;
+        if (!OreDictionary.getOres(SILICON_DIOXIDE_DUST, false).isEmpty()) {
+            silica = OreDictionary.getOres(SILICON_DIOXIDE_DUST, false).get(0).copy();
+            silica.setCount(SLAG_SILICA);
+        }
+        ItemStack slag = new ItemStack(ModItems.borosilicateSlag, SLAG_PER_BORON);
+        ArcFurnaceRecipe.addRecipe(boron, slag, silica, ARC_TIME, ARC_ENERGY_PER_TICK);
+        ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(slag, NonNullList.withSize(4, ItemStack.EMPTY));
+        if (found == null || !ItemStack.areItemStacksEqual(found.output, boron)) {
+            YouranMod.LOG.error("沉浸工程电弧炉的硼硅酸盐渣配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
         } else {
-            YouranMod.LOG.info("已加沉浸工程电弧炉配方：二氧化硅粉 + 焦炭 → 硅锭");
+            YouranMod.LOG.info("已加沉浸工程电弧炉配方：5 硼硅酸盐渣 → 硼锭 + {} 二氧化硅粉", silica.getCount());
+        }
+    }
+
+    /** 匠魂的“盘”（平底锅锅头）部件，铸模的 NBT 里记它：{PartType:"tconstruct:pan_head"} */
+    static final String PAN_HEAD = "tconstruct:pan_head";
+    static final String TIC_PART_TYPE = "PartType";
+    /** 掺杂辅料：1 硼锭（矿物词典 ingotBoron，炼金化学注册）+ 4 萤石粉（dustGlowstone，原版） */
+    static final String BORON_INGOT = "ingotBoron";
+    static final String GLOWSTONE_DUST = "dustGlowstone";
+    static final int GLOWSTONE_PER_MOLD = 4;
+
+    /** 匠魂“盘”铸模：金铸模 {@code tconstruct:cast}、粘土铸模 {@code tconstruct:clay_cast}，NBT 记部件；没装匠魂时为空物品 */
+    static ItemStack panCast(WaferMold mold) {
+        Item cast = ForgeRegistries.ITEMS.getValue(new ResourceLocation("tconstruct", mold == WaferMold.GOLD ? "cast" : "clay_cast"));
+        if (cast == null || !ForgeRegistries.ITEMS.containsKey(new ResourceLocation(PAN_HEAD))) {
+            return ItemStack.EMPTY;
+        }
+        ItemStack stack = new ItemStack(cast);
+        net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
+        tag.setString(TIC_PART_TYPE, PAN_HEAD);
+        stack.setTagCompound(tag);
+        return stack;
+    }
+
+    /**
+     * 电弧炉：匠魂“盘”铸模（金或粘土）+ 辅料 1 硼锭 + 4 萤石粉 → 对应材质的掺杂硅晶圆铸模（服主 11-15，芯片线第 7 步）。
+     * 铸模按 NBT 比（只认“盘”的铸模，别的部件的不行）；时间、电耗同粗硅（Claude 定）。要装了匠魂；硼锭没有时（没装炼金化学）不加。
+     */
+    public static void registerDopedMolds() {
+        if (OreDictionary.getOres(BORON_INGOT, false).isEmpty()) {
+            YouranMod.LOG.info("矿物词典里没有 {}（没装炼金化学？），不加沉浸工程电弧炉的掺杂硅晶圆铸模配方", BORON_INGOT);
+            return;
+        }
+        for (WaferMold mold : WaferMold.values()) {
+            ItemStack cast = panCast(mold);
+            if (cast.isEmpty()) {
+                YouranMod.LOG.info("没有匠魂的“盘”铸模（{}），不加沉浸工程电弧炉的掺杂硅晶圆铸模配方", mold.id);
+                return;
+            }
+            ItemStack output = new ItemStack(ModItems.dopedWaferMold(mold));
+            ArcFurnaceRecipe.addRecipe(output, new IngredientStack(cast).setUseNBT(true), ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK,
+                    BORON_INGOT, new IngredientStack(GLOWSTONE_DUST, GLOWSTONE_PER_MOLD));
+            NonNullList<ItemStack> additives = NonNullList.withSize(4, ItemStack.EMPTY);
+            additives.set(0, OreDictionary.getOres(BORON_INGOT, false).get(0).copy());
+            additives.set(1, new ItemStack(net.minecraft.init.Items.GLOWSTONE_DUST, GLOWSTONE_PER_MOLD));
+            ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(cast, additives);
+            ItemStack otherPart = cast.copy();
+            otherPart.getTagCompound().setString(TIC_PART_TYPE, "tconstruct:sword_blade");
+            ArcFurnaceRecipe wrong = ArcFurnaceRecipe.findRecipe(otherPart, additives);
+            if (found == null || found.output.getItem() != output.getItem() || (wrong != null && wrong.output.getItem() == output.getItem())) {
+                YouranMod.LOG.error("沉浸工程电弧炉的掺杂硅晶圆铸模配方（{}）没生效：找到的是 {}，别的部件的铸模找到的是 {}", mold.id,
+                        found == null ? null : found.output, wrong == null ? null : wrong.output);
+            } else {
+                YouranMod.LOG.info("已加沉浸工程电弧炉配方：“盘”{}铸模 + 硼锭 + {} 萤石粉 → 掺杂硅晶圆铸模", mold.id, GLOWSTONE_PER_MOLD);
+            }
+        }
+    }
+
+    /**
+     * 灌装机：1000 mB 混合气 + 1 掺杂硅晶圆铸模（消耗）→ 1 硅晶圆（服主 11-15，芯片线第 8 步），晶圆带混合气的纯度与铸模材质。
+     * 灌装机按 NBT 比配方，所以每种纯度（没有标记的与 9–32 个 9）、每种铸模各一条，共 50 条；JEI 里只列 9 个 9 的两条。
+     */
+    public static void registerWaferBottling() {
+        int added = 0;
+        for (WaferMold mold : WaferMold.values()) {
+            ItemStack input = new ItemStack(ModItems.dopedWaferMold(mold));
+            for (int nines : WaferRules.castingGrades()) {
+                FluidStack fluid = FluidPurity.mixture(WaferRules.MIXTURE_PER_WAFER, nines);
+                ItemStack wafer = moe.qingu.youran.item.ItemSiliconWafer.make(ModItems.siliconWafer, WaferRules.waferNines(nines), mold);
+                BottlingMachineRecipe.recipeList.add(new PurityBottlingRecipe(wafer, input, fluid, nines == Purity.WAFER_GRADE_NINES));
+                BottlingMachineRecipe found = BottlingMachineRecipe.findRecipe(input, fluid);
+                if (found == null || !ItemStack.areItemStackTagsEqual(found.output, wafer) || found.output.getItem() != wafer.getItem()) {
+                    YouranMod.LOG.error("沉浸工程灌装机的硅晶圆配方（{}，{} 个 9）没生效：找到的是 {}", mold.id, nines, found == null ? null : found.output);
+                } else {
+                    added++;
+                }
+            }
+        }
+        YouranMod.LOG.info("已加沉浸工程灌装机配方：{} mB 混合气 + 掺杂硅晶圆铸模 → 硅晶圆（{} 条）", WaferRules.MIXTURE_PER_WAFER, added);
+    }
+
+    /** 电弧炉：1 报废硅晶圆 → 1 炼金化学硅锭（重新走硅线），不要辅料，时间、电耗同粗硅。要装了炼金化学 */
+    public static void registerScrapWafer() {
+        ItemStack silicon = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
+        if (silicon.isEmpty()) {
+            return;
+        }
+        ItemStack scrap = new ItemStack(ModItems.scrapSiliconWafer);
+        ArcFurnaceRecipe.addRecipe(silicon, scrap, ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK);
+        ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(scrap, NonNullList.withSize(4, ItemStack.EMPTY));
+        if (found == null || !ItemStack.areItemStacksEqual(found.output, silicon)) {
+            YouranMod.LOG.error("沉浸工程电弧炉的报废硅晶圆配方没生效：找到的是 {}", found == null ? null : found.output);
+        } else {
+            YouranMod.LOG.info("已加沉浸工程电弧炉配方：报废硅晶圆 → 硅锭");
         }
     }
 

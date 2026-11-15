@@ -73,7 +73,8 @@ public final class CannerReactionHooks {
         left.amount -= r.inputAmount();
         ICannerEnrichRecipeManager.RawInput adjusted = new ICannerEnrichRecipeManager.RawInput(left.amount > 0 ? left : null,
                 StackUtil.copyShrunk(additive, r.inputItem().count()));
-        CannerReactionOutput output = new CannerReactionOutput(outputFluid(r), outputItem(r));
+        ItemStack made = r.outputItem() == null ? ItemStack.EMPTY : r.outputItem().toStack(tank.copy(), additive.copy());
+        CannerReactionOutput output = new CannerReactionOutput(outputFluid(r), made);
         return new Outcome(true, new MachineRecipeResult<>(new MachineRecipe<Object, Object>(r, output), adjusted));
     }
 

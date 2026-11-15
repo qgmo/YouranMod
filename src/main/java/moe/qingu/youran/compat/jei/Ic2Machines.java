@@ -16,6 +16,10 @@ final class Ic2Machines {
         return orEmpty(IC2Items.getItem("te", "solar_distiller"));
     }
 
+    static ItemStack oreWashingPlant() {
+        return orEmpty(IC2Items.getItem("te", "ore_washing_plant"));
+    }
+
     private static ItemStack orEmpty(ItemStack stack) {
         return stack == null ? ItemStack.EMPTY : stack;
     }

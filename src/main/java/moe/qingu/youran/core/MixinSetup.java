@@ -21,14 +21,18 @@ public final class MixinSetup {
     public static final String IE_CONFIG = "mixins.youranmod.ie.json";
     /** 修补沉浸原油的类（精馏塔提纯三氯氢硅）：要沉浸工程与沉浸原油都在 */
     public static final String IP_CONFIG = "mixins.youranmod.ip.json";
+    /** 修补匠魂的类（浇铸台收带 NBT 的流体）：没装匠魂时不注册 */
+    public static final String TIC_CONFIG = "mixins.youranmod.tic.json";
     /** IC2 的主类，用来认出它的 jar */
     static final String IC2_MAIN_CLASS = "ic2/core/IC2.class";
     /** 沉浸工程的主类 */
     static final String IE_MAIN_CLASS = "blusunrize/immersiveengineering/ImmersiveEngineering.class";
     /** 沉浸原油的主类 */
     static final String IP_MAIN_CLASS = "flaxbeard/immersivepetroleum/ImmersivePetroleum.class";
-    /** 要修补的模组的主类，核心插件按这些找 jar（顺序同 {@link #configs(boolean, boolean, boolean)} 的参数） */
-    static final String[] MAIN_CLASSES = {IC2_MAIN_CLASS, IE_MAIN_CLASS, IP_MAIN_CLASS};
+    /** 匠魂的主类 */
+    static final String TIC_MAIN_CLASS = "slimeknights/tconstruct/TConstruct.class";
+    /** 要修补的模组的主类，核心插件按这些找 jar（顺序同 {@link #configs(boolean, boolean, boolean, boolean)} 的参数） */
+    static final String[] MAIN_CLASSES = {IC2_MAIN_CLASS, IE_MAIN_CLASS, IP_MAIN_CLASS, TIC_MAIN_CLASS};
 
     private MixinSetup() {
     }
@@ -37,7 +41,7 @@ public final class MixinSetup {
     public static List<String> lateConfigs() {
         ClassLoader loader = MixinSetup.class.getClassLoader();
         return configs(present(loader, IC2_CONFIG, IC2_MAIN_CLASS), present(loader, IE_CONFIG, IE_MAIN_CLASS),
-                present(loader, IP_CONFIG, IP_MAIN_CLASS));
+                present(loader, IP_CONFIG, IP_MAIN_CLASS), present(loader, TIC_CONFIG, TIC_MAIN_CLASS));
     }
 
     private static boolean present(ClassLoader loader, String config, String mainClass) {
@@ -48,8 +52,12 @@ public final class MixinSetup {
         return configs(ic2, false, false);
     }
 
-    /** 沉浸原油的配置要沉浸工程也在（它的类继承沉浸工程的类） */
     static List<String> configs(boolean ic2, boolean ie, boolean ip) {
+        return configs(ic2, ie, ip, false);
+    }
+
+    /** 沉浸原油的配置要沉浸工程也在（它的类继承沉浸工程的类）；匠魂的单独看 */
+    static List<String> configs(boolean ic2, boolean ie, boolean ip, boolean tic) {
         List<String> configs = new ArrayList<>();
         if (ic2) {
             configs.add(IC2_CONFIG);
@@ -59,6 +67,9 @@ public final class MixinSetup {
             if (ip) {
                 configs.add(IP_CONFIG);
             }
+        }
+        if (tic) {
+            configs.add(TIC_CONFIG);
         }
         return Collections.unmodifiableList(configs);
     }

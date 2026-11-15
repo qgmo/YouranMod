@@ -7,7 +7,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
 /**
- * 精馏塔提纯三氯氢硅的一份配方：{@value Purity#BATCH_INPUT} mB 某个纯度 → {@value Purity#BATCH_OUTPUT} mB 杂质降到十分之一。
+ * 精馏塔提纯三氯氢硅的一份配方：{@value Purity#BATCH_INPUT} mB 某个纯度 → {@value Purity#BATCH_OUTPUT} mB 多一个 9（杂质降到十分之一）。
  * 每种纯度（准确说是每种 NBT）各一份，输入带着原来的 NBT，精馏塔扣输入时才扣得对（沉浸工程的多流体罐按 NBT 区分流体）。
  * 不进 {@code DistillationRecipe.recipeList}，由 {@code mixin.immersivepetroleum.DistillationRecipeMixin} 在找配方时给出。
  *

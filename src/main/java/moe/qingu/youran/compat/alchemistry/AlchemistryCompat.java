@@ -26,7 +26,8 @@ import java.util.Map;
  * <ul>
  *     <li>600 四氧化三铁 {@code triiron_tetroxide}：铁 3、氧 4；</li>
  *     <li>601 乙酸 {@code acetic_acid}：碳 2、氢 4、氧 2；</li>
- *     <li>602 醋酸纤维素 {@code cellulose_acetate}：碳 12、氢 16、氧 8（三醋酸纤维素的重复单元）。</li>
+ *     <li>602 醋酸纤维素 {@code cellulose_acetate}：碳 12、氢 16、氧 8（三醋酸纤维素的重复单元）；</li>
+ *     <li>603 硼酸根 {@code borate}：硼 1、氧 3（电气石里的 BO₃ 单元，芯片线的硼来源）。</li>
  * </ul>
  * 名字在本模组 jar 里的 {@code assets/alchemistry/lang/*.lang}（键 {@code item.alchemistry:compound_<名字>.name}），
  * 客户端加载语言文件时与炼金化学自己的合并。
@@ -36,6 +37,8 @@ public final class AlchemistryCompat {
     public static final String TRIIRON_TETROXIDE = "triiron_tetroxide";
     public static final String ACETIC_ACID = "acetic_acid";
     public static final String CELLULOSE_ACETATE = "cellulose_acetate";
+    /** 硼酸根（服主 11-15，硼的来源） */
+    public static final String BORATE = moe.qingu.youran.logic.boron.Tourmaline.BORATE;
     /** 炼金化学自带的纤维素 */
     public static final String CELLULOSE = "cellulose";
     static final String ITEM_COMPOUND = "alchemistry:compound";
@@ -43,12 +46,15 @@ public final class AlchemistryCompat {
     static final String ITEM_INGOT = "alchemistry:ingot";
     /** 硅的原子序数（硅锭 {@code alchemistry:ingot:14}） */
     public static final int SILICON = 14;
+    /** 硼的原子序数（硼锭 {@code alchemistry:ingot:5}，矿物词典 ingotBoron） */
+    public static final int BORON = 5;
 
     /** 要注册的化合物：名字、元数据、颜色、组成（元素名, 个数） */
     static final List<CompoundSpec> COMPOUNDS = Arrays.asList(
             new CompoundSpec(TRIIRON_TETROXIDE, 600, new Color(40, 40, 46), "iron", 3, "oxygen", 4),
             new CompoundSpec(ACETIC_ACID, 601, new Color(236, 234, 214), "carbon", 2, "hydrogen", 4, "oxygen", 2),
-            new CompoundSpec(CELLULOSE_ACETATE, 602, new Color(226, 222, 204), "carbon", 12, "hydrogen", 16, "oxygen", 8));
+            new CompoundSpec(CELLULOSE_ACETATE, 602, new Color(226, 222, 204), "carbon", 12, "hydrogen", 16, "oxygen", 8),
+            new CompoundSpec(BORATE, 603, new Color(214, 222, 236), "boron", 1, "oxygen", 3));
 
     /** 化合物名 → 元数据（注册成的，或炼金化学里已有的） */
     private static final Map<String, Integer> METAS = new HashMap<>();
@@ -94,6 +100,27 @@ public final class AlchemistryCompat {
         int meta = meta(name);
         Item compound = ForgeRegistries.ITEMS.getValue(new ResourceLocation(ITEM_COMPOUND));
         return meta < 0 || compound == null ? ItemStack.EMPTY : new ItemStack(compound, count, meta);
+    }
+
+    /**
+     * 元素或化合物（按炼金化学里的名字，如 {@code iron}、{@code metasilicate}）；没装炼金化学或没有这个名字时为空物品。
+     * 先找元素，再找化合物。
+     */
+    public static ItemStack chemical(String name, int count) {
+        if (!Loader.isModLoaded(MODID)) {
+            return ItemStack.EMPTY;
+        }
+        try {
+            Class<?> elements = Class.forName("al132.alchemistry.chemistry.ElementRegistry");
+            Object element = elements.getMethod("get", String.class).invoke(elements.getField("INSTANCE").get(null), name);
+            if (element != null) {
+                return (ItemStack) element.getClass().getMethod("toItemStack", int.class).invoke(element, count);
+            }
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("查不到炼金化学的元素 {}", name, e);
+            return ItemStack.EMPTY;
+        }
+        return stack(name, count);
     }
 
     /** 元素锭（元数据是原子序数）；没装炼金化学时为空物品 */
@@ -187,6 +214,46 @@ public final class AlchemistryCompat {
             YouranMod.LOG.info("已加炼金化学液化器、蒸发器配方：8 {} ⇄ 500 mB 乙酸", ACETIC_ACID);
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
             YouranMod.LOG.error("加炼金化学的乙酸液化器、蒸发器配方失败", e);
+        }
+    }
+
+    /**
+     * 溶解机配方：{@code input}（数量是每次消耗的个数）→ 若干组产物。每组按概率（百分数，100 = 必出）独立地出，
+     * 同炼金化学自己的“绝对概率”配方（{@code relativeProbability = false}，掷一次）。后初始化时调用。
+     * 组里有元素 / 化合物找不到时整条不加，返回 false。
+     */
+    public static boolean addDissolverRecipe(ItemStack input, List<List<moe.qingu.youran.logic.boron.Tourmaline.Portion>> groups) {
+        if (input.isEmpty()) {
+            return false;
+        }
+        try {
+            Constructor<?> groupCtor = Class.forName("al132.alchemistry.recipes.ProbabilityGroup").getConstructor(List.class, double.class);
+            List<Object> built = new ArrayList<>();
+            for (List<moe.qingu.youran.logic.boron.Tourmaline.Portion> group : groups) {
+                List<ItemStack> stacks = new ArrayList<>();
+                int percent = 100;
+                for (moe.qingu.youran.logic.boron.Tourmaline.Portion p : group) {
+                    ItemStack s = chemical(p.name, p.count);
+                    if (s.isEmpty()) {
+                        YouranMod.LOG.info("炼金化学里没有 {}，不加 {} 的溶解机配方", p.name, input.getItem().getRegistryName());
+                        return false;
+                    }
+                    stacks.add(s);
+                    percent = p.percent;
+                }
+                built.add(groupCtor.newInstance(stacks, (double) percent));
+            }
+            Object set = Class.forName("al132.alchemistry.recipes.ProbabilitySet").getConstructor(List.class, boolean.class, int.class)
+                    .newInstance(built, false, 1);
+            Object recipe = Class.forName("al132.alchemistry.recipes.DissolverRecipe")
+                    .getConstructor(net.minecraft.item.crafting.Ingredient.class, boolean.class, set.getClass())
+                    .newInstance(net.minecraft.item.crafting.Ingredient.fromStacks(input.copy()), false, set);
+            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
+            listOf(modRecipesClass, modRecipesClass.getField("INSTANCE").get(null), "getDissolverRecipes").add(recipe);
+            return true;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("加炼金化学的溶解机配方失败：{}", input.getItem().getRegistryName(), e);
+            return false;
         }
     }
 

@@ -1,6 +1,11 @@
 package moe.qingu.youran.compat.jei;
 
 import moe.qingu.youran.fluid.FluidPurity;
+import moe.qingu.youran.item.ItemSiliconWafer;
+import moe.qingu.youran.logic.purity.WashWater;
+import moe.qingu.youran.logic.purity.WaferMold;
+import moe.qingu.youran.logic.purity.WaferRules;
+import moe.qingu.youran.registry.ModItems;
 import moe.qingu.youran.logic.purity.Purity;
 import moe.qingu.youran.logic.reaction.FluidItemReaction;
 import moe.qingu.youran.logic.reaction.ItemIngredient;
@@ -33,6 +38,10 @@ final class JeiRecipes {
         List<FluidItemRecipe> list = new ArrayList<>();
         for (FluidItemReaction<ItemStack, ReactionItem> r : CannerReactions.TABLE.reactions()) {
             FluidStack in = FluidRegistry.getFluidStack(r.inputFluid(), r.inputAmount());
+            if (in != null && CannerReactions.MIXTURE.equals(r.inputFluid())) {
+                // 混合气只有 9 个 9 起的（配方表按流体种类比，这里显示能做出来的最低纯度，JEI 才能连到炼油厂、冶炼炉）
+                in = FluidPurity.mixture(r.inputAmount(), Purity.WAFER_GRADE_NINES);
+            }
             List<ItemStack> items = stacks(r.inputItem());
             FluidStack out = r.outputFluid() == null ? null : FluidRegistry.getFluidStack(r.outputFluid(), r.outputAmount());
             ItemStack outItem = r.outputItem() == null ? ItemStack.EMPTY : r.outputItem().toStack();
@@ -70,16 +79,16 @@ final class JeiRecipes {
         return copy;
     }
 
-    /** 提纯：10 mB 纯度 90% → 9 mB 99% → … → 9 mB 99.9999999%，一遍一条，每条带上同样的说明 */
+    /** 提纯：10 mB 1 个 9（90%）→ 9 mB 2 个 9 → … → 9 mB 9 个 9，一遍一条，每条带上同样的说明 */
     static List<FluidItemRecipe> purification(String noteKey, Object... noteArgs) {
         List<FluidItemRecipe> list = new ArrayList<>();
-        double imp = Purity.DEFAULT_IMPURITY;
+        int nines = Purity.DEFAULT_NINES;
         String note = I18n.format(noteKey, noteArgs);
         for (int pass = 0; pass < PURIFY_PASSES; pass++) {
-            double next = Purity.distilled(imp);
-            list.add(FluidItemRecipe.fluids(FluidPurity.trichlorosilane(Purity.BATCH_INPUT, imp),
+            int next = Purity.distilled(nines);
+            list.add(FluidItemRecipe.fluids(FluidPurity.trichlorosilane(Purity.BATCH_INPUT, nines),
                     FluidPurity.trichlorosilane(Purity.BATCH_OUTPUT, next), Collections.singletonList(note)));
-            imp = next;
+            nines = next;
         }
         return list;
     }
@@ -93,6 +102,41 @@ final class JeiRecipes {
             return null;
         }
         return FluidItemRecipe.fluids(input, output, Collections.singletonList(I18n.format(noteKey, noteArgs)));
+    }
+
+    /**
+     * 洗矿机洗硅晶圆：整合包里有的每种水一条（1000 mB 水 + 9 个 9 的硅晶圆 → 高精硅晶圆），说明里写纯净率与 9 个 9 时
+     * 金、粘土铸模的报废率。
+     */
+    static List<FluidItemRecipe> waferWashing(List<String> waters) {
+        List<FluidItemRecipe> list = new ArrayList<>();
+        for (String name : waters) {
+            FluidStack water = FluidRegistry.getFluidStack(name, WaferRules.WASH_WATER);
+            if (water == null) {
+                continue;
+            }
+            int rate = WashWater.rate(name);
+            List<ItemStack> wafers = new ArrayList<>();
+            for (WaferMold mold : WaferMold.values()) {
+                wafers.add(ItemSiliconWafer.make(ModItems.siliconWafer, Purity.WAFER_GRADE_NINES, mold));
+            }
+            List<String> notes = java.util.Arrays.asList(I18n.format("youranmod.jei.ore_washing_wafer.note", rate),
+                    I18n.format("youranmod.jei.ore_washing_wafer.scrap",
+                            percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.GOLD)),
+                            percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.CLAY))));
+            list.add(new FluidItemRecipe(water, wafers, null,
+                    ItemSiliconWafer.make(ModItems.precisionSiliconWafer, Purity.WAFER_GRADE_NINES, WaferMold.GOLD), notes));
+        }
+        return list;
+    }
+
+    /** 概率写成百分数，最多一位小数：0.075 →“7.5%”，0.4 →“40%” */
+    static String percent(double p) {
+        String s = String.format(java.util.Locale.ROOT, "%.1f", p * 100);
+        if (s.endsWith(".0")) {
+            s = s.substring(0, s.length() - 2);
+        }
+        return s + "%";
     }
 
     /** 按注册名与元数据取物品；没有时为空物品 */

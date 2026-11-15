@@ -30,6 +30,17 @@ class MixinSetupTest {
         assertEquals(Collections.emptyList(), MixinSetup.configs(false, false, false));
     }
 
+    /** 匠魂的配置只看匠魂装没装，排在最后 */
+    @Test
+    void ticConfig() {
+        assertEquals(java.util.Arrays.asList("mixins.youranmod.ic2.json", "mixins.youranmod.ie.json", "mixins.youranmod.ip.json",
+                "mixins.youranmod.tic.json"), MixinSetup.configs(true, true, true, true));
+        assertEquals(Collections.singletonList("mixins.youranmod.tic.json"), MixinSetup.configs(false, false, true, true));
+        assertEquals(MixinSetup.configs(true, true, false), MixinSetup.configs(true, true, false, false));
+        assertEquals(4, MixinSetup.MAIN_CLASSES.length);
+        assertEquals(MixinSetup.TIC_MAIN_CLASS, MixinSetup.MAIN_CLASSES[3]);
+    }
+
     /** 核心插件在 mods 与 mods/1.12.2 里按主类找 IC2 的 jar */
     @Test
     void findsIc2JarByMainClass() throws IOException {
