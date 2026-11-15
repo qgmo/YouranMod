@@ -2,7 +2,6 @@ package moe.qingu.youran.server.net.pay;
 
 import moe.qingu.youran.api.lang.ServerLang;
 import moe.qingu.youran.api.network.ConfirmRequest;
-import moe.qingu.youran.api.network.ConfirmText;
 import moe.qingu.youran.api.pay.Amount;
 import moe.qingu.youran.api.pay.Currency;
 import moe.qingu.youran.api.pay.PayItem;
@@ -11,7 +10,7 @@ import net.minecraft.item.ItemStack;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** 物品与金额的文字：网页上用服务端的中文名；确认框里用翻译键（客户端按玩家的语言显示），中文名作退路 */
+/** 物品与金额的文字：网页上、请 id.yr 弹的确认框里都用服务端的中文名 */
 final class ItemText {
     private static final Map<PayItem, String> NAMES = new ConcurrentHashMap<>();
     private static volatile int namesVersion = -1;
@@ -63,37 +62,6 @@ final class ItemText {
         for (PayItem i : m.keySet()) {
             cache(i);
         }
-    }
-
-    /** 确认框里的物品名（主线程）：没改名的用翻译键 */
-    static ConfirmText confirmName(PayItem item) {
-        String zh = clip(cache(item), 40);
-        ItemStack s = item.toStack(1);
-        if (s.isEmpty() || s.hasDisplayName()) {
-            return ConfirmText.literal(clean(zh));
-        }
-        String key = s.getTranslationKey() + ".name";
-        return ConfirmText.KEY.matcher(key).matches() ? ConfirmText.translate(key, clean(zh)) : ConfirmText.literal(clean(zh));
-    }
-
-    /** 确认框里的一行“前缀 名字 ×个数”：翻译键 {@code key} 的两个参数是名字与个数，{@code fallback} 是中文的格式（%s 名字、%s 个数） */
-    static ConfirmText confirmLine(String key, String fallback, PayItem item, long n) {
-        ConfirmText name = confirmName(item);
-        return ConfirmText.translate(key, String.format(fallback, name.fallback, n), name, n);
-    }
-
-    /** 确认框里的一行钱：翻译键 {@code key} 的两个参数是标价单位的写法与另一种单位的写法（“20 绿宝石”“40 元”） */
-    static ConfirmText confirmMoney(String key, String fallback, long yuan, Currency.Unit unit) {
-        Currency.Unit other = unit == Currency.Unit.EMERALD ? Currency.Unit.YUAN : Currency.Unit.EMERALD;
-        return ConfirmText.translate(key, String.format(fallback, Currency.format(yuan, unit), Currency.format(yuan, other)),
-                money(yuan, unit), money(yuan, other));
-    }
-
-    private static ConfirmText money(long yuan, Currency.Unit u) {
-        String n = u == Currency.Unit.EMERALD ? (yuan % Currency.YUAN_PER_EMERALD == 0 ? Long.toString(yuan / Currency.YUAN_PER_EMERALD)
-                : (yuan / Currency.YUAN_PER_EMERALD) + ".5") : Long.toString(yuan);
-        return ConfirmText.translate(u == Currency.Unit.EMERALD ? "youranmod.pay.confirm.emeralds" : "youranmod.pay.confirm.yuan",
-                Currency.format(yuan, u), n);
     }
 
     /** 网页上的金额 */

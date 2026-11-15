@@ -2,8 +2,6 @@ package moe.qingu.youran.server.net.pay;
 
 import com.mojang.authlib.GameProfile;
 import moe.qingu.youran.api.network.ConfirmRequest;
-import moe.qingu.youran.api.network.ConfirmResult;
-import moe.qingu.youran.api.network.ConfirmText;
 import moe.qingu.youran.api.network.DomainNames;
 import moe.qingu.youran.api.network.stack.HttpClient;
 import moe.qingu.youran.api.pay.AccountRef;
@@ -393,26 +391,74 @@ public final class PayServer implements PayBackend {
         }
     }
 
+    // ---------------------------------------------------------------- 确认框的内容
+
+    /**
+     * 要请 id.yr 弹的确认框（pay.yr 是 id.yr 的普通网站，用它的弹窗确认 / 验证身份能力，不直接调系统确认框）：标题、条目（都是写好的中文）、
+     * 确认的是哪一类事。条目最多 {@value #MAX_ASK_ITEMS} 条（id.yr 的上限），每条最多 80 个字。
+     */
+    static final class Ask {
+        static final int MAX_ASK_ITEMS = 10;
+        final String title;
+        final List<String> items;
+        final ConfirmRequest.Purpose purpose;
+
+        Ask(String title, List<String> items, ConfirmRequest.Purpose purpose) {
+            this.title = ItemText.clip(ItemText.clean(title), ConfirmRequest.MAX_TITLE);
+            List<String> l = new ArrayList<>();
+            for (String i : items) {
+                l.add(ItemText.clip(ItemText.clean(i), ConfirmRequest.MAX_ITEM));
+            }
+            this.items = java.util.Collections.unmodifiableList(l);
+            this.purpose = purpose;
+        }
+    }
+
+    /** 条目太多时只留前面的，最后一条写“还有几行” */
+    private static List<String> fit(List<String> head, List<String> lines, List<String> tail) {
+        int room = Ask.MAX_ASK_ITEMS - head.size() - tail.size();
+        List<String> out = new ArrayList<>(head);
+        if (lines.size() > room) {
+            int more = lines.size() - (room - 1);
+            out.addAll(lines.subList(0, room - 1));
+            out.add("……还有 " + more + " 行，见网页");
+        } else {
+            out.addAll(lines);
+        }
+        out.addAll(tail);
+        return out;
+    }
+
+    /** 一行“前缀 物品名 ×个数”（物品名在主线程上算好） */
+    private static String line(String prefix, PayItem item, long n) {
+        return prefix + ItemText.clip(ItemText.cache(item), 40) + " ×" + n;
+    }
+
+    /** 一行钱：“前缀 20 绿宝石（40 元）” */
+    private static String money(String prefix, long yuan, Currency.Unit unit) {
+        Currency.Unit other = unit == Currency.Unit.EMERALD ? Currency.Unit.YUAN : Currency.Unit.EMERALD;
+        return prefix + Currency.format(yuan, unit) + "（" + Currency.format(yuan, other) + "）";
+    }
+
     // ---------------------------------------------------------------- 付款（主线程）
 
-    /** 准备好的一次付款：算好的拿法（背包、余额）与确认框 */
+    /** 准备好的一次付款：算好的拿法（背包、余额）与确认框的内容 */
     static final class PreparedPay {
         final String orderId;
         final UUID payer;
         final CurrencyPlan.PayPlan plan;
         /** 从付款人 pay.yr 账户余额里出的 */
         final Amount fromBalance;
-        final ConfirmRequest request;
+        final Ask ask;
 
-        PreparedPay(String orderId, UUID payer, CurrencyPlan.PayPlan plan, Amount fromBalance, ConfirmRequest request) {
+        PreparedPay(String orderId, UUID payer, CurrencyPlan.PayPlan plan, Amount fromBalance, Ask ask) {
             this.orderId = orderId;
             this.payer = payer;
             this.plan = plan;
             this.fromBalance = fromBalance;
-            this.request = request;
+            this.ask = ask;
         }
     }
-
     /** 付款页上的预览：账户余额、用余额付多少、剩下的按现在的背包怎么拿 */
     static final class Preview {
         /** 登录的角色不在线时为 null */
@@ -465,7 +511,7 @@ public final class PayServer implements PayBackend {
     }
 
     /**
-     * 准备付款：登录的角色 {@code payer} 付（要在线：背包、余额都是他的）；确认框弹给这台电脑现在的操作者，谁同意都照 {@code payer} 的账扣
+     * 准备付款：登录的角色 {@code payer} 付（要在线：背包、余额都是他的）；确认框由 id.yr 弹给这台电脑现在的操作者，谁同意都照 {@code payer} 的账扣
      * （服主 11-15：另一个玩家坐到已登录的电脑前动钱是允许的，同 MineBay“相当于老婆帮你买东西”）。
      */
     PreparedPay preparePay(String orderId, UUID payer, CurrencyPlan.Prefer prefer, CurrencyPlan.BalanceUse use) throws PayException {
@@ -498,93 +544,46 @@ public final class PayServer implements PayBackend {
             throw new PayException("insufficient_items", "背包里的不够：还差 " + ItemText.describe(plan.lack, o.unit));
         }
         ItemText.cacheAll(fromBal);
-        String recv = ItemText.clean(ItemText.clip(ledger.name(o.receiver), 24));
-        List<ConfirmText> items = new ArrayList<>();
-        items.add(ConfirmText.translate("youranmod.pay.confirm.to", "收款方：" + recv, ConfirmText.literal(recv)));
+        String recv = ItemText.clip(ledger.name(o.receiver), 24);
+        List<String> head = new ArrayList<>();
+        head.add("收款方：" + recv);
+        if (o.site != null && !o.site.equals(PayApi.DOMAIN)) {
+            // 框上的“网站”是 pay.yr（是它请 id.yr 弹的框），收款的网站写在这里
+            head.add("收款网站：" + PayPages.site(o.site));
+        }
         if (o.description != null) {
-            String d = ItemText.clip(o.description, 60);
-            items.add(ConfirmText.translate("youranmod.pay.confirm.what", "内容：" + d, ConfirmText.literal(d)));
+            head.add("内容：" + ItemText.clip(o.description, 60));
         }
         if (o.price.yuan > 0) {
-            items.add(ItemText.confirmMoney("youranmod.pay.confirm.price", "价格：%s（%s）", o.price.yuan, o.unit));
+            head.add(money("价格：", o.price.yuan, o.unit));
         }
-        List<ConfirmText> lines = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
         if (fromBal.yuan > 0) {
-            lines.add(ItemText.confirmMoney("youranmod.pay.confirm.balance", "用 pay.yr 余额：%s（%s）", fromBal.yuan, Currency.Unit.YUAN));
+            lines.add(money("用 pay.yr 余额：", fromBal.yuan, Currency.Unit.YUAN));
         }
         for (Map.Entry<PayItem, Long> e : fromBal.items.entrySet()) {
-            lines.add(ItemText.confirmLine("youranmod.pay.confirm.balance.item", "用 pay.yr 余额：%s ×%s", e.getKey(), e.getValue()));
+            lines.add(line("用 pay.yr 余额：", e.getKey(), e.getValue()));
         }
         for (Map.Entry<PayItem, Long> e : plan.take.entrySet()) {
-            lines.add(ItemText.confirmLine("youranmod.pay.confirm.take", "拿出：%s ×%s", e.getKey(), e.getValue()));
+            lines.add(line("拿出：", e.getKey(), e.getValue()));
         }
         for (Map.Entry<PayItem, Long> e : plan.change.entrySet()) {
-            lines.add(ItemText.confirmLine("youranmod.pay.confirm.change", "找回：%s ×%s", e.getKey(), e.getValue()));
+            lines.add(line("找回：", e.getKey(), e.getValue()));
         }
-        int room = ConfirmRequest.MAX_ITEMS - items.size() - 1;
-        if (lines.size() > room) {
-            int more = lines.size() - (room - 1);
-            lines = new ArrayList<>(lines.subList(0, room - 1));
-            lines.add(ConfirmText.translate("youranmod.pay.confirm.more", "……还有 " + more + " 行，见付款页", more));
-        }
-        items.addAll(lines);
-        String payerName = ItemText.clean(p.name());
-        if (plan.take.isEmpty()) {
-            items.add(ConfirmText.translate("youranmod.pay.confirm.account", "这是 " + payerName + " 的 pay.yr 账户", ConfirmText.literal(payerName)));
-        } else {
-            items.add(ConfirmText.translate("youranmod.pay.confirm.from", "从 " + payerName + " 的背包里拿，经 pay.yr 付款", ConfirmText.literal(payerName)));
-        }
-        ConfirmRequest req = new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.title", ItemText.clip("付款给 " + recv, 40),
-                ConfirmText.literal(recv)), o.site, items, PayConfig.confirmSeconds, ConfirmRequest.Purpose.PAY);
-        return new PreparedPay(orderId, payer, plan, fromBal, req);
+        String payerName = p.name();
+        String last = plan.take.isEmpty() ? "这是 " + payerName + " 的 pay.yr 账户" : "从 " + payerName + " 的背包里拿";
+        Ask ask = new Ask("付款给 " + recv, fit(head, lines, java.util.Collections.singletonList(last)), ConfirmRequest.Purpose.PAY);
+        return new PreparedPay(orderId, payer, plan, fromBal, ask);
     }
 
-    /** 确认框同意以后（主线程）：再查一遍，照确认时的拿法扣（余额那部分从登录的角色的账户出） */
-    TxRunner.Result executePay(PreparedPay prep, ConfirmResult r) {
-        PayException refused = refusal(r);
-        if (refused != null) {
-            return TxRunner.Result.failed(refused);
-        }
+    /** 确认通过以后（主线程）：再查一遍，照确认时的拿法扣（余额那部分从登录的角色的账户出） */
+    TxRunner.Result executePay(PreparedPay prep) {
         Ledger.Order o = ledger.order(prep.orderId);
         WorldPort.PlayerPort p = world.player(prep.payer);
         if (o == null || p == null) {
             return TxRunner.Result.failed(new PayException("offline", "登录的角色不在线"));
         }
-        logConfirmer("付款 " + prep.orderId, r, p.name());
         return runner.pay(o, p, prep.plan.take, prep.plan.change, prep.fromBalance);
-    }
-
-    /** 不是本人确认的（另一个玩家坐在已登录的电脑前）记一行日志 */
-    private static void logConfirmer(String what, ConfirmResult r, String account) {
-        if (r != null && r.playerName != null && !r.playerName.equals(account)) {
-            Ledger.LOG.info("pay.yr：{}：{} 的账户，由当时操作电脑的 {} 在确认框里同意", what, account, r.playerName);
-        }
-    }
-
-    /**
-     * 确认框的结果不是“同意了”时的说明。同意的人不必是登录的角色（服主 11-15：另一个玩家坐到已登录的电脑前动钱是允许的，
-     * 记账照登录的账户；确认框里写明是谁的账户）。
-     */
-    static PayException refusal(ConfirmResult r) {
-        if (r == null) {
-            return new PayException("unavailable", "确认框没弹出来");
-        }
-        switch (r.outcome) {
-            case APPROVED:
-                return null;
-            case DENIED:
-                return new PayException("denied", "你在确认框里点了拒绝");
-            case TIMEOUT:
-                return new PayException("timeout", "确认框超时了（" + PayConfig.confirmSeconds + " 秒没回应）");
-            case OPERATOR_CHANGED:
-                return new PayException("operator_changed", "确认的时候离开了电脑或换了人");
-            case NO_OPERATOR:
-                return new PayException("no_operator", "这台电脑现在没人操作");
-            case BUSY:
-                return new PayException("busy", "你已经有一个确认框开着，先处理那个");
-            default:
-                return new PayException("unavailable", "确认框不可用");
-        }
     }
 
     static String statusText(OrderInfo.Status s) {
@@ -614,14 +613,14 @@ public final class PayServer implements PayBackend {
         final UUID player;
         final Amount value;
         final Map<PayItem, Long> give;
-        final ConfirmRequest request;
+        final Ask ask;
 
-        PreparedWithdraw(AccountRef account, UUID player, Amount value, Map<PayItem, Long> give, ConfirmRequest request) {
+        PreparedWithdraw(AccountRef account, UUID player, Amount value, Map<PayItem, Long> give, Ask ask) {
             this.account = account;
             this.player = player;
             this.value = value;
             this.give = give;
-            this.request = request;
+            this.ask = ask;
         }
     }
 
@@ -647,55 +646,43 @@ public final class PayServer implements PayBackend {
             }
             give.merge(e.getKey(), e.getValue(), Math::addExact);
         }
-        List<ConfirmText> lines = new ArrayList<>();
-        String name = ItemText.clean(p.name());
-        lines.add(ConfirmText.translate("youranmod.pay.confirm.withdraw.into", "放进 " + name + " 的背包，放不下的掉在脚边",
-                ConfirmText.literal(name)));
+        String name = p.name();
+        List<String> lines = new ArrayList<>();
         for (Map.Entry<PayItem, Long> e : give.entrySet()) {
-            lines.add(ItemText.confirmLine("youranmod.pay.confirm.item", "%s ×%s", e.getKey(), e.getValue()));
+            lines.add(line("", e.getKey(), e.getValue()));
         }
-        if (lines.size() > ConfirmRequest.MAX_ITEMS) {
-            int more = lines.size() - (ConfirmRequest.MAX_ITEMS - 1);
-            lines = new ArrayList<>(lines.subList(0, ConfirmRequest.MAX_ITEMS - 1));
-            lines.add(ConfirmText.translate("youranmod.pay.confirm.more", "……还有 " + more + " 行，见付款页", more));
-        }
-        ConfirmRequest req = new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.withdraw.title",
-                ItemText.clip("从 " + name + " 的 pay.yr 账户提现", ConfirmRequest.MAX_TITLE), ConfirmText.literal(name)),
-                PayApi.DOMAIN, lines, PayConfig.confirmSeconds, ConfirmRequest.Purpose.RECEIVE);
-        return new PreparedWithdraw(acct, player, value, give, req);
+        Ask ask = new Ask("从 " + name + " 的 pay.yr 账户提现",
+                fit(java.util.Collections.singletonList("放进 " + name + " 的背包，放不下的掉在脚边"), lines, java.util.Collections.<String>emptyList()),
+                ConfirmRequest.Purpose.RECEIVE);
+        return new PreparedWithdraw(acct, player, value, give, ask);
     }
 
-    TxRunner.Result executeWithdraw(PreparedWithdraw prep, ConfirmResult r) {
-        PayException refused = refusal(r);
-        if (refused != null) {
-            return TxRunner.Result.failed(refused);
-        }
+    TxRunner.Result executeWithdraw(PreparedWithdraw prep) {
         WorldPort.PlayerPort p = world.player(prep.player);
         if (p == null) {
             return TxRunner.Result.failed(new PayException("offline", "提现要账户的主人在线（东西放进他的背包）"));
         }
-        logConfirmer("提现", r, p.name());
         return runner.withdraw(prep.account, p, prep.value, prep.give, "在 pay.yr 提现");
     }
 
-    // ---------------------------------------------------------------- 退款、密钥（主线程）
+    // ---------------------------------------------------------------- 退款、密钥、安全设置（主线程）
 
     static final class PreparedRefund {
         final String paymentId;
         final UUID by;
         final Amount amount;
-        final ConfirmRequest request;
+        final Ask ask;
 
-        PreparedRefund(String paymentId, UUID by, Amount amount, ConfirmRequest request) {
+        PreparedRefund(String paymentId, UUID by, Amount amount, Ask ask) {
             this.paymentId = paymentId;
             this.by = by;
             this.amount = amount;
-            this.request = request;
+            this.ask = ask;
         }
     }
 
     PreparedRefund prepareRefund(UUID by, String paymentId, Amount amount) throws PayException {
-        String owner = ItemText.clean(ItemText.clip(ledger.name(AccountRef.player(by)), 16));
+        String owner = ItemText.clip(ledger.name(AccountRef.player(by)), 16);
         Ledger.Payment p = ledger.payment(paymentId);
         if (p == null || !p.receiver.equals(AccountRef.player(by))) {
             throw new PayException("no_such_payment", "没有这笔付款（只能退自己收到的）");
@@ -711,52 +698,60 @@ public final class PayServer implements PayBackend {
             throw new PayException("insufficient_balance", "账户余额不够退（已经提现了）：还差 " + ItemText.describe(bal.shortOf(amount), Currency.Unit.YUAN));
         }
         ItemText.cacheAll(amount);
-        String payer = ItemText.clean(p.payerName == null ? "?" : p.payerName);
-        List<ConfirmText> lines = new ArrayList<>();
-        lines.add(ConfirmText.translate("youranmod.pay.confirm.account", "这是 " + owner + " 的 pay.yr 账户", ConfirmText.literal(owner)));
-        lines.add(ConfirmText.translate("youranmod.pay.confirm.refund.to", "退进 " + payer + " 在 pay.yr 的账户", ConfirmText.literal(payer)));
+        String payer = p.payerName == null ? "?" : p.payerName;
+        List<String> head = new ArrayList<>();
+        head.add("这是 " + owner + " 的 pay.yr 账户");
+        head.add("退进 " + payer + " 在 pay.yr 的账户");
+        List<String> lines = new ArrayList<>();
         if (amount.yuan > 0) {
-            lines.add(ItemText.confirmMoney("youranmod.pay.confirm.refund.money", "从这个账户扣回：%s（%s）", amount.yuan, Currency.Unit.YUAN));
+            lines.add(money("从这个账户扣回：", amount.yuan, Currency.Unit.YUAN));
         }
         for (Map.Entry<PayItem, Long> e : amount.items.entrySet()) {
-            if (lines.size() >= ConfirmRequest.MAX_ITEMS) {
-                break;
-            }
-            lines.add(ItemText.confirmLine("youranmod.pay.confirm.refund.item", "从这个账户扣回：%s ×%s", e.getKey(), e.getValue()));
+            lines.add(line("从这个账户扣回：", e.getKey(), e.getValue()));
         }
-        ConfirmRequest req = new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.refund.title", ItemText.clip("退款给 " + payer, 40),
-                ConfirmText.literal(payer)), PayApi.DOMAIN, lines, PayConfig.confirmSeconds, ConfirmRequest.Purpose.PAY);
-        return new PreparedRefund(paymentId, by, amount, req);
+        Ask ask = new Ask("退款给 " + payer, fit(head, lines, java.util.Collections.<String>emptyList()), ConfirmRequest.Purpose.PAY);
+        return new PreparedRefund(paymentId, by, amount, ask);
     }
 
-    void executeRefund(PreparedRefund prep, ConfirmResult r) throws PayException {
-        PayException refused = refusal(r);
-        if (refused != null) {
-            throw refused;
-        }
-        logConfirmer("退款 " + prep.paymentId, r, ledger.name(AccountRef.player(prep.by)));
+    void executeRefund(PreparedRefund prep) throws PayException {
         doRefund(prep.paymentId, prep.amount, "收款方在 pay.yr 退款");
     }
 
     /** 重置密钥的确认框；标题写明是谁的账户（同一台电脑上别人登录着时，坐下的人看得出不是自己的） */
-    ConfirmRequest keyRequest(String accountName) {
-        String n = ItemText.clean(ItemText.clip(accountName, 16));
-        return new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.key.title", "重置 " + n + " 的 pay.yr 密钥", ConfirmText.literal(n)), PayApi.DOMAIN,
-                java.util.Arrays.asList(ConfirmText.translate("youranmod.pay.confirm.key.item1", "生成一把新的密钥，给你的网站创建、查询收款单用"),
-                        ConfirmText.translate("youranmod.pay.confirm.key.item2", "旧的密钥马上作废")),
-                PayConfig.confirmSeconds, ConfirmRequest.Purpose.ACTION);
+    Ask keyAsk(String accountName) {
+        String n = ItemText.clip(accountName, 16);
+        return new Ask("重置 " + n + " 的 pay.yr 密钥", java.util.Arrays.asList("生成一把新的密钥，给你的网站创建、查询收款单用", "旧的密钥马上作废"),
+                ConfirmRequest.Purpose.ACTION);
     }
 
-    String executeKey(UUID player, ConfirmResult r) throws PayException {
-        PayException refused = refusal(r);
-        if (refused != null) {
-            throw refused;
-        }
-        logConfirmer("重置密钥", r, ledger.name(AccountRef.player(player)));
+    String executeKey(UUID player) throws PayException {
         try {
             return ledger.newKey(AccountRef.player(player), System.currentTimeMillis());
         } catch (IOException e) {
             throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
+        }
+    }
+
+    /** 打开、关闭“操作前必须验证身份”的确认框（总是验证身份：只有帐号本人能改） */
+    Ask securityAsk(String accountName, boolean on) {
+        String n = ItemText.clip(accountName, 16);
+        return new Ask((on ? "打开" : "关闭") + "操作前验证身份", java.util.Arrays.asList("pay.yr 账户：" + n,
+                on ? "打开后，付款、提现、退款、重置密钥前都要 " + n + " 本人确认" : "关闭后，坐在这台电脑前的人确认就能操作"), ConfirmRequest.Purpose.ACTION);
+    }
+
+    /** 这个账户开了“操作前必须验证身份”没有 */
+    boolean verifyRequired(UUID player) {
+        Ledger.Account a = ledger.account(AccountRef.player(player));
+        return a != null && a.verifyBeforeOps;
+    }
+
+    void setVerifyRequired(UUID player, boolean on) throws PayException {
+        try {
+            ledger.setVerify(AccountRef.player(player), on);
+        } catch (IOException e) {
+            throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
+        } catch (IllegalStateException e) {
+            throw new PayException("no_account", "没有这个账户");
         }
     }
 
