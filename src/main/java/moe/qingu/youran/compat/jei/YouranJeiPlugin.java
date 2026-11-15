@@ -80,7 +80,7 @@ public final class YouranJeiPlugin implements IModPlugin {
             }
         }
         if (ModFluids.trichlorosilane != null) {
-            FluidStack fluid = FluidPurity.trichlorosilane(1000, Purity.DEFAULT_IMPURITY);
+            FluidStack fluid = FluidPurity.trichlorosilane(1000, Purity.DEFAULT_NINES);
             registry.addIngredientInfo(fluid, VanillaTypes.FLUID, "youranmod.jei.trichlorosilane.info");
         }
     }

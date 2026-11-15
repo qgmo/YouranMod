@@ -70,16 +70,16 @@ final class JeiRecipes {
         return copy;
     }
 
-    /** 提纯：10 mB 纯度 90% → 9 mB 99% → … → 9 mB 99.9999999%，一遍一条，每条带上同样的说明 */
+    /** 提纯：10 mB 1 个 9（90%）→ 9 mB 2 个 9 → … → 9 mB 9 个 9，一遍一条，每条带上同样的说明 */
     static List<FluidItemRecipe> purification(String noteKey, Object... noteArgs) {
         List<FluidItemRecipe> list = new ArrayList<>();
-        double imp = Purity.DEFAULT_IMPURITY;
+        int nines = Purity.DEFAULT_NINES;
         String note = I18n.format(noteKey, noteArgs);
         for (int pass = 0; pass < PURIFY_PASSES; pass++) {
-            double next = Purity.distilled(imp);
-            list.add(FluidItemRecipe.fluids(FluidPurity.trichlorosilane(Purity.BATCH_INPUT, imp),
+            int next = Purity.distilled(nines);
+            list.add(FluidItemRecipe.fluids(FluidPurity.trichlorosilane(Purity.BATCH_INPUT, nines),
                     FluidPurity.trichlorosilane(Purity.BATCH_OUTPUT, next), Collections.singletonList(note)));
-            imp = next;
+            nines = next;
         }
         return list;
     }

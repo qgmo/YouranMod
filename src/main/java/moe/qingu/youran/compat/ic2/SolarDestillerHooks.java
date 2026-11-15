@@ -17,7 +17,7 @@ import java.util.Arrays;
  *
  * <p>照蒸馏机原来的规则：每个周期（普通群系 72 tick、炎热 36、寒冷 144）在看得见天空（亮度 > 0.5）时处理 1 mB 输入。
  * 三氯氢硅每份要 {@value Purity#BATCH_INPUT} mB，所以攒够 {@value Purity#BATCH_INPUT} 个周期做一次：
- * 抽 {@value Purity#BATCH_INPUT} mB、出 {@value Purity#BATCH_OUTPUT} mB 杂质降到十分之一的三氯氢硅。罐里不到一份时也照样攒周期，
+ * 抽 {@value Purity#BATCH_INPUT} mB、出 {@value Purity#BATCH_OUTPUT} mB 多一个 9 的三氯氢硅。罐里不到一份时也照样攒周期，
  * 攒满时有多少蒸多少（出九成，往下取整，见 {@link Purity#outputFor}），余量不会卡在罐里挡住别的纯度。
  * 原来的水 → 蒸馏水不变；只是输出罐里装着三氯氢硅时不蒸水（不然水被抽掉了、蒸馏水却装不进去）。
  */

@@ -10,8 +10,6 @@ import mezz.jei.api.gui.IRecipeLayout;
 import mezz.jei.api.ingredients.IIngredients;
 import mezz.jei.api.recipe.IRecipeCategory;
 import moe.qingu.youran.YouranMod;
-import moe.qingu.youran.fluid.FluidPurity;
-import moe.qingu.youran.logic.purity.Purity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.item.ItemStack;
@@ -21,7 +19,7 @@ import javax.annotation.Nullable;
 
 /**
  * 一种机器的“流体 + 物品 → 流体 + 物品”配方分类：左边输入流体、输入物品，中间箭头，右边输出流体、输出物品，下面是说明。
- * 三氯氢硅的格子在悬停说明里多一行“几个 9”（名字里已经带了纯度百分数，见 {@code fluid.FluidTrichlorosilane}）。
+ * 带纯度的流体名字里已经带了纯度（见 {@code fluid.FluidTrichlorosilane}），悬停说明不另加。
  */
 final class FluidItemCategory implements IRecipeCategory<FluidItemRecipe> {
     static final int WIDTH = 150;
@@ -130,11 +128,5 @@ final class FluidItemCategory implements IRecipeCategory<FluidItemRecipe> {
             items.setBackground(1, slot);
             items.set(1, recipe.outputItem);
         }
-        fluids.addTooltipCallback((index, input, fluid, tooltip) -> {
-            if (FluidPurity.isTrichlorosilane(fluid)) {
-                int nines = Purity.nines(FluidPurity.impurity(fluid));
-                tooltip.add(1, I18n.format("youranmod.jei.purity.nines", nines));
-            }
-        });
     }
 }

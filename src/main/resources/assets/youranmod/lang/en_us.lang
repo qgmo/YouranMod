@@ -77,12 +77,13 @@ item.polyethylene_lump.name=Polyethylene Lump
 item.floppy_disk.name=5.25" Floppy Disk
 item.silicon_dust.name=Silicon Dust
 fluid.trichlorosilane=Trichlorosilane
-fluid.trichlorosilane.with_purity=%s (Purity %s%%)
+youranmod.fluid.with_purity=%s (%s)
+youranmod.purity=Purity %s%%, %s nines
+youranmod.purity.long=Purity: %s nines
 youranmod.jei.canner_reaction=Canner Reactions (Enrich)
 youranmod.jei.solar_distiller=Solar Distiller
 youranmod.jei.distillation_tower=Distillation Tower: Purification
-youranmod.jei.purity.nines=%s nines
 youranmod.jei.solar_distiller.water=1 mB per cycle (72 ticks; 36 in hot biomes, 144 in cold), needs to see the sky
 youranmod.jei.solar_distiller.purify=One batch every %s cycles, needs to see the sky
 youranmod.jei.distillation_tower.purify=1 tick and %s Flux per batch
-youranmod.jei.trichlorosilane.info=Purity is stored in the fluid's NBT and shown after its name. Trichlorosilane without a purity tag counts as 90% (a pipe or tank that drops the tag is treated as dirty). Trichlorosilane of different purities cannot share a tank; a leftover under 10 mB in a still is distilled on its own after a while (90%, rounded down). One distillation pass in a Solar Distiller or Distillation Tower turns every 10 mB into 9 mB with a tenth of the impurity.
+youranmod.jei.trichlorosilane.info=Purity is counted in nines, stored in the fluid's NBT and shown after its name (1 nine = 90%, 3 nines = 99.9%). Trichlorosilane without a purity tag counts as 1 nine (a pipe or tank that drops the tag is treated as dirty). Trichlorosilane of different purities cannot share a tank; a leftover under 10 mB in a still is distilled on its own after a while (90%, rounded down). One distillation pass in a Solar Distiller or Distillation Tower turns every 10 mB into 9 mB and adds one nine (up to 32).
