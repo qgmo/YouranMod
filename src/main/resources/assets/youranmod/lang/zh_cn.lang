@@ -98,7 +98,8 @@ youranmod.jei.solar_distiller.purify=攒满 %s 个周期出一份，要看得见
 youranmod.jei.distillation_tower.purify=一份 1 tick，%s Flux
 youranmod.jei.trichlorosilane.info=纯度用“几个 9”表示，记在流体的 NBT 里，名字后面显示（1 个 9 = 90%，3 个 9 = 99.9%）。没有纯度标记的按 1 个 9 算（管道、罐子丢了标记，就当它们不干净）。纯度不同的三氯氢硅不能装进同一个罐子；蒸馏机里剩下不到 10 mB 的余量，过一会儿会当一份蒸掉（出九成，往下取整）。在太阳能蒸馏机或精馏塔里蒸馏一遍：每 10 mB 出 9 mB，多一个 9（最多 32 个）。
 youranmod.jei.ore_washing_wafer=洗矿机：洗硅晶圆
-youranmod.jei.ore_washing_wafer.note=纯净率 %s%%；9 个 9 的晶圆报废率：金铸模 %s，粘土铸模 %s
+youranmod.jei.ore_washing_wafer.note=纯净率 %s%%（9 个 9 的晶圆报废率）
+youranmod.jei.ore_washing_wafer.scrap=金铸模 %s，粘土铸模 %s
 youranmod.jei.trichlorosilane_hydrogen.info=三氯氢硅氢气混合气：到了 9 个 9 的三氯氢硅加氢气（IC2）做成，在沉浸工程炼油厂（每 tick 10 mB + 40 mB → 50 mB）或匠魂冶炼炉（1 mB + 4 mB → 5 mB）里都能做。纯度同做它的三氯氢硅，记在 NBT 里，名字后面显示；不到 9 个 9 的三氯氢硅做不了。1000 mB 浇进掺杂硅晶圆铸模就是一片硅晶圆（匠魂浇铸台、IC2 装罐机富集模式、沉浸工程灌装机）。
 youranmod.jei.wafer.info=硅晶圆的纯度随浇注用的混合气，还记着用的是金铸模还是粘土铸模。硅晶圆要在 IC2 洗矿机里洗（每片 1000 mB 水），洗成高精硅晶圆（纯度、铸模照抄）或者报废。报废率 = (1 − 水的纯净率) × 铸模倍数（金 1，粘土 1.5）× 0.8^(几个 9 − 9)，超过 100% 按 100%；不到 9 个 9 的一定报废。各种水的纯净率见“洗矿机：洗硅晶圆”。
 youranmod.jei.scrap_wafer.info=洗坏了的硅晶圆。放进熔炉或沉浸工程电弧炉烧回炼金化学硅锭，从头再走一遍硅线。
