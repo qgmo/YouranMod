@@ -70,6 +70,12 @@ public final class NetworkConfig {
     @Config.RequiresMcRestart
     public static String tlsCaKey = "";
 
+    @Config.Comment({"人机验证 captcha.yr 的本机端口：只绑 127.0.0.1，提供和 captcha.yr 一样的 POST /new、POST /verify，",
+            "给进不了游戏内网络的游戏外网站（网页面板的后台）用；图片仍由游戏内浏览器从 captcha.yr 取。0 为不开（默认）。"})
+    @Config.RangeInt(min = 0, max = 65535)
+    @Config.RequiresMcRestart
+    public static int captchaLocalPort = 0;
+
     private NetworkConfig() {
     }
 }
