@@ -57,6 +57,8 @@ public final class ModItems {
     public static Item pvcSheet;
     public static Item polyethyleneLump;
     public static Item floppyDisk;
+    /** 硅粉（芯片线“硅”，服主 11-15）：炼金化学硅锭打成的粉，做三氯氢硅的原料 */
+    public static Item siliconDust;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -109,6 +111,7 @@ public final class ModItems {
         pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做软盘的软套"));
         polyethyleneLump = add(registry, new ItemWithTooltip("polyethylene_lump", 64, "聚乙烯（PE）"));
         floppyDisk = add(registry, new ItemFloppyDisk());
+        siliconDust = add(registry, new ItemWithTooltip("silicon_dust", 64, "粗硅（Si）打成的粉，加盐酸做成三氯氢硅"));
     }
 
     private static Item itemBlock(Block block) {

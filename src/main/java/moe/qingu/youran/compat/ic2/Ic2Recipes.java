@@ -2,6 +2,7 @@ package moe.qingu.youran.compat.ic2;
 
 import ic2.api.recipe.Recipes;
 import moe.qingu.youran.YouranMod;
+import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
 import moe.qingu.youran.registry.ModItems;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
@@ -18,6 +19,21 @@ public final class Ic2Recipes {
         registerCentrifuge();
         registerRolling();
         registerFloppy();
+        registerSiliconMacerator();
+    }
+
+    /** 打粉机：1 炼金化学硅锭 → 1 硅粉（芯片线“硅”第 2 步）。要装了炼金化学 */
+    static void registerSiliconMacerator() {
+        ItemStack ingot = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
+        if (ingot.isEmpty()) {
+            YouranMod.LOG.info("没有炼金化学的硅锭，不加 IC2 打粉机的硅粉配方");
+            return;
+        }
+        if (!Recipes.macerator.addRecipe(Recipes.inputFactory.forStack(ingot), null, false, new ItemStack(ModItems.siliconDust))) {
+            YouranMod.LOG.error("IC2 打粉机配方（硅锭 → 硅粉）没加上：已有输入相同的配方");
+        } else {
+            YouranMod.LOG.info("已加 IC2 打粉机配方：硅锭 → 硅粉");
+        }
     }
 
     /** 热能离心机：1 铁粉（dustIron）→ 3 小撮磁粉 */

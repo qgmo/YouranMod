@@ -2,6 +2,7 @@ package moe.qingu.youran.compat.immersiveengineering;
 
 import blusunrize.immersiveengineering.api.crafting.ArcFurnaceRecipe;
 import blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe;
+import blusunrize.immersiveengineering.api.crafting.CrusherRecipe;
 import blusunrize.immersiveengineering.api.crafting.MetalPressRecipe;
 import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
 import moe.qingu.youran.registry.ModFluids;
@@ -151,6 +152,25 @@ public final class IeRecipes {
             YouranMod.LOG.error("沉浸工程电弧炉的粗硅配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
         } else {
             YouranMod.LOG.info("已加沉浸工程电弧炉配方：二氧化硅粉 + 焦炭 → 硅锭");
+        }
+    }
+
+    /** 粉碎机电耗：同沉浸工程自己把锭粉碎成粉（3000 Flux） */
+    static final int CRUSHER_ENERGY = 3000;
+
+    /** 粉碎机：1 炼金化学硅锭 → 1 硅粉（芯片线“硅”第 2 步，同 IC2 打粉机）。要装了炼金化学 */
+    public static void registerSiliconCrusher() {
+        ItemStack ingot = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
+        if (ingot.isEmpty()) {
+            YouranMod.LOG.info("没有炼金化学的硅锭，不加沉浸工程粉碎机的硅粉配方");
+            return;
+        }
+        CrusherRecipe.addRecipe(new ItemStack(ModItems.siliconDust), ingot, CRUSHER_ENERGY);
+        CrusherRecipe found = CrusherRecipe.findRecipe(ingot);
+        if (found == null || found.output.getItem() != ModItems.siliconDust) {
+            YouranMod.LOG.error("沉浸工程粉碎机的硅粉配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
+        } else {
+            YouranMod.LOG.info("已加沉浸工程粉碎机配方：硅锭 → 硅粉");
         }
     }
 }
