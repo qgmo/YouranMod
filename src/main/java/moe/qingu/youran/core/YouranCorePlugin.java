@@ -59,7 +59,7 @@ public final class YouranCorePlugin implements IFMLLoadingPlugin {
             return;
         }
         if (!MixinSetup.hasMixin()) {
-            LOG.warn("没有 Mixin（既没有 SpongeForge 也没有 MixinBooter），装罐机反应配方、太阳能蒸馏机与精馏塔的提纯、搅拌机的三氯氢硅配方不生效");
+            LOG.warn("没有 Mixin（既没有 SpongeForge 也没有 MixinBooter），装罐机反应配方、太阳能蒸馏机与精馏塔的提纯、搅拌机的三氯氢硅配方、洗矿机认别的水与洗硅晶圆不生效");
             return;
         }
         File mods = new File((File) data.get("mcLocation"), "mods");

@@ -308,6 +308,22 @@ public final class IeRecipes {
         YouranMod.LOG.info("已加沉浸工程灌装机配方：{} mB 混合气 + 掺杂硅晶圆铸模 → 硅晶圆（{} 条）", WaferRules.MIXTURE_PER_WAFER, added);
     }
 
+    /** 电弧炉：1 报废硅晶圆 → 1 炼金化学硅锭（重新走硅线），不要辅料，时间、电耗同粗硅。要装了炼金化学 */
+    public static void registerScrapWafer() {
+        ItemStack silicon = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
+        if (silicon.isEmpty()) {
+            return;
+        }
+        ItemStack scrap = new ItemStack(ModItems.scrapSiliconWafer);
+        ArcFurnaceRecipe.addRecipe(silicon, scrap, ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK);
+        ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(scrap, NonNullList.withSize(4, ItemStack.EMPTY));
+        if (found == null || !ItemStack.areItemStacksEqual(found.output, silicon)) {
+            YouranMod.LOG.error("沉浸工程电弧炉的报废硅晶圆配方没生效：找到的是 {}", found == null ? null : found.output);
+        } else {
+            YouranMod.LOG.info("已加沉浸工程电弧炉配方：报废硅晶圆 → 硅锭");
+        }
+    }
+
     /** 粉碎机电耗：同沉浸工程自己把锭粉碎成粉（3000 Flux） */
     static final int CRUSHER_ENERGY = 3000;
 

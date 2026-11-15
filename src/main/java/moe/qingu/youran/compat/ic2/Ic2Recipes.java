@@ -23,6 +23,7 @@ public final class Ic2Recipes {
         registerFloppy();
         registerSiliconMacerator();
         registerTourmalineCentrifuge();
+        OreWashingHooks.registerRecipe();
     }
 
     /** 电气石进热能离心机要的最低热量（Claude 11-15 定）：比铁矿石（1500）高一点 */

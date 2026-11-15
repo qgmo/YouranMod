@@ -7,6 +7,9 @@ package moe.qingu.youran.logic.purity;
  * 照西门子法氢气过量的思路，体积比 三氯氢硅 : 氢气 = 1 : 4，出的混合气是两者之和。
  *
  * <p>第 8 步，浇注：{@value #MIXTURE_PER_WAFER} mB 混合气 + 1 掺杂硅晶圆铸模（消耗）→ 1 硅晶圆，纯度同混合气，记下铸模材质。
+ *
+ * <p>第 9 步，清洗：IC2 洗矿机，每片用 {@value #WASH_WATER} mB 水，成了是高精硅晶圆（照抄纯度与铸模），坏了是报废硅晶圆。
+ * 报废的概率见 {@link #scrapChance}。
  */
 public final class WaferRules {
     /** 炼油厂每 tick：三氯氢硅（mB） */
@@ -29,7 +32,36 @@ public final class WaferRules {
     /** 匠魂浇铸台浇一片的时间（tick） */
     public static final int CASTING_TIME = 200;
 
+    /** 洗一片硅晶圆用的水（mB），同 IC2 洗一份粉碎矿石 */
+    public static final int WASH_WATER = 1000;
+    /** 每多一个 9（超过 {@value Purity#WAFER_GRADE_NINES} 个），报废率乘这个数（百分数） */
+    public static final int SCRAP_PER_EXTRA_NINE_PERCENT = 80;
+
     private WaferRules() {
+    }
+
+    /**
+     * 清洗一片硅晶圆报废的概率（0–1，Claude 11-15 定的一版）：
+     * <pre>
+     *   不到 9 个 9 的晶圆：一定报废（丢了纯度标记的混合气浇出来的就是这种）；
+     *   否则 = (1 − 纯净率) × 铸模倍数（金 1、粘土 1.5）× 0.8^(个数 − 9)，超过 1 按 1
+     * </pre>
+     * 例：9 个 9、金铸模，蒸馏水（95%）报废 5%，普通水（60%）40%；粘土铸模分别是 7.5%、60%。
+     *
+     * @param waterPercent 水的纯净率（百分数，{@link WashWater#rate}）
+     * @param nines        晶圆的纯度（几个 9）
+     * @param mold         晶圆用的铸模；不知道时按粘土算
+     */
+    public static double scrapChance(int waterPercent, int nines, WaferMold mold) {
+        int n = Purity.sanitize(nines);
+        if (n < Purity.WAFER_GRADE_NINES) {
+            return 1.0;
+        }
+        int water = Math.max(0, Math.min(100, waterPercent));
+        WaferMold m = mold == null ? WaferMold.CLAY : mold;
+        double p = (100 - water) / 100.0 * m.scrapFactorPercent / 100.0
+                * Math.pow(SCRAP_PER_EXTRA_NINE_PERCENT / 100.0, n - Purity.WAFER_GRADE_NINES);
+        return Math.max(0.0, Math.min(1.0, p));
     }
 
     /** 浇注出来的硅晶圆的纯度：同混合气 */

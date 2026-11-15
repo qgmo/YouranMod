@@ -39,6 +39,8 @@ public final class CompatRecipes {
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerSiliconCrusher();
             // 硼的来源：5 硼硅酸盐渣 → 硼锭 + 二氧化硅粉（电弧炉）
             moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerBoronArcFurnace();
+            // 芯片线第 9 步：报废硅晶圆烧回硅锭（电弧炉）
+            moe.qingu.youran.compat.immersiveengineering.IeRecipes.registerScrapWafer();
         }
         // 芯片线“硅”：三氯氢硅（搅拌机，要 Mixin 改它的流体比例）
         if (ie) {
@@ -69,6 +71,11 @@ public final class CompatRecipes {
         // 炼金化学的化合机、液化器、蒸发器（在它载入完成时应用 CraftTweaker 的删改之前加；没装时什么都不做）
         AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
         AlchemistryCompat.registerAceticAcidConversion(ModFluids.aceticAcid);
+        // 芯片线第 9 步：报废硅晶圆在熔炉里烧回炼金化学硅锭
+        ItemStack silicon = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
+        if (!silicon.isEmpty()) {
+            net.minecraftforge.fml.common.registry.GameRegistry.addSmelting(ModItems.scrapSiliconWafer, silicon, 0.1F);
+        }
         // 硼的来源：洞穴水晶（电气石）进溶解机（要夸克）
         if (alchemistry) {
             BoronRecipes.registerCrystalDissolver();
