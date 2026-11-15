@@ -1,16 +1,3 @@
 item.alchemistry:compound_triiron_tetroxide.name=Triiron Tetroxide
 item.alchemistry:compound_acetic_acid.name=Acetic Acid
 item.alchemistry:compound_cellulose_acetate.name=Cellulose Acetate
-# 整合包脚本 Elements and Compounds.zs 注册的化合物（meta 500–512），名字照脚本注释
-item.alchemistry:compound_hydrochloric_acid.name=Hydrochloric Acid
-item.alchemistry:compound_magnesium_carbonate.name=Magnesium Carbonate
-item.alchemistry:compound_calcium_oxide.name=Calcium Oxide
-item.alchemistry:compound_silicate.name=Silicate
-item.alchemistry:compound_metasilicate.name=Metasilicate
-item.alchemistry:compound_calcium_silicate.name=Calcium Silicate
-item.alchemistry:compound_magnesium_silicate.name=Magnesium Silicate
-item.alchemistry:compound_stearate.name=Stearate
-item.alchemistry:compound_sodium_stearate.name=Sodium Stearate
-item.alchemistry:compound_fat.name=Fat
-item.alchemistry:compound_ethene.name=Ethene
-item.alchemistry:compound_polyethene.name=Polyethene
