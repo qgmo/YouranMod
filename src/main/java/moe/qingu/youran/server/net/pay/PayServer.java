@@ -449,7 +449,10 @@ public final class PayServer implements PayBackend {
         return preparePay(orderId, payer, prefer, CurrencyPlan.BalanceUse.NONE);
     }
 
-    /** 准备付款：登录的角色 {@code payer} 付（要在线：背包、余额都是他的） */
+    /**
+     * 准备付款：登录的角色 {@code payer} 付（要在线：背包、余额都是他的）；确认框弹给这台电脑现在的操作者，谁同意都照 {@code payer} 的账扣
+     * （服主 11-15：另一个玩家坐到已登录的电脑前动钱是允许的，同 MineBay“相当于老婆帮你买东西”）。
+     */
     PreparedPay preparePay(String orderId, UUID payer, CurrencyPlan.Prefer prefer, CurrencyPlan.BalanceUse use) throws PayException {
         long now = System.currentTimeMillis();
         Ledger.Order o = ledger.order(orderId);
@@ -523,7 +526,7 @@ public final class PayServer implements PayBackend {
 
     /** 确认框同意以后（主线程）：再查一遍，照确认时的拿法扣（余额那部分从登录的角色的账户出） */
     TxRunner.Result executePay(PreparedPay prep, ConfirmResult r) {
-        PayException refused = refusal(r, prep.payer);
+        PayException refused = refusal(r);
         if (refused != null) {
             return TxRunner.Result.failed(refused);
         }
@@ -532,18 +535,28 @@ public final class PayServer implements PayBackend {
         if (o == null || p == null) {
             return TxRunner.Result.failed(new PayException("offline", "登录的角色不在线"));
         }
+        logConfirmer("付款 " + prep.orderId, r, p.name());
         return runner.pay(o, p, prep.plan.take, prep.plan.change, prep.fromBalance);
     }
 
-    /** 确认框的结果不是“登录的这个人同意了”时的说明 */
-    static PayException refusal(ConfirmResult r, UUID expected) {
+    /** 不是本人确认的（另一个玩家坐在已登录的电脑前）记一行日志 */
+    private static void logConfirmer(String what, ConfirmResult r, String account) {
+        if (r != null && r.playerName != null && !r.playerName.equals(account)) {
+            Ledger.LOG.info("pay.yr：{}：{} 的账户，由当时操作电脑的 {} 在确认框里同意", what, account, r.playerName);
+        }
+    }
+
+    /**
+     * 确认框的结果不是“同意了”时的说明。同意的人不必是登录的角色（服主 11-15：另一个玩家坐到已登录的电脑前动钱是允许的，
+     * 记账照登录的账户；确认框里写明是谁的账户）。
+     */
+    static PayException refusal(ConfirmResult r) {
         if (r == null) {
             return new PayException("unavailable", "确认框没弹出来");
         }
         switch (r.outcome) {
             case APPROVED:
-                return r.player != null && r.player.equals(expected) ? null
-                        : new PayException("operator_mismatch", "确认的人（" + r.playerName + "）不是登录的角色；请退出后用自己的角色重新登录");
+                return null;
             case DENIED:
                 return new PayException("denied", "你在确认框里点了拒绝");
             case TIMEOUT:
@@ -602,7 +615,7 @@ public final class PayServer implements PayBackend {
         AccountRef acct = AccountRef.player(player);
         WorldPort.PlayerPort p = world.player(player);
         if (p == null) {
-            throw new PayException("offline", "提现要本人在线");
+            throw new PayException("offline", "提现要账户的主人在线（东西放进他的背包）");
         }
         Amount value = Amount.of(yuan, items);
         if (value.isZero()) {
@@ -638,14 +651,15 @@ public final class PayServer implements PayBackend {
     }
 
     TxRunner.Result executeWithdraw(PreparedWithdraw prep, ConfirmResult r) {
-        PayException refused = refusal(r, prep.player);
+        PayException refused = refusal(r);
         if (refused != null) {
             return TxRunner.Result.failed(refused);
         }
         WorldPort.PlayerPort p = world.player(prep.player);
         if (p == null) {
-            return TxRunner.Result.failed(new PayException("offline", "提现要本人在线"));
+            return TxRunner.Result.failed(new PayException("offline", "提现要账户的主人在线（东西放进他的背包）"));
         }
+        logConfirmer("提现", r, p.name());
         return runner.withdraw(prep.account, p, prep.value, prep.give, "在 pay.yr 提现");
     }
 
@@ -666,6 +680,7 @@ public final class PayServer implements PayBackend {
     }
 
     PreparedRefund prepareRefund(UUID by, String paymentId, Amount amount) throws PayException {
+        String owner = ItemText.clean(ItemText.clip(ledger.name(AccountRef.player(by)), 16));
         Ledger.Payment p = ledger.payment(paymentId);
         if (p == null || !p.receiver.equals(AccountRef.player(by))) {
             throw new PayException("no_such_payment", "没有这笔付款（只能退自己收到的）");
@@ -683,15 +698,16 @@ public final class PayServer implements PayBackend {
         ItemText.cacheAll(amount);
         String payer = ItemText.clean(p.payerName == null ? "?" : p.payerName);
         List<ConfirmText> lines = new ArrayList<>();
+        lines.add(ConfirmText.translate("youranmod.pay.confirm.account", "这是 " + owner + " 的 pay.yr 账户", ConfirmText.literal(owner)));
         lines.add(ConfirmText.translate("youranmod.pay.confirm.refund.to", "退进 " + payer + " 在 pay.yr 的账户", ConfirmText.literal(payer)));
         if (amount.yuan > 0) {
-            lines.add(ItemText.confirmMoney("youranmod.pay.confirm.refund.money", "从你的账户扣回：%s（%s）", amount.yuan, Currency.Unit.YUAN));
+            lines.add(ItemText.confirmMoney("youranmod.pay.confirm.refund.money", "从这个账户扣回：%s（%s）", amount.yuan, Currency.Unit.YUAN));
         }
         for (Map.Entry<PayItem, Long> e : amount.items.entrySet()) {
             if (lines.size() >= ConfirmRequest.MAX_ITEMS) {
                 break;
             }
-            lines.add(ItemText.confirmLine("youranmod.pay.confirm.refund.item", "从你的账户扣回：%s ×%s", e.getKey(), e.getValue()));
+            lines.add(ItemText.confirmLine("youranmod.pay.confirm.refund.item", "从这个账户扣回：%s ×%s", e.getKey(), e.getValue()));
         }
         ConfirmRequest req = new ConfirmRequest(ConfirmText.translate("youranmod.pay.confirm.refund.title", ItemText.clip("退款给 " + payer, 40),
                 ConfirmText.literal(payer)), PayApi.DOMAIN, lines, PayConfig.confirmSeconds, ConfirmRequest.Purpose.PAY);
@@ -699,10 +715,11 @@ public final class PayServer implements PayBackend {
     }
 
     void executeRefund(PreparedRefund prep, ConfirmResult r) throws PayException {
-        PayException refused = refusal(r, prep.by);
+        PayException refused = refusal(r);
         if (refused != null) {
             throw refused;
         }
+        logConfirmer("退款 " + prep.paymentId, r, ledger.name(AccountRef.player(prep.by)));
         doRefund(prep.paymentId, prep.amount, "收款方在 pay.yr 退款");
     }
 
@@ -716,10 +733,11 @@ public final class PayServer implements PayBackend {
     }
 
     String executeKey(UUID player, ConfirmResult r) throws PayException {
-        PayException refused = refusal(r, player);
+        PayException refused = refusal(r);
         if (refused != null) {
             throw refused;
         }
+        logConfirmer("重置密钥", r, ledger.name(AccountRef.player(player)));
         try {
             return ledger.newKey(AccountRef.player(player), System.currentTimeMillis());
         } catch (IOException e) {

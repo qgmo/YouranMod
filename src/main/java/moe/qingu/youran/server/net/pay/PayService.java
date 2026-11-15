@@ -54,7 +54,8 @@ import static moe.qingu.youran.server.net.pay.PayPages.link;
  *   POST /api/v1/orders；GET /api/v1/orders/&lt;单号&gt;；POST /api/v1/orders/&lt;单号&gt;/cancel；GET /api/v1/balance；GET /api/v1/payments/&lt;号&gt;
  * </pre>
  * 登录状态是 Cookie {@code yrpay}（跟着电脑走：同一台电脑的下一个人看得到，所以空闲 {@code sessionIdleMinutes} 分钟就失效）。
- * 付款、提现、退款、重置密钥都要在系统确认框里确认，而且确认的人必须就是登录的角色。
+ * 付款、提现、退款、重置密钥都要在系统确认框里确认。确认框弹给这台电脑现在的操作者，不必是登录的角色（服主 11-15：另一个玩家坐到
+ * 已登录的电脑前动钱是允许的，“相当于老婆帮你买东西”）；记账一律照登录的账户，确认框里写明是谁的账户。
  */
 final class PayService {
     static final int PORT = 80;
@@ -507,7 +508,8 @@ final class PayService {
                     .append("<input type=\"hidden\" name=\"prefer\" value=\"").append(prefer == CurrencyPlan.Prefer.YUAN ? "yuan" : "emerald").append("\" />")
                     .append("<input type=\"hidden\" name=\"bal\" value=\"").append(esc(use.code())).append("\" />")
                     .append("<input type=\"submit\" class=\"go\" value=\"付款\" /></div></form>\n")
-                    .append("<p class=\"hint\">点了以后游戏会弹出系统确认框（不是网页），写着要拿出的东西、用多少余额；确认了才扣。</p>\n");
+                    .append("<p class=\"hint\">点了以后游戏会弹出系统确认框（不是网页），写着要拿出的东西、用多少余额；确认了才扣。确认框弹给正在操作这台电脑的人，"
+                            + "扣的是登录的角色（").append(esc(s.name)).append("）的。</p>\n");
         }
         b.append("<p>").append(back).append(" · ").append(link(checkoutUrl(o.id, prefer, use), "刷新")).append("</p>\n");
         return PayPages.page("付款", s.name, s.csrf, b.toString(), 0, null);
@@ -693,7 +695,8 @@ final class PayService {
                         .append("\" maxlength=\"9\" value=\"\" /> 个（有 ").append(e.getValue()).append(" 个）</td></tr>\n");
             }
             b.append("</table><input type=\"submit\" class=\"go\" value=\"提现到背包\" /></div></form>\n")
-                    .append("<p class=\"hint\">提现要本人在线、坐在电脑前：会弹出系统确认框；东西进背包，放不下的掉在脚边。</p>\n");
+                    .append("<p class=\"hint\">提现要 ").append(esc(s.name)).append(" 在线：会弹出系统确认框（弹给正在操作这台电脑的人）；东西进 ")
+                    .append(esc(s.name)).append(" 的背包，放不下的掉在脚边。付款时也可以直接用余额，不用先提现。</p>\n");
         }
         // 收到的付款
         List<Ledger.Payment> pays = core.ledger.paymentsTo(me, 20);

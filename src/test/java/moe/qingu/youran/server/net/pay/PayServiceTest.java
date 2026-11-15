@@ -87,18 +87,21 @@ class PayServiceTest {
         assertThrows(PayException.class, () -> PayService.yuanField("1.5"));
     }
 
-    /** 确认框的结果：只有“登录的这个人同意了”才算 */
+    /**
+     * 确认框的结果：同意了就算，谁同意的都行（服主 11-15：另一个玩家坐到已登录的电脑前动钱是允许的，记账照登录的账户）；
+     * 拒绝、超时、离开、没人操作、忙都不算
+     */
     @Test
     void confirmResults() {
         UUID me = UUID.randomUUID();
-        assertNull(PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.APPROVED, me, "Me"), me));
-        assertEquals("operator_mismatch", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.APPROVED, UUID.randomUUID(), "Other"), me).code);
-        assertEquals("denied", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.DENIED, me, "Me"), me).code);
-        assertEquals("timeout", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.TIMEOUT, me, "Me"), me).code);
-        assertEquals("operator_changed", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.OPERATOR_CHANGED, me, "Me"), me).code);
-        assertEquals("busy", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.BUSY, me, "Me"), me).code);
-        assertEquals("no_operator", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null), me).code);
-        assertEquals("unavailable", PayServer.refusal(null, me).code);
+        assertNull(PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.APPROVED, me, "Me")));
+        assertNull(PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.APPROVED, UUID.randomUUID(), "Other")), "别的玩家同意也算");
+        assertEquals("denied", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.DENIED, me, "Me")).code);
+        assertEquals("timeout", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.TIMEOUT, me, "Me")).code);
+        assertEquals("operator_changed", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.OPERATOR_CHANGED, me, "Me")).code);
+        assertEquals("busy", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.BUSY, me, "Me")).code);
+        assertEquals("no_operator", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null)).code);
+        assertEquals("unavailable", PayServer.refusal(null).code);
     }
 
     /** 余额用法的写法：none / all / 元数 / part + n；写错为 null */
