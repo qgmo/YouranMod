@@ -280,11 +280,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                 players == null ? "" : "；玩家临时地址 " + layout.playersPrefix() + "/96");
     }
 
-    /** 验证码的本机端口（配置 {@code network.captchaLocalPort}，0 为不开） */
+    /** 验证码的本机端口（配置 {@code network.captchaLocal} 开关、{@code network.captchaLocalPort} 端口，默认 8094） */
     private void startCaptchaLocal(CaptchaService service) {
         int port = NetworkConfig.captchaLocalPort;
-        if (port <= 0) {
-            LOG.info("游戏内网络：验证码的本机端口没开（network.captchaLocalPort=0）");
+        if (!NetworkConfig.captchaLocal) {
+            LOG.info("游戏内网络：验证码的本机端口没开（network.captchaLocal=false）");
             return;
         }
         CaptchaLocalServer s = new CaptchaLocalServer(service, System::currentTimeMillis);
