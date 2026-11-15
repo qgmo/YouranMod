@@ -121,16 +121,18 @@ public final class IeRecipes {
         }
     }
 
-    /** IC2 的二氧化硅粉（ic2:dust:13）；沉浸工程的焦炭（immersiveengineering:material:6） */
+    /** IC2 的二氧化硅粉（ic2:dust:13）；沉浸工程的焦炭（immersiveengineering:material:6）与焦炭粉（material:17） */
     static final String SILICON_DIOXIDE_DUST = "dustSiliconDioxide";
     static final String COKE = "fuelCoke";
+    static final String COKE_DUST = "dustCoke";
     /** 电弧炉：时间、每 tick 电耗同沉浸工程自己的钢（铁锭 + 焦炭粉 → 钢锭：400 tick、512 Flux/tick） */
     static final int ARC_TIME = 400;
     static final int ARC_ENERGY_PER_TICK = 512;
 
     /**
-     * 电弧炉：1 二氧化硅粉（IC2）+ 辅料 1 焦炭 → 1 炼金化学硅锭（服主 11-15，芯片线“硅”第 1 步，粗硅）。不出炉渣。
-     * 要装了炼金化学；二氧化硅粉按矿物词典 dustSiliconDioxide（IC2 注册），焦炭按 fuelCoke（沉浸工程注册）。
+     * 电弧炉：1 二氧化硅粉（IC2）+ 辅料 1 焦炭或焦炭粉 → 1 炼金化学硅锭（服主 11-15，芯片线“硅”第 1 步，粗硅）。不出炉渣。
+     * 要装了炼金化学；二氧化硅粉按矿物词典 dustSiliconDioxide（IC2 注册），辅料认 fuelCoke 与 dustCoke（沉浸工程注册；
+     * 沉浸工程按矿物词典名的列表合成一种辅料，两种都能放进辅料槽）。
      */
     public static void registerSiliconArcFurnace() {
         ItemStack silicon = AlchemistryCompat.ingot(AlchemistryCompat.SILICON, 1);
@@ -142,17 +144,21 @@ public final class IeRecipes {
             YouranMod.LOG.info("矿物词典里没有 {}（没装 IC2？），不加沉浸工程电弧炉的粗硅配方", SILICON_DIOXIDE_DUST);
             return;
         }
-        ArcFurnaceRecipe.addRecipe(silicon, SILICON_DIOXIDE_DUST, ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK, COKE);
+        ArcFurnaceRecipe.addRecipe(silicon, SILICON_DIOXIDE_DUST, ItemStack.EMPTY, ARC_TIME, ARC_ENERGY_PER_TICK,
+                java.util.Arrays.asList(COKE, COKE_DUST));
         ItemStack dust = OreDictionary.getOres(SILICON_DIOXIDE_DUST, false).get(0);
-        NonNullList<ItemStack> additives = NonNullList.withSize(4, ItemStack.EMPTY);
-        if (!OreDictionary.getOres(COKE, false).isEmpty()) {
-            additives.set(0, OreDictionary.getOres(COKE, false).get(0).copy());
-        }
-        ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(dust, additives);
-        if (found == null || !ItemStack.areItemStacksEqual(found.output, silicon)) {
-            YouranMod.LOG.error("沉浸工程电弧炉的粗硅配方没生效：同样的输入找到的是 {}", found == null ? null : found.output);
-        } else {
-            YouranMod.LOG.info("已加沉浸工程电弧炉配方：二氧化硅粉 + 焦炭 → 硅锭");
+        for (String coke : new String[]{COKE, COKE_DUST}) {
+            if (OreDictionary.getOres(coke, false).isEmpty()) {
+                continue;
+            }
+            NonNullList<ItemStack> additives = NonNullList.withSize(4, ItemStack.EMPTY);
+            additives.set(0, OreDictionary.getOres(coke, false).get(0).copy());
+            ArcFurnaceRecipe found = ArcFurnaceRecipe.findRecipe(dust, additives);
+            if (found == null || !ItemStack.areItemStacksEqual(found.output, silicon)) {
+                YouranMod.LOG.error("沉浸工程电弧炉的粗硅配方（辅料 {}）没生效：同样的输入找到的是 {}", coke, found == null ? null : found.output);
+            } else {
+                YouranMod.LOG.info("已加沉浸工程电弧炉配方：二氧化硅粉 + {} → 硅锭", coke);
+            }
         }
     }
 
