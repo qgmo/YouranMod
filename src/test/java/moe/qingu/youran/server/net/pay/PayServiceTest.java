@@ -13,7 +13,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -97,6 +99,25 @@ class PayServiceTest {
         assertEquals("busy", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.BUSY, me, "Me"), me).code);
         assertEquals("no_operator", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null), me).code);
         assertEquals("unavailable", PayServer.refusal(null, me).code);
+    }
+
+    /** 余额用法的写法：none / all / 元数 / part + n；写错为 null */
+    @Test
+    void balanceUseParsing() {
+        assertSame(CurrencyPlan.BalanceUse.NONE, PayService.balanceUse(Collections.<String, String>emptyMap()));
+        assertSame(CurrencyPlan.BalanceUse.ALL, PayService.balanceUse(Collections.singletonMap("bal", "all")));
+        assertEquals(12, PayService.balanceUse(Collections.singletonMap("bal", "12")).yuan);
+        Map<String, String> part = new java.util.HashMap<>();
+        part.put("bal", "part");
+        part.put("n", " 7 ");
+        assertEquals(7, PayService.balanceUse(part).yuan);
+        assertEquals("7", PayService.balanceUse(part).code());
+        part.put("n", "");
+        assertSame(CurrencyPlan.BalanceUse.NONE, PayService.balanceUse(part));
+        part.put("n", "-3");
+        assertNull(PayService.balanceUse(part));
+        assertNull(PayService.balanceUse(Collections.singletonMap("bal", "1e3")));
+        assertSame(CurrencyPlan.BalanceUse.NONE, PayService.balanceUse(Collections.singletonMap("bal", "0")));
     }
 
     @Test

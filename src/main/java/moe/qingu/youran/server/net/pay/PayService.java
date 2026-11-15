@@ -374,15 +374,39 @@ final class PayService {
         if (o == null) {
             return done(page(404, PayPages.message("没有这张收款单", nameOf(s), csrfOf(s), "err", "没有这张收款单（单号不对，或者已经过了保留期）。", link("/", "回首页"))));
         }
-        CurrencyPlan.Prefer prefer = "yuan".equals(r.queryParameters().get("prefer")) ? CurrencyPlan.Prefer.YUAN : CurrencyPlan.Prefer.EMERALD;
-        if (s == null || o.status != OrderInfo.Status.OPEN) {
-            return done(ok(checkoutPage(o, s, null, prefer, error)));
+        Map<String, String> q = r.queryParameters();
+        CurrencyPlan.Prefer prefer = "yuan".equals(q.get("prefer")) ? CurrencyPlan.Prefer.YUAN : CurrencyPlan.Prefer.EMERALD;
+        CurrencyPlan.BalanceUse use = balanceUse(q);
+        String err = error;
+        if (use == null) {
+            use = CurrencyPlan.BalanceUse.NONE;
+            err = err == null ? "用余额付的元数要填 1–9 位整数" : err;
         }
-        return ctx.onMainThread(() -> core.preview(orderId, s.player, prefer))
-                .handle((plan, e) -> ok(checkoutPage(o, s, plan, prefer, error)));
+        CurrencyPlan.BalanceUse u = use;
+        String shownError = err;
+        if (s == null || o.status != OrderInfo.Status.OPEN) {
+            return done(ok(checkoutPage(o, s, null, prefer, u, shownError)));
+        }
+        return ctx.onMainThread(() -> core.preview(orderId, s.player, prefer, u))
+                .handle((pv, e) -> ok(checkoutPage(o, s, pv, prefer, u, shownError)));
     }
 
-    private String checkoutPage(OrderInfo o, Session s, CurrencyPlan.PayPlan plan, CurrencyPlan.Prefer prefer, String error) {
+    /** 表单 / 网址里的余额用法：{@code bal=none|all|part}（{@code part} 时 {@code n=元数}），或 {@code bal=元数}；写错为 null */
+    static CurrencyPlan.BalanceUse balanceUse(Map<String, String> f) {
+        String b = f.get("bal");
+        if ("part".equals(b)) {
+            String n = f.get("n") == null ? "" : f.get("n").trim();
+            return n.isEmpty() ? CurrencyPlan.BalanceUse.NONE : CurrencyPlan.BalanceUse.parse(n);
+        }
+        return CurrencyPlan.BalanceUse.parse(b == null ? null : b.trim());
+    }
+
+    private static String checkoutUrl(String orderId, CurrencyPlan.Prefer prefer, CurrencyPlan.BalanceUse use) {
+        return "/c/" + orderId + "?prefer=" + (prefer == CurrencyPlan.Prefer.YUAN ? "yuan" : "emerald") + "&bal=" + use.code();
+    }
+
+    private String checkoutPage(OrderInfo o, Session s, PayServer.Preview pv, CurrencyPlan.Prefer prefer, CurrencyPlan.BalanceUse use, String error) {
+        CurrencyPlan.PayPlan plan = pv == null ? null : pv.plan;
         StringBuilder b = new StringBuilder();
         b.append("<h1>向 ").append(esc(o.receiverName)).append(" 付款</h1>\n");
         if (error != null) {
@@ -422,7 +446,7 @@ final class PayService {
                 b.append("<p class=\"err\">付款要先用游戏角色登录（").append(esc(id.domain()))
                         .append("），这个服务器现在没有开这个服务（要装 YouranAuth），暂时不能付款。</p>\n");
             } else {
-                b.append("<p>付款要先用你的游戏角色登录（").append(esc(id.domain())).append("，会弹出系统确认框）。从<b>登录的角色</b>的背包里扣。</p>\n")
+                b.append("<p>付款要先用你的游戏角色登录（").append(esc(id.domain())).append("，会弹出系统确认框）。从<b>登录的角色</b>的背包或 pay.yr 余额里扣。</p>\n")
                         .append("<form method=\"get\" action=\"/login\"><div><input type=\"hidden\" name=\"next\" value=\"/c/").append(o.id).append("\" />")
                         .append("<input type=\"submit\" class=\"go\" value=\"用游戏角色登录\" /></div></form>\n");
             }
@@ -430,13 +454,42 @@ final class PayService {
             return PayPages.page("付款", null, null, b.toString(), 0, null);
         }
         b.append("<h2>付款人：").append(esc(s.name)).append("</h2>\n");
+        if (o.requiredPayer != null && !o.requiredPayer.equals(s.player)) {
+            String who = core.ledger.name(AccountRef.player(o.requiredPayer));
+            b.append("<p class=\"err\">这张收款单要由 <b>").append(esc(who)).append("</b> 付（网站指定的），现在登录的是 ").append(esc(s.name))
+                    .append("。请退出后让 ").append(esc(who)).append(" 在这台电脑上登录 pay.yr。</p>\n")
+                    .append("<form method=\"post\" action=\"/logout\"><div><input type=\"hidden\" name=\"csrf\" value=\"").append(esc(s.csrf))
+                    .append("\" /><input type=\"submit\" value=\"退出登录\" /></div></form>\n")
+                    .append("<p>").append(back).append("</p>\n");
+            return PayPages.page("付款", s.name, s.csrf, b.toString(), 0, null);
+        }
+        if (pv != null && pv.error != null) {
+            b.append("<p class=\"err\">").append(esc(pv.error)).append("</p>\n");
+        }
+        if (pv != null && !pv.balance.isZero()) {
+            b.append("<table class=\"info\"><tr><th>pay.yr 余额</th><td>").append(esc(ItemText.describe(pv.balance, Currency.Unit.YUAN)))
+                    .append("</td></tr></table>\n")
+                    .append("<form method=\"get\" action=\"/c/").append(o.id).append("\"><div>")
+                    .append("<input type=\"hidden\" name=\"prefer\" value=\"").append(prefer == CurrencyPlan.Prefer.YUAN ? "yuan" : "emerald").append("\" />")
+                    .append("用余额付：<input type=\"radio\" name=\"bal\" value=\"none\"").append(use.isNone() ? " checked=\"checked\"" : "").append(" /> 不用 ")
+                    .append("<input type=\"radio\" name=\"bal\" value=\"all\"").append(use == CurrencyPlan.BalanceUse.ALL ? " checked=\"checked\"" : "").append(" /> 能用的全用上 ")
+                    .append("<input type=\"radio\" name=\"bal\" value=\"part\"").append(!use.isNone() && use != CurrencyPlan.BalanceUse.ALL ? " checked=\"checked\"" : "")
+                    .append(" /> 用 <input type=\"text\" name=\"n\" maxlength=\"9\" size=\"5\" value=\"")
+                    .append(!use.isNone() && use != CurrencyPlan.BalanceUse.ALL ? Long.toString(use.yuan) : "").append("\" /> 元 ")
+                    .append("<input type=\"submit\" value=\"重新算\" /></div></form>\n")
+                    .append("<p class=\"hint\">余额按价值算（绿宝石、悠然元合并记）；剩下的从背包拿。“能用的全用上”也会用账户里和要求一样的别的物品。</p>\n");
+        }
         if (plan == null) {
             b.append("<p class=\"err\">").append(esc(s.name)).append(" 现在不在线，付不了。</p>\n");
         } else if (!plan.ok()) {
             b.append("<p class=\"err\">背包里的不够：还差 ").append(esc(ItemText.describe(plan.lack, o.unit))).append("。</p>\n")
                     .append("<p class=\"hint\">只算主背包、快捷栏和副手，不算盔甲栏；物品要和要求的完全一样（数据值、NBT）。</p>\n");
         } else {
-            b.append("<table class=\"info\"><tr><th>从背包拿出</th><td>").append(esc(PayPages.items(plan.take))).append("</td></tr>\n");
+            b.append("<table class=\"info\">");
+            if (pv != null && !pv.fromBalance.isZero()) {
+                b.append("<tr><th>用余额付</th><td>").append(esc(ItemText.describe(pv.fromBalance, Currency.Unit.YUAN))).append("</td></tr>\n");
+            }
+            b.append("<tr><th>从背包拿出</th><td>").append(esc(plan.take.isEmpty() ? "（不用）" : PayPages.items(plan.take))).append("</td></tr>\n");
             if (!plan.change.isEmpty()) {
                 b.append("<tr><th>找回</th><td>").append(esc(PayPages.items(plan.change))).append("（").append(plan.changeYuan)
                         .append(" 元，放进背包，放不下的掉在脚边）</td></tr>\n");
@@ -444,18 +497,19 @@ final class PayService {
             b.append("</table>\n");
         }
         if (o.price.yuan > 0) {
-            b.append("<p>").append(prefer == CurrencyPlan.Prefer.EMERALD ? "<b>先用绿宝石</b>" : link("/c/" + o.id + "?prefer=emerald", "先用绿宝石"))
-                    .append(" · ").append(prefer == CurrencyPlan.Prefer.YUAN ? "<b>先用悠然元</b>" : link("/c/" + o.id + "?prefer=yuan", "先用悠然元"))
+            b.append("<p>").append(prefer == CurrencyPlan.Prefer.EMERALD ? "<b>先用绿宝石</b>" : link(checkoutUrl(o.id, CurrencyPlan.Prefer.EMERALD, use), "先用绿宝石"))
+                    .append(" · ").append(prefer == CurrencyPlan.Prefer.YUAN ? "<b>先用悠然元</b>" : link(checkoutUrl(o.id, CurrencyPlan.Prefer.YUAN, use), "先用悠然元"))
                     .append(" <span class=\"hint\">（不够时另一种补上；按面额凑，尽量不找零）</span></p>\n");
         }
         if (plan != null && plan.ok()) {
             b.append("<form method=\"post\" action=\"/c/").append(o.id).append("/pay\"><div>")
                     .append("<input type=\"hidden\" name=\"csrf\" value=\"").append(esc(s.csrf)).append("\" />")
                     .append("<input type=\"hidden\" name=\"prefer\" value=\"").append(prefer == CurrencyPlan.Prefer.YUAN ? "yuan" : "emerald").append("\" />")
+                    .append("<input type=\"hidden\" name=\"bal\" value=\"").append(esc(use.code())).append("\" />")
                     .append("<input type=\"submit\" class=\"go\" value=\"付款\" /></div></form>\n")
-                    .append("<p class=\"hint\">点了以后游戏会弹出系统确认框（不是网页），写着要拿出的东西；确认了才扣。</p>\n");
+                    .append("<p class=\"hint\">点了以后游戏会弹出系统确认框（不是网页），写着要拿出的东西、用多少余额；确认了才扣。</p>\n");
         }
-        b.append("<p>").append(back).append(" · ").append(link("/c/" + o.id, "刷新")).append("</p>\n");
+        b.append("<p>").append(back).append(" · ").append(link(checkoutUrl(o.id, prefer, use), "刷新")).append("</p>\n");
         return PayPages.page("付款", s.name, s.csrf, b.toString(), 0, null);
     }
 
@@ -484,6 +538,10 @@ final class PayService {
             return page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请回付款页重新点“付款”。", link("/c/" + orderId, "回付款页")));
         }
         CurrencyPlan.Prefer prefer = "yuan".equals(f.get("prefer")) ? CurrencyPlan.Prefer.YUAN : CurrencyPlan.Prefer.EMERALD;
+        CurrencyPlan.BalanceUse use = balanceUse(f);
+        if (use == null) {
+            return page(400, PayPages.message("付款", s.name, s.csrf, "err", "用余额付的元数要填 1–9 位整数", link("/c/" + orderId, "回付款页")));
+        }
         if (ops.size() >= MAX_OPS) {
             return page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null));
         }
@@ -496,7 +554,7 @@ final class PayService {
         core.onMain(() -> {
             PayServer.PreparedPay prep;
             try {
-                prep = core.preparePay(orderId, s.player, prefer);
+                prep = core.preparePay(orderId, s.player, prefer, use);
             } catch (PayException e) {
                 op.fail(e.getMessage());
                 orderLocks.remove(orderId, op.id);
@@ -964,6 +1022,14 @@ final class PayService {
                 spec.item(parseItem(id.trim(), f.get("item" + i + "_nbt"), "item" + i), n);
             }
             spec.description(f.get("description")).reference(f.get("reference")).returnUrl(ret).cancelUrl(f.get("cancel_url"));
+            String payer = f.get("payer_uuid");
+            if (payer != null && !payer.trim().isEmpty()) {
+                try {
+                    spec.payer(UUID.fromString(payer.trim()));
+                } catch (IllegalArgumentException e) {
+                    throw new PayException("invalid_payer_uuid", "payer_uuid 要是玩家的 UUID");
+                }
+            }
             String exp = f.get("expires_in");
             if (exp != null && !exp.trim().isEmpty()) {
                 long e = positive(exp, "expires_in");
@@ -1073,6 +1139,9 @@ final class PayService {
         }
         if (o.reference != null) {
             j.addProperty("reference", o.reference);
+        }
+        if (o.requiredPayer != null) {
+            j.addProperty("required_payer_uuid", o.requiredPayer.toString());
         }
         j.addProperty("created", o.createdAt / 1000);
         j.addProperty("expires_at", o.expiresAt / 1000);
