@@ -44,11 +44,6 @@ public final class PayConfig {
     @Config.RequiresMcRestart
     public static int sessionIdleMinutes = 10;
 
-    @Config.Comment({"确认框（付款、提现、退款、重置密钥）多少秒没回应算拒绝。默认 60。"})
-    @Config.RangeInt(min = 5, max = 120)
-    @Config.RequiresMcRestart
-    public static int confirmSeconds = 60;
-
     @Config.Comment({"付过的收款单与付款记录保留多少天（之后不能再查、不能退款）。账户余额与收支记录（每个账户最近 200 条）一直保留。默认 365。"})
     @Config.RangeInt(min = 7)
     @Config.RequiresMcRestart

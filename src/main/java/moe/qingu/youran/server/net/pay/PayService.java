@@ -4,7 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import moe.qingu.youran.api.network.HostContext;
 import moe.qingu.youran.api.network.Ipv6Address;
-import moe.qingu.youran.api.network.SystemConfirm;
+import moe.qingu.youran.api.network.idyr.IdYrClient;
 import moe.qingu.youran.api.network.http.HttpRequest;
 import moe.qingu.youran.api.network.http.HttpResponse;
 import moe.qingu.youran.api.network.http.HttpServer;
@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -44,18 +45,19 @@ import static moe.qingu.youran.server.net.pay.PayPages.link;
  * <pre>
  *   GET  /                      介绍与接口说明
  *   GET  /c/&lt;单号&gt;             付款页（没登录时先登录）
- *   POST /c/&lt;单号&gt;/pay         付款：弹系统确认框，跳到 /op/&lt;号&gt; 等结果
+ *   POST /c/&lt;单号&gt;/pay         付款：请 id.yr 弹确认框（跳过去），确认完跳回 /op/&lt;号&gt;
  *   GET  /c/&lt;单号&gt;/cancel      不付了，回网站
  *   GET  /login、/login/callback  用 id.yr 游戏角色一键登录（OAuth 授权码 + PKCE）
  *   POST /logout
- *   GET  /op/&lt;号&gt;              等确认框与结果（自动刷新）
- *   GET  /account               账户：余额、提现、收到的付款、收支记录、密钥
- *   POST /account/withdraw、/account/key；GET、POST /account/refund/&lt;付款号&gt;
+ *   GET  /op/&lt;号&gt;              id.yr 跳回来的地方：向 id.yr 核对确认结果，通过了就做，显示结果（处理中自动刷新）
+ *   GET  /account               账户：余额、提现、收到的付款、收支记录、密钥、安全设置
+ *   POST /account/withdraw、/account/key、/account/security；GET、POST /account/refund/&lt;付款号&gt;
  *   POST /api/v1/orders；GET /api/v1/orders/&lt;单号&gt;；POST /api/v1/orders/&lt;单号&gt;/cancel；GET /api/v1/balance；GET /api/v1/payments/&lt;号&gt;
  * </pre>
  * 登录状态是 Cookie {@code yrpay}（跟着电脑走：同一台电脑的下一个人看得到，所以空闲 {@code sessionIdleMinutes} 分钟就失效）。
- * 付款、提现、退款、重置密钥都要在系统确认框里确认。确认框弹给这台电脑现在的操作者，不必是登录的角色（服主 11-15：另一个玩家坐到
- * 已登录的电脑前动钱是允许的，“相当于老婆帮你买东西”）；记账一律照登录的账户，确认框里写明是谁的账户。
+ * 付款、提现、退款、重置密钥都要确认。pay.yr 是 id.yr 的普通网站（服主 11-15）：登录时要了 {@code confirm}（弹窗确认）与 {@code verify}（验证身份）
+ * 两项能力，确认框由 id.yr 弹给这台电脑现在的操作者，不必是登录的角色（另一个玩家坐到已登录的电脑前动钱是允许的，“相当于老婆帮你买东西”）；
+ * 记账一律照登录的账户，确认框里写明是谁的账户。账户开了“操作前必须验证身份”时改用验证身份：只有登录的角色本人同意才通过。
  */
 final class PayService {
     static final int PORT = 80;
@@ -67,6 +69,10 @@ final class PayService {
     static final long LOGIN_TTL = 5 * 60_000;
     static final long OP_TTL = 30 * 60_000;
     static final long SESSION_MAX = 2 * 3600_000;
+    /** 跳去 id.yr 确认以后多久没回来就当作没确认（id.yr 的请求 2 分钟内要打开、确认框 1 分钟） */
+    static final long CONFIRM_STALE = 5 * 60_000;
+    /** 登录时向 id.yr 要的能力 */
+    static final String SCOPE = "confirm verify";
     static final Pattern ORDER_PATH = Pattern.compile("/c/(ord_[a-z0-9]{16})(/pay|/cancel)?");
     static final Pattern OP_PATH = Pattern.compile("/op/(op_[a-z0-9]{16})");
     static final Pattern REFUND_PATH = Pattern.compile("/account/refund/(pay_[a-z0-9]{16})");
@@ -80,15 +86,26 @@ final class PayService {
         final String name;
         final String csrf;
         final long created;
+        /** id.yr 的访问令牌（弹确认框用），什么时候过期；登录用的协议（client_id 的协议） */
+        final String accessToken;
+        final long tokenExpires;
+        final String scheme;
         volatile long lastSeen;
 
-        Session(String id, UUID player, String name, String csrf, long now) {
+        Session(String id, UUID player, String name, String csrf, long now, String accessToken, long tokenExpires, String scheme) {
             this.id = id;
             this.player = player;
             this.name = name;
             this.csrf = csrf;
             this.created = now;
             this.lastSeen = now;
+            this.accessToken = accessToken;
+            this.tokenExpires = tokenExpires;
+            this.scheme = scheme;
+        }
+
+        boolean alive(long now) {
+            return now - lastSeen <= PayConfig.sessionIdleMinutes * 60_000L && now - created <= SESSION_MAX && now < tokenExpires;
         }
     }
 
@@ -109,14 +126,14 @@ final class PayService {
     }
 
     enum OpKind {
-        PAY, WITHDRAW, REFUND, KEY
+        PAY, WITHDRAW, REFUND, KEY, SECURITY
     }
 
     enum OpState {
         PREPARING, CONFIRMING, PROCESSING, DONE, FAILED
     }
 
-    /** 一次要确认的操作（付款、提现……）：页面按它显示“请确认”、结果 */
+    /** 一次要确认的操作（付款、提现……）：准备好的内容、id.yr 的确认请求、结果 */
     static final class Op {
         final String id;
         final String sessionId;
@@ -128,6 +145,16 @@ final class PayService {
         volatile String txId;
         /** 新密钥（只显示一次） */
         volatile String secret;
+        /** 准备好的（PreparedPay / PreparedWithdraw / PreparedRefund；安全设置为 Boolean） */
+        volatile Object prepared;
+        /** id.yr 的确认请求与地址；这次是不是验证身份 */
+        volatile String confirmId;
+        volatile String confirmUrl;
+        volatile boolean verify;
+        /** 没做成时“返回”去哪里（带着填的内容） */
+        volatile String back;
+        /** 同一时间只向 id.yr 核对一次 */
+        final AtomicBoolean checking = new AtomicBoolean();
 
         Op(String id, String sessionId, OpKind kind, String orderId, long now) {
             this.id = id;
@@ -150,7 +177,7 @@ final class PayService {
 
     private final PayServer core;
     private final HostContext ctx;
-    private final IdClient id;
+    private final IdYrClient id;
     private final BooleanSupplier idAvailable;
     private final SecureRandom random = new SecureRandom();
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
@@ -166,8 +193,8 @@ final class PayService {
     PayService(PayServer core, HostContext ctx, Ipv6Address resolver, BooleanSupplier idAvailable) {
         this.core = core;
         this.ctx = ctx;
-        this.id = new IdClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), PayConfig.idDomain.trim().toLowerCase(java.util.Locale.ROOT),
-                ctx.tls() != null);
+        this.id = new IdYrClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), PayConfig.idDomain, ctx.tls() != null,
+                moe.qingu.youran.api.pay.PayApi.DOMAIN);
         this.idAvailable = idAvailable;
         this.apiLimit = new SourceLimiter(PayConfig.apiPerMinute / 60.0, Math.max(10, PayConfig.apiPerMinute / 4), 8192);
     }
@@ -211,7 +238,7 @@ final class PayService {
                     return get ? checkout(r, s, orderId, null, now) : done(notAllowed("GET"));
                 }
                 if (m.group(2).equals("/pay")) {
-                    return done(post ? pay(r, s, orderId, now) : notAllowed("POST"));
+                    return post ? pay(r, s, orderId, now) : done(notAllowed("POST"));
                 }
                 return done(get ? cancel(orderId, now) : notAllowed("GET"));
             }
@@ -225,22 +252,24 @@ final class PayService {
                 case "/account":
                     return get ? account(r, s, null) : done(notAllowed("GET"));
                 case "/account/withdraw":
-                    return done(post ? withdraw(r, s, now) : notAllowed("POST"));
+                    return post ? withdraw(r, s, now) : done(notAllowed("POST"));
                 case "/account/key":
-                    return done(post ? key(r, s, now) : notAllowed("POST"));
+                    return post ? key(r, s, now) : done(notAllowed("POST"));
+                case "/account/security":
+                    return post ? security(r, s, now) : done(notAllowed("POST"));
                 default:
                     break;
             }
             m = OP_PATH.matcher(r.path);
             if (m.matches()) {
-                return done(get ? op(s, m.group(1)) : notAllowed("GET"));
+                return get ? op(s, m.group(1)) : done(notAllowed("GET"));
             }
             m = REFUND_PATH.matcher(r.path);
             if (m.matches()) {
                 if (get) {
                     return refundForm(r, s, m.group(1), null);
                 }
-                return done(post ? refund(r, s, m.group(1), now) : notAllowed("GET, POST"));
+                return post ? refund(r, s, m.group(1), now) : done(notAllowed("GET, POST"));
             }
             return done(page(404, PayPages.message("没有这个页面", nameOf(s), csrfOf(s), "err", "没有这个页面。", link("/", "回首页"))));
         } catch (RuntimeException e) {
@@ -292,7 +321,7 @@ final class PayService {
         String verifier = random(48);
         String scheme = r.secure ? "https" : "http";
         logins.put(state, new Login(verifier, scheme, next, r.remoteAddress, now));
-        return redirect(id.authorizeUrl(scheme, state, verifier));
+        return redirect(id.authorizeUrl(scheme, state, verifier, SCOPE));
     }
 
     private CompletableFuture<HttpResponse> callback(HttpRequest r, long now) {
@@ -310,7 +339,7 @@ final class PayService {
         String err = q.get("error");
         if (err != null) {
             return done(page(400, PayPages.message("登录失败", null, null, "err", loginError(err, q.get("error_description")),
-                    link(l.next, "返回") + " · " + link("/login?next=" + IdClient.enc(l.next), "重新登录"))));
+                    link(l.next, "返回") + " · " + link("/login?next=" + IdYrClient.enc(l.next), "重新登录"))));
         }
         String code = q.get("code");
         if (code == null || code.isEmpty()) {
@@ -321,12 +350,12 @@ final class PayService {
                 Throwable c = e instanceof java.util.concurrent.CompletionException && e.getCause() != null ? e.getCause() : e;
                 Ledger.LOG.warn("pay.yr：向 {} 兑换授权码失败：{}", id.domain(), c == null ? "?" : c.toString());
                 return page(502, PayPages.message("登录失败", null, null, "err", "向登录服务（" + id.domain() + "）兑换失败，请重新登录。",
-                        link("/login?next=" + IdClient.enc(l.next), "重新登录")));
+                        link("/login?next=" + IdYrClient.enc(l.next), "重新登录")));
             }
             if (sessions.size() >= MAX_SESSIONS) {
                 return page(503, PayPages.message("太忙了", null, null, "err", "现在登录的人太多，请稍后再试", null));
             }
-            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis());
+            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis(), who.accessToken, who.expiresAt, l.scheme);
             sessions.put(s.id, s);
             Ledger.LOG.info("pay.yr：{} 用游戏角色登录（来源 {}）", who.name, r.remoteAddress);
             return redirect(l.next).withHeader("Set-Cookie", cookie(s.id, l.scheme.equals("https"), -1));
@@ -378,7 +407,7 @@ final class PayService {
                 if (s == null) {
                     return null;
                 }
-                if (now - s.lastSeen > PayConfig.sessionIdleMinutes * 60_000L || now - s.created > SESSION_MAX) {
+                if (!s.alive(now)) {
                     sessions.remove(s.id);
                     return null;
                 }
@@ -532,7 +561,8 @@ final class PayService {
                     .append("<input type=\"hidden\" name=\"prefer\" value=\"").append(prefer == CurrencyPlan.Prefer.YUAN ? "yuan" : "emerald").append("\" />")
                     .append("<input type=\"hidden\" name=\"bal\" value=\"").append(esc(use.code())).append("\" />")
                     .append("<input type=\"submit\" class=\"go\" value=\"付款\" /></div></form>\n")
-                    .append("<p class=\"hint\">在游戏弹出的确认框里核对后才扣，扣 ").append(esc(s.name)).append(" 的。</p>\n");
+                    .append("<p class=\"hint\">在游戏弹出的确认框里核对后才扣，扣 ").append(esc(s.name)).append(" 的")
+                    .append(core.verifyRequired(s.player) ? "；这个账户要 " + esc(s.name) + " 本人验证身份" : "").append("。</p>\n");
         }
         b.append("<p>").append(back).append(" · ").append(link(checkoutUrl(o.id, prefer, use), "刷新")).append("</p>\n");
         return PayPages.page("付款", s.name, s.csrf, b.toString(), 0, null);
@@ -554,47 +584,115 @@ final class PayService {
         return url + (url.indexOf('?') >= 0 ? "&" : "?") + "order=" + orderId + "&status=" + status;
     }
 
-    private HttpResponse pay(HttpRequest r, Session s, String orderId, long now) {
+    private CompletableFuture<HttpResponse> pay(HttpRequest r, Session s, String orderId, long now) {
         Map<String, String> f = r.form();
         if (s == null) {
-            return redirect("/c/" + orderId);
+            return done(redirect("/c/" + orderId));
         }
         if (!s.csrf.equals(f.get("csrf"))) {
-            return page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请回付款页重新点“付款”。", link("/c/" + orderId, "回付款页")));
+            return done(page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请回付款页重新点“付款”。", link("/c/" + orderId, "回付款页"))));
         }
         CurrencyPlan.Prefer prefer = "yuan".equals(f.get("prefer")) ? CurrencyPlan.Prefer.YUAN : CurrencyPlan.Prefer.EMERALD;
         CurrencyPlan.BalanceUse use = balanceUse(f);
         if (use == null) {
-            return page(400, PayPages.message("付款", s.name, s.csrf, "err", "用余额付的元数要填 1–9 位整数", link("/c/" + orderId, "回付款页")));
+            return done(page(400, PayPages.message("付款", s.name, s.csrf, "err", "用余额付的元数要填 1–9 位整数", link("/c/" + orderId, "回付款页"))));
         }
-        if (ops.size() >= MAX_OPS) {
-            return page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null));
+        Op op = newOp(s, OpKind.PAY, orderId, now);
+        if (op == null) {
+            return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
-        Op op = new Op("op_" + random(16).toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "a"), s.id, OpKind.PAY, orderId, now);
-        if (orderLocks.putIfAbsent(orderId, op.id) != null) {
-            return page(409, PayPages.message("正在付款", s.name, s.csrf, "err", "这张收款单正在别处付款（确认框还开着）。", link("/c/" + orderId, "回付款页")));
+        op.back = checkoutUrl(orderId, prefer, use);
+        if (!lock(orderId, op, s, now)) {
+            ops.remove(op.id);
+            return done(page(409, PayPages.message("正在付款", s.name, s.csrf, "err", "这张收款单正在别处付款（确认框还开着）。", link(op.back, "回付款页"))));
         }
-        ops.put(op.id, op);
-        Ipv6Address source = r.remoteAddress;
-        core.onMain(() -> {
+        return ctx.onMainThread(() -> {
             PayServer.PreparedPay prep;
             try {
                 prep = core.preparePay(orderId, s.player, prefer, use);
             } catch (PayException e) {
-                op.fail(e.getMessage());
-                orderLocks.remove(orderId, op.id);
-                return;
+                throw new java.util.concurrent.CompletionException(e);
             }
-            op.state = OpState.CONFIRMING;
-            SystemConfirm.ask(source, prep.request).whenComplete((res, err) -> core.onMain(() -> {
-                try {
-                    TxRunner.Result tr = core.executePay(prep, res);
-                    finish(op, tr, "付款成功");
-                } finally {
-                    orderLocks.remove(orderId, op.id);
+            op.prepared = prep;
+            return prep.ask;
+        }).thenCompose(ask -> askId(r, s, op, ask)).exceptionally(e -> failed(op, e));
+    }
+
+    /**
+     * 同一张单同一时间只能一处在付。已经有一处时：是这个登录自己的（点了“付款”又回来再点），或那一处跳去 id.yr 以后很久没回来，就顶掉它。
+     */
+    private boolean lock(String orderId, Op op, Session s, long now) {
+        while (true) {
+            String held = orderLocks.putIfAbsent(orderId, op.id);
+            if (held == null) {
+                return true;
+            }
+            Op old = ops.get(held);
+            boolean waiting = old != null && (old.state == OpState.PREPARING || old.state == OpState.CONFIRMING) && !old.checking.get();
+            if (old != null && !waiting && old.state != OpState.DONE && old.state != OpState.FAILED) {
+                return false;
+            }
+            if (old != null && waiting && !old.sessionId.equals(s.id) && now - old.created <= CONFIRM_STALE) {
+                return false;
+            }
+            if (old != null && waiting) {
+                synchronized (old) {
+                    old.fail("换成了新的一次付款，这一次作废了。");
                 }
-            }));
+            }
+            if (orderLocks.replace(orderId, held, op.id)) {
+                return true;
+            }
+        }
+    }
+
+    private void unlock(Op op) {
+        if (op.orderId != null) {
+            orderLocks.remove(op.orderId, op.id);
+        }
+    }
+
+    /**
+     * 内容准备好了：请 id.yr 建确认请求（账户开了“操作前必须验证身份”时是验证身份），把浏览器 303 过去；确认完 id.yr 跳回 {@code /op/<号>}。
+     * 建不成时这一次作废，显示原因。
+     */
+    private CompletableFuture<HttpResponse> askId(HttpRequest r, Session s, Op op, PayServer.Ask ask) {
+        boolean verify = op.kind == OpKind.SECURITY || core.verifyRequired(s.player);
+        op.verify = verify;
+        String back = s.scheme + "://" + moe.qingu.youran.api.pay.PayApi.DOMAIN + "/op/" + op.id;
+        IdYrClient.Ask a = IdYrClient.Ask.of(verify, ask.title, ask.items, ask.purpose, r.remoteAddress, back, op.id);
+        return id.ask(s.accessToken, a).handle((t, e) -> {
+            if (t == null) {
+                return failed(op, e);
+            }
+            synchronized (op) {
+                if (op.state != OpState.PREPARING) {
+                    // 等的时候被新的一次顶掉了
+                    return redirect("/op/" + op.id);
+                }
+                op.confirmId = t.id;
+                op.confirmUrl = t.url;
+                op.state = OpState.CONFIRMING;
+            }
+            return redirect(t.url);
         });
+    }
+
+    /** 准备或向 id.yr 建请求失败：这一次作废，去结果页看原因 */
+    private HttpResponse failed(Op op, Throwable e) {
+        Throwable c = e instanceof java.util.concurrent.CompletionException && e.getCause() != null ? e.getCause() : e;
+        if (c instanceof PayException) {
+            op.fail(c.getMessage());
+        } else if (c instanceof moe.qingu.youran.api.network.idyr.IdYrException) {
+            moe.qingu.youran.api.network.idyr.IdYrException x = (moe.qingu.youran.api.network.idyr.IdYrException) c;
+            op.fail(x.tokenExpired() ? "登录过期了，请重新登录。" : x.insufficientScope() ? "登录时没有授权 pay.yr 弹确认框，请退出后重新登录。"
+                    : "id.yr 暂时不能弹确认框（" + x.code + "），请稍后再试。");
+            Ledger.LOG.warn("pay.yr：向 {} 建确认请求失败：{}", id.domain(), x.getMessage());
+        } else {
+            op.fail("连不上 " + id.domain() + "，请稍后再试。");
+            Ledger.LOG.warn("pay.yr：向 {} 建确认请求失败：{}", id.domain(), c == null ? "?" : c.toString());
+        }
+        unlock(op);
         return redirect("/op/" + op.id);
     }
 
@@ -612,18 +710,103 @@ final class PayService {
         }
     }
 
+    /** 确认通过了（主线程）：照准备好的做 */
+    private void execute(Op op, Session s) {
+        try {
+            switch (op.kind) {
+                case PAY:
+                    if (!op.id.equals(orderLocks.get(op.orderId))) {
+                        op.fail("换成了新的一次付款，这一次作废了。");
+                        return;
+                    }
+                    finish(op, core.executePay((PayServer.PreparedPay) op.prepared), "付款成功");
+                    break;
+                case WITHDRAW:
+                    finish(op, core.executeWithdraw((PayServer.PreparedWithdraw) op.prepared), "提现成功：东西放进了背包（放不下的掉在脚边）");
+                    break;
+                case REFUND: {
+                    PayServer.PreparedRefund prep = (PayServer.PreparedRefund) op.prepared;
+                    core.executeRefund(prep);
+                    op.done("已退款：" + ItemText.describe(prep.amount, Currency.Unit.YUAN) + "，退进了付款人的 pay.yr 账户");
+                    break;
+                }
+                case KEY:
+                    op.secret = core.executeKey(s.player);
+                    op.done("密钥已重置");
+                    break;
+                case SECURITY: {
+                    boolean on = (Boolean) op.prepared;
+                    core.setVerifyRequired(s.player, on);
+                    Ledger.LOG.info("pay.yr：{} {}了“操作前必须验证身份”", s.name, on ? "打开" : "关闭");
+                    op.done(on ? "已打开“操作前必须验证身份”。" : "已关闭“操作前必须验证身份”。");
+                    break;
+                }
+                default:
+                    op.fail("没做成");
+            }
+        } catch (PayException e) {
+            op.fail(e.getMessage());
+        } catch (RuntimeException e) {
+            Ledger.LOG.error("pay.yr：执行 {} 出错", op.kind, e);
+            op.fail("pay.yr 出错了，没有做成。");
+        } finally {
+            unlock(op);
+        }
+    }
+
     // ---------------------------------------------------------------- 等结果
 
-    private HttpResponse op(Session s, String opId) {
+    private CompletableFuture<HttpResponse> op(Session s, String opId) {
         Op op = ops.get(opId);
         if (op == null || s == null || !op.sessionId.equals(s.id)) {
-            return page(404, PayPages.message("没有这个操作", nameOf(s), csrfOf(s), "err", "没有这个操作（过期了，或者登录换了）。", link("/account", "我的账户")));
+            return done(page(404, PayPages.message("没有这个操作", nameOf(s), csrfOf(s), "err", "没有这个操作（过期了，或者登录换了）。", link("/account", "我的账户"))));
         }
-        if (op.state == OpState.PROCESSING && !core.processing(op.txId)) {
+        if (op.state == OpState.CONFIRMING && op.checking.compareAndSet(false, true)) {
+            // 从 id.yr 跳回来了（或者自己刷新）：向 id.yr 核对结果，网址里带的结果不算数
+            return id.result(s.accessToken, op.confirmId).handle((out, e) -> {
+                if (out == null) {
+                    Throwable c = e instanceof java.util.concurrent.CompletionException && e.getCause() != null ? e.getCause() : e;
+                    if (c instanceof moe.qingu.youran.api.network.idyr.IdYrException && ((moe.qingu.youran.api.network.idyr.IdYrException) c).httpStatus < 500) {
+                        op.fail(((moe.qingu.youran.api.network.idyr.IdYrException) c).tokenExpired() ? "登录过期了，没有执行。请重新登录。" : "核对不了确认结果（"
+                                + ((moe.qingu.youran.api.network.idyr.IdYrException) c).code + "），没有执行。");
+                        unlock(op);
+                    } else {
+                        Ledger.LOG.warn("pay.yr：向 {} 核对确认结果失败：{}", id.domain(), c == null ? "?" : c.toString());
+                    }
+                    op.checking.set(false);
+                    return opPage(s, op);
+                }
+                boolean run = false;
+                synchronized (op) {
+                    if (out.approved() && op.state == OpState.CONFIRMING) {
+                        op.state = OpState.PROCESSING;
+                        run = true;
+                    }
+                }
+                if (run) {
+                    ctx.onMainThread(() -> {
+                        execute(op, s);
+                        return Boolean.TRUE;
+                    });
+                } else if (out.approved()) {
+                    Ledger.LOG.info("pay.yr：操作 {} 已经作废，id.yr 那边的同意不算", op.id);
+                } else if (out.status == IdYrClient.Outcome.Status.DENIED) {
+                    op.fail(out.text(op.verify) + "没有执行。");
+                    unlock(op);
+                }
+                op.checking.set(false);
+                return opPage(s, op);
+            });
+        }
+        return done(opPage(s, op));
+    }
+
+    private HttpResponse opPage(Session s, Op op) {
+        if (op.state == OpState.PROCESSING && op.txId != null && !core.processing(op.txId)) {
             // 存盘核对补上了：照账本看结果
             if (op.kind == OpKind.PAY) {
                 OrderInfo o = core.order(op.orderId);
-                if (o != null && o.status == OrderInfo.Status.PAID && op.txId != null) {
+                if (o != null && o.status == OrderInfo.Status.PAID) {
                     op.done("付款成功");
                 } else {
                     op.fail("没有付成（存盘没成功，已经作废），背包里的东西没有扣");
@@ -632,20 +815,18 @@ final class PayService {
                 op.done("已完成");
             }
         }
-        String back = op.kind == OpKind.PAY ? "/c/" + op.orderId : "/account";
+        String back = op.back != null ? op.back : "/account";
         switch (op.state) {
             case PREPARING:
             case CONFIRMING:
-                return ok(PayPages.page("请确认", s.name, s.csrf, "<h1>请在游戏弹出的确认框里确认</h1>\n"
-                        + "<p class=\"wait\">" + (op.state == OpState.PREPARING ? "正在准备……" : "核对确认框里的内容，点“"
-                        + (op.kind == OpKind.PAY ? "确认付款" : "确认") + "”或“拒绝”。") + "</p>\n"
-                        + "<p class=\"hint\">本页自动刷新；" + PayConfig.confirmSeconds + " 秒不回应算拒绝。</p>\n"
-                        + "<p>" + link("/op/" + op.id, "刷新") + "</p>\n", 2, "/op/" + op.id));
+                return ok(PayPages.page("请确认", s.name, s.csrf, "<h1>等确认结果</h1>\n"
+                        + "<p class=\"wait\">" + (op.verify ? "要在游戏弹出的确认框里验证身份。" : "要在游戏弹出的确认框里确认。") + "</p>\n"
+                        + "<p>" + (op.confirmUrl != null ? link(op.confirmUrl, "回到确认页") + " · " : "") + link("/op/" + op.id, "刷新") + "</p>\n", 2, "/op/" + op.id));
             case PROCESSING:
                 return ok(PayPages.page("正在处理", s.name, s.csrf, "<h1>正在处理</h1>\n<p class=\"wait\">请稍等。</p>\n", 2, "/op/" + op.id));
             case FAILED:
                 return ok(PayPages.message(op.kind == OpKind.PAY ? "没有付款" : "没有完成", s.name, s.csrf, "err", op.message,
-                        op.kind == OpKind.PAY ? link(back, "回付款页") + " · " + link("/c/" + op.orderId + "/cancel", "不付了，返回网站") : link(back, "回我的账户")));
+                        op.kind == OpKind.PAY ? link(back, "回付款页") + " · " + link("/c/" + op.orderId + "/cancel", "不付了，返回网站") : link(back, "返回")));
             default:
                 break;
         }
@@ -685,10 +866,11 @@ final class PayService {
                 ItemText.cacheAll(rec.amount);
             }
             return Boolean.TRUE;
-        }).handle((v, e) -> ok(accountPage(s, me, error)));
+        }).handle((v, e) -> ok(accountPage(s, me, error, r.queryParameters())));
     }
 
-    private String accountPage(Session s, AccountRef me, String error) {
+    /** {@code typed}：没做成时带回来的填过的内容（查询串） */
+    private String accountPage(Session s, AccountRef me, String error, Map<String, String> typed) {
         Amount bal = core.balance(me);
         Ledger.Account acct = core.ledger.account(me);
         StringBuilder b = new StringBuilder();
@@ -708,14 +890,18 @@ final class PayService {
                     .append("<input type=\"hidden\" name=\"csrf\" value=\"").append(esc(s.csrf)).append("\" />")
                     .append("<table class=\"info\">");
             if (bal.yuan > 0) {
-                b.append("<tr><th>钱（元）</th><td><input type=\"text\" name=\"yuan\" maxlength=\"9\" value=\"").append(bal.yuan).append("\" /> ")
-                        .append("<input type=\"radio\" name=\"form\" value=\"emerald\" checked=\"checked\" /> 要绿宝石 ")
-                        .append("<input type=\"radio\" name=\"form\" value=\"yuan\" /> 要悠然元")
+                boolean yuanForm = "yuan".equals(typed.get("form"));
+                b.append("<tr><th>钱（元）</th><td><input type=\"text\" name=\"yuan\" maxlength=\"9\" value=\"")
+                        .append(esc(typed.containsKey("yuan") ? typed.get("yuan") : Long.toString(bal.yuan))).append("\" /> ")
+                        .append("<input type=\"radio\" name=\"form\" value=\"emerald\"").append(yuanForm ? "" : " checked=\"checked\"").append(" /> 要绿宝石 ")
+                        .append("<input type=\"radio\" name=\"form\" value=\"yuan\"").append(yuanForm ? " checked=\"checked\"" : "").append(" /> 要悠然元")
                         .append("</td></tr>\n");
             }
             for (Map.Entry<PayItem, Long> e : bal.items.entrySet()) {
-                b.append("<tr><th>").append(esc(ItemText.name(e.getKey()))).append("</th><td><input type=\"text\" name=\"item_").append(itemKey(e.getKey()))
-                        .append("\" maxlength=\"9\" value=\"\" /> 个（有 ").append(e.getValue()).append(" 个）</td></tr>\n");
+                String k = "item_" + itemKey(e.getKey());
+                b.append("<tr><th>").append(esc(ItemText.name(e.getKey()))).append("</th><td><input type=\"text\" name=\"").append(k)
+                        .append("\" maxlength=\"9\" value=\"").append(esc(typed.containsKey(k) ? typed.get(k) : "")).append("\" /> 个（有 ")
+                        .append(e.getValue()).append(" 个）</td></tr>\n");
             }
             b.append("</table><input type=\"submit\" class=\"go\" value=\"提现到背包\" /></div></form>\n")
                     .append("<p class=\"hint\">放进 ").append(esc(s.name)).append(" 的背包（要在线），放不下的掉在脚边。</p>\n");
@@ -747,6 +933,14 @@ final class PayService {
         b.append("<form method=\"post\" action=\"/account/key\"><div><input type=\"hidden\" name=\"csrf\" value=\"").append(esc(s.csrf)).append("\" />")
                 .append("<input type=\"submit\" value=\"").append(acct != null && acct.keyHash != null ? "重置密钥" : "生成密钥").append("\" /></div></form>\n")
                 .append("<p class=\"hint\">").append(link(PayPages.docs("/"), "接入文档")).append("</p>\n");
+        // 安全设置
+        boolean on = acct != null && acct.verifyBeforeOps;
+        b.append("<h2>安全</h2>\n<form method=\"post\" action=\"/account/security\"><div><input type=\"hidden\" name=\"csrf\" value=\"").append(esc(s.csrf))
+                .append("\" /><input type=\"hidden\" name=\"verify\" value=\"").append(on ? "0" : "1").append("\" />")
+                .append("操作前必须验证身份：<b>").append(on ? "已打开" : "已关闭").append("</b> ")
+                .append("<input type=\"submit\" value=\"").append(on ? "关闭" : "打开").append("\" /></div></form>\n")
+                .append("<p class=\"hint\">打开后，付款、提现、退款、重置密钥前都要 ").append(esc(s.name)).append(" 本人确认。")
+                .append(link(PayPages.docs("/help#verify"), "说明")).append("</p>\n");
         return PayPages.page("我的账户", s.name, s.csrf, b.toString(), 0, null);
     }
 
@@ -793,41 +987,55 @@ final class PayService {
         return Long.parseLong(v.trim());
     }
 
-    private HttpResponse withdraw(HttpRequest r, Session s, long now) {
+    private CompletableFuture<HttpResponse> withdraw(HttpRequest r, Session s, long now) {
         if (s == null) {
-            return redirect("/login?next=/account");
+            return done(page(401, PayPages.message("没有登录", null, null, "err", "登录过期了。请先登录，再点浏览器的“后退”回来提交（填的内容还在）。",
+                    link("/login?next=/account", "登录"))));
         }
         Map<String, String> f = r.form();
         if (!s.csrf.equals(f.get("csrf"))) {
-            return page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请回账户页重新提交。", link("/account", "我的账户")));
+            return done(page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请回账户页重新提交。", link("/account", "我的账户"))));
         }
+        String back = "/account?" + echo(f, "yuan", "form", "item_");
         long yuan;
         Map<PayItem, Long> items;
         try {
             yuan = yuanField(f.get("yuan"));
             items = itemCounts(f, core.balance(AccountRef.player(s.player)).items.keySet());
         } catch (PayException e) {
-            return ok(PayPages.message("提现", s.name, s.csrf, "err", e.getMessage(), link("/account", "回我的账户")));
+            return done(page(422, PayPages.message("提现", s.name, s.csrf, "err", e.getMessage(), link(back, "回我的账户"))));
         }
         Currency.Unit form = "yuan".equals(f.get("form")) ? Currency.Unit.YUAN : Currency.Unit.EMERALD;
         Op op = newOp(s, OpKind.WITHDRAW, null, now);
         if (op == null) {
-            return page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null));
+            return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
-        Ipv6Address source = r.remoteAddress;
-        core.onMain(() -> {
+        op.back = back;
+        return ctx.onMainThread(() -> {
             PayServer.PreparedWithdraw prep;
             try {
                 prep = core.prepareWithdraw(s.player, yuan, form, items);
             } catch (PayException e) {
-                op.fail(e.getMessage());
-                return;
+                throw new java.util.concurrent.CompletionException(e);
             }
-            op.state = OpState.CONFIRMING;
-            SystemConfirm.ask(source, prep.request).whenComplete((res, err) -> core.onMain(() ->
-                    finish(op, core.executeWithdraw(prep, res), "提现成功：东西放进了背包（放不下的掉在脚边）")));
-        });
-        return redirect("/op/" + op.id);
+            op.prepared = prep;
+            return prep.ask;
+        }).thenCompose(ask -> askId(r, s, op, ask)).exceptionally(e -> failed(op, e));
+    }
+
+    /** 表单里填的（{@code names} 里的字段，或以 {@code prefix_} 开头的）写成查询串，失败时带回表单 */
+    static String echo(Map<String, String> form, String... names) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> e : form.entrySet()) {
+            boolean want = false;
+            for (String n : names) {
+                want |= n.endsWith("_") ? e.getKey().startsWith(n) : e.getKey().equals(n);
+            }
+            if (want && e.getValue() != null && e.getValue().length() <= 16 && e.getKey().length() <= 32) {
+                sb.append(sb.length() == 0 ? "" : "&").append(IdYrClient.enc(e.getKey())).append('=').append(IdYrClient.enc(e.getValue()));
+            }
+        }
+        return sb.toString();
     }
 
     private CompletableFuture<HttpResponse> refundForm(HttpRequest r, Session s, String paymentId, String error) {
@@ -841,10 +1049,10 @@ final class PayService {
         return ctx.onMainThread(() -> {
             ItemText.cacheAll(p.amount);
             return Boolean.TRUE;
-        }).handle((v, e) -> ok(refundPage(s, p, error)));
+        }).handle((v, e) -> ok(refundPage(s, p, error, r.queryParameters())));
     }
 
-    private String refundPage(Session s, Ledger.Payment p, String error) {
+    private String refundPage(Session s, Ledger.Payment p, String error, Map<String, String> typed) {
         Amount left = p.amount.minus(p.refunded);
         StringBuilder b = new StringBuilder();
         b.append("<h1>退款给 ").append(esc(p.payerName)).append("</h1>\n");
@@ -862,12 +1070,15 @@ final class PayService {
             b.append("<form method=\"post\" action=\"/account/refund/").append(p.id).append("\"><div>")
                     .append("<input type=\"hidden\" name=\"csrf\" value=\"").append(esc(s.csrf)).append("\" /><table class=\"info\">");
             if (left.yuan > 0) {
-                b.append("<tr><th>退多少钱（元）</th><td><input type=\"text\" name=\"yuan\" maxlength=\"9\" value=\"").append(left.yuan).append("\" /> 最多 ")
+                b.append("<tr><th>退多少钱（元）</th><td><input type=\"text\" name=\"yuan\" maxlength=\"9\" value=\"")
+                        .append(esc(typed.containsKey("yuan") ? typed.get("yuan") : Long.toString(left.yuan))).append("\" /> 最多 ")
                         .append(left.yuan).append(" 元</td></tr>\n");
             }
             for (Map.Entry<PayItem, Long> e : left.items.entrySet()) {
-                b.append("<tr><th>").append(esc(ItemText.name(e.getKey()))).append("</th><td><input type=\"text\" name=\"item_").append(itemKey(e.getKey()))
-                        .append("\" maxlength=\"9\" value=\"").append(e.getValue()).append("\" /> 个，最多 ").append(e.getValue()).append("</td></tr>\n");
+                String k = "item_" + itemKey(e.getKey());
+                b.append("<tr><th>").append(esc(ItemText.name(e.getKey()))).append("</th><td><input type=\"text\" name=\"").append(k)
+                        .append("\" maxlength=\"9\" value=\"").append(esc(typed.containsKey(k) ? typed.get(k) : Long.toString(e.getValue())))
+                        .append("\" /> 个，最多 ").append(e.getValue()).append("</td></tr>\n");
             }
             b.append("</table><input type=\"submit\" class=\"go\" value=\"退款\" /></div></form>\n")
                     .append("<p class=\"hint\">退进付款人的 pay.yr 账户，从 ").append(esc(s.name)).append(" 的余额扣回。</p>\n");
@@ -876,74 +1087,75 @@ final class PayService {
         return PayPages.page("退款", s.name, s.csrf, b.toString(), 0, null);
     }
 
-    private HttpResponse refund(HttpRequest r, Session s, String paymentId, long now) {
+    private CompletableFuture<HttpResponse> refund(HttpRequest r, Session s, String paymentId, long now) {
         if (s == null) {
-            return redirect("/login?next=/account");
+            return done(page(401, PayPages.message("没有登录", null, null, "err", "登录过期了。请先登录，再点浏览器的“后退”回来提交（填的内容还在）。",
+                    link("/login?next=/account", "登录"))));
         }
         Map<String, String> f = r.form();
         if (!s.csrf.equals(f.get("csrf"))) {
-            return page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请重新提交。", link("/account", "我的账户")));
+            return done(page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请重新提交。", link("/account", "我的账户"))));
         }
         Ledger.Payment p = core.ledger.payment(paymentId);
         if (p == null || !p.receiver.equals(AccountRef.player(s.player))) {
-            return page(404, PayPages.message("没有这笔付款", s.name, s.csrf, "err", "没有这笔付款（只能退自己收到的）。", link("/account", "回我的账户")));
+            return done(page(404, PayPages.message("没有这笔付款", s.name, s.csrf, "err", "没有这笔付款（只能退自己收到的）。", link("/account", "回我的账户"))));
         }
+        String back = "/account/refund/" + paymentId + "?" + echo(f, "yuan", "item_");
         Amount amount;
         try {
             amount = Amount.of(yuanField(f.get("yuan")), itemCounts(f, p.amount.items.keySet()));
         } catch (PayException e) {
-            return ok(PayPages.message("退款", s.name, s.csrf, "err", e.getMessage(), link("/account/refund/" + paymentId, "回退款页")));
+            return done(page(422, PayPages.message("退款", s.name, s.csrf, "err", e.getMessage(), link(back, "回退款页"))));
         }
         Op op = newOp(s, OpKind.REFUND, null, now);
         if (op == null) {
-            return page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null));
+            return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
-        Ipv6Address source = r.remoteAddress;
-        core.onMain(() -> {
+        op.back = back;
+        return ctx.onMainThread(() -> {
             PayServer.PreparedRefund prep;
             try {
                 prep = core.prepareRefund(s.player, paymentId, amount);
             } catch (PayException e) {
-                op.fail(e.getMessage());
-                return;
+                throw new java.util.concurrent.CompletionException(e);
             }
-            op.state = OpState.CONFIRMING;
-            SystemConfirm.ask(source, prep.request).whenComplete((res, err) -> core.onMain(() -> {
-                try {
-                    core.executeRefund(prep, res);
-                    op.done("已退款：" + ItemText.describe(amount, Currency.Unit.YUAN) + "，退进了 " + p.payerName + " 的 pay.yr 账户");
-                } catch (PayException e) {
-                    op.fail(e.getMessage());
-                }
-            }));
-        });
-        return redirect("/op/" + op.id);
+            op.prepared = prep;
+            return prep.ask;
+        }).thenCompose(ask -> askId(r, s, op, ask)).exceptionally(e -> failed(op, e));
     }
 
-    private HttpResponse key(HttpRequest r, Session s, long now) {
+    private CompletableFuture<HttpResponse> key(HttpRequest r, Session s, long now) {
         if (s == null) {
-            return redirect("/login?next=/account");
+            return done(redirect("/login?next=/account"));
         }
         if (!s.csrf.equals(r.form().get("csrf"))) {
-            return page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请重新提交。", link("/account", "我的账户")));
+            return done(page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请重新提交。", link("/account", "我的账户"))));
         }
         Op op = newOp(s, OpKind.KEY, null, now);
         if (op == null) {
-            return page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null));
+            return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
-        Ipv6Address source = r.remoteAddress;
-        core.onMain(() -> {
-            op.state = OpState.CONFIRMING;
-            SystemConfirm.ask(source, core.keyRequest(s.name)).whenComplete((res, err) -> core.onMain(() -> {
-                try {
-                    op.secret = core.executeKey(s.player, res);
-                    op.done("密钥已重置");
-                } catch (PayException e) {
-                    op.fail(e.getMessage());
-                }
-            }));
-        });
-        return redirect("/op/" + op.id);
+        op.back = "/account";
+        return askId(r, s, op, core.keyAsk(s.name));
+    }
+
+    /** 打开、关闭“操作前必须验证身份”：两个方向都要验证身份（只有帐号本人能改；关了才不会被坐在前面的别人顺手关掉） */
+    private CompletableFuture<HttpResponse> security(HttpRequest r, Session s, long now) {
+        if (s == null) {
+            return done(redirect("/login?next=/account"));
+        }
+        Map<String, String> f = r.form();
+        if (!s.csrf.equals(f.get("csrf"))) {
+            return done(page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请重新提交。", link("/account", "我的账户"))));
+        }
+        boolean on = "1".equals(f.get("verify"));
+        Op op = newOp(s, OpKind.SECURITY, null, now);
+        if (op == null) {
+            return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
+        }
+        op.prepared = on;
+        op.back = "/account";
+        return askId(r, s, op, core.securityAsk(s.name, on));
     }
 
     private Op newOp(Session s, OpKind kind, String orderId, long now) {
@@ -1236,9 +1448,14 @@ final class PayService {
             return;
         }
         logins.values().removeIf(l -> now - l.created > LOGIN_TTL);
-        sessions.values().removeIf(s -> now - s.lastSeen > PayConfig.sessionIdleMinutes * 60_000L || now - s.created > SESSION_MAX);
+        sessions.values().removeIf(s -> !s.alive(now));
         for (Iterator<Op> it = ops.values().iterator(); it.hasNext(); ) {
             Op op = it.next();
+            if ((op.state == OpState.CONFIRMING || op.state == OpState.PREPARING) && now - op.created > CONFIRM_STALE && !op.checking.get()) {
+                // 跳去 id.yr 以后没回来：当作没确认（id.yr 那边的请求也早过期了）
+                op.fail("确认超时了，没有执行。");
+                unlock(op);
+            }
             if (now - op.created > OP_TTL && op.state != OpState.CONFIRMING && op.state != OpState.PREPARING) {
                 it.remove();
             }

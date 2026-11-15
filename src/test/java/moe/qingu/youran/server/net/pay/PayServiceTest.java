@@ -1,7 +1,7 @@
 package moe.qingu.youran.server.net.pay;
 
 import com.google.gson.JsonObject;
-import moe.qingu.youran.api.network.ConfirmResult;
+import moe.qingu.youran.api.network.idyr.IdYrClient;
 import moe.qingu.youran.api.pay.PayException;
 import moe.qingu.youran.api.pay.PayItem;
 import org.junit.jupiter.api.Test;
@@ -10,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -87,21 +86,28 @@ class PayServiceTest {
         assertThrows(PayException.class, () -> PayService.yuanField("1.5"));
     }
 
-    /**
-     * 确认框的结果：同意了就算，谁同意的都行（服主 11-15：另一个玩家坐到已登录的电脑前动钱是允许的，记账照登录的账户）；
-     * 拒绝、超时、离开、没人操作、忙都不算
-     */
+    /** 失败时带回表单的内容：只带要的字段，太长的不带 */
     @Test
-    void confirmResults() {
-        UUID me = UUID.randomUUID();
-        assertNull(PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.APPROVED, me, "Me")));
-        assertNull(PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.APPROVED, UUID.randomUUID(), "Other")), "别的玩家同意也算");
-        assertEquals("denied", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.DENIED, me, "Me")).code);
-        assertEquals("timeout", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.TIMEOUT, me, "Me")).code);
-        assertEquals("operator_changed", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.OPERATOR_CHANGED, me, "Me")).code);
-        assertEquals("busy", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.BUSY, me, "Me")).code);
-        assertEquals("no_operator", PayServer.refusal(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null)).code);
-        assertEquals("unavailable", PayServer.refusal(null).code);
+    void echoTyped() {
+        Map<String, String> f = new java.util.LinkedHashMap<>();
+        f.put("csrf", "secret");
+        f.put("yuan", "12");
+        f.put("form", "yuan");
+        f.put("item_abc", "3");
+        f.put("item_long", "12345678901234567");
+        assertEquals("yuan=12&form=yuan&item_abc=3", PayService.echo(f, "yuan", "form", "item_"));
+        assertEquals("", PayService.echo(Collections.<String, String>emptyMap(), "yuan"));
+    }
+
+    /** 请 id.yr 弹的框：去掉颜色代码与控制字符，标题最多 40 字、条目最多 80 字 */
+    @Test
+    void askText() {
+        PayServer.Ask a = new PayServer.Ask("付款给 §c坏人" + new String(new char[50]).replace("\0", "长"),
+                java.util.Arrays.asList("收款方：A\u202e", new String(new char[100]).replace("\0", "字")), moe.qingu.youran.api.network.ConfirmRequest.Purpose.PAY);
+        assertTrue(a.title.startsWith("付款给 坏人"), a.title);
+        assertEquals(40, a.title.codePointCount(0, a.title.length()));
+        assertEquals("收款方：A", a.items.get(0));
+        assertEquals(80, a.items.get(1).length());
     }
 
     /** 余额用法的写法：none / all / 元数 / part + n；写错为 null */
@@ -142,13 +148,14 @@ class PayServiceTest {
         assertTrue(PayService.loginError("access_denied", null).contains("拒绝"));
     }
 
-    /** PKCE：RFC 7636 附录 B 的例子 */
+    /** PKCE：RFC 7636 附录 B 的例子；登录时要 confirm 与 verify 两项能力 */
     @Test
     void pkce() {
-        assertEquals("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", IdClient.challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"));
-        assertTrue(new IdClient(null, null, "id.yr", false).authorizeUrl("https", "st", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
-                .startsWith("https://id.yr/authorize?response_type=code&client_id=https%3A%2F%2Fpay.yr%2F&redirect_uri=https%3A%2F%2Fpay.yr%2Flogin%2Fcallback&state=st"));
-        IdClient c = new IdClient(null, null, "id.yr", false);
+        assertEquals("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", IdYrClient.challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"));
+        IdYrClient c = new IdYrClient(null, null, "id.yr", false, "pay.yr");
+        assertEquals("https://id.yr/authorize?response_type=code&client_id=https%3A%2F%2Fpay.yr%2F&redirect_uri=https%3A%2F%2Fpay.yr%2Flogin%2Fcallback&state=st"
+                + "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&scope=confirm+verify",
+                c.authorizeUrl("https", "st", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", PayService.SCOPE));
         assertTrue(c.issuerOk(null) && c.issuerOk("https://id.yr") && c.issuerOk("http://id.yr"));
         assertTrue(!c.issuerOk("https://evil.yr"));
     }

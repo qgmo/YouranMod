@@ -179,6 +179,28 @@ class LedgerTest {
         assertNull(again.accountByKey(k1));
     }
 
+    /** 账户设置“操作前必须验证身份”：默认关；改了记进日志，关了再开、写快照以后都在 */
+    @Test
+    void verifySetting() throws Exception {
+        Ledger l = open();
+        l.touchPlayer(BOB, "Bob");
+        AccountRef bob = AccountRef.player(BOB);
+        assertFalse(l.account(bob).verifyBeforeOps);
+        l.setVerify(bob, true);
+        assertTrue(l.account(bob).verifyBeforeOps);
+        assertThrows(IllegalStateException.class, () -> l.setVerify(AccountRef.player(ALICE), true), "没有账户");
+        l.close();
+        Ledger r = open();
+        assertTrue(r.account(bob).verifyBeforeOps, "日志重放");
+        r.snapshotNow(T0, Long.MAX_VALUE / 4);
+        r.close();
+        Ledger s = open();
+        assertTrue(s.account(bob).verifyBeforeOps, "快照");
+        s.setVerify(bob, false);
+        s.close();
+        assertFalse(open().account(bob).verifyBeforeOps);
+    }
+
     /** 关了再开：照日志重放；写快照以后照快照 + 之后的日志 */
     @Test
     void persistence() throws Exception {

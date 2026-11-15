@@ -66,6 +66,8 @@ final class Ledger {
         String keyHash;
         String keyPrefix;
         long keyCreated;
+        /** 账户设置“操作前必须验证身份”（服主 11-15；默认关闭） */
+        boolean verifyBeforeOps;
         final ArrayDeque<PayRecord> records = new ArrayDeque<>();
 
         Account(AccountRef ref, String name) {
@@ -446,6 +448,21 @@ final class Ledger {
         return key;
     }
 
+    /** 账户设置“操作前必须验证身份” */
+    synchronized void setVerify(AccountRef acct, boolean on) throws IOException {
+        Account a = accounts.get(acct);
+        if (a == null) {
+            throw new IllegalStateException("没有这个账户");
+        }
+        if (a.verifyBeforeOps == on) {
+            return;
+        }
+        JsonObject e = entry("sec");
+        e.addProperty("acct", acct.id());
+        e.addProperty("verify", on);
+        commitEntry(e);
+    }
+
     /** 开始付款：收款单要还能付；记下要拿的、要找的（全从背包付） */
     synchronized Tx beginPay(Order o, UUID payer, String payerName, Map<PayItem, Long> take, Map<PayItem, Long> change, Drops drops, long now)
             throws IOException, PayException {
@@ -688,6 +705,10 @@ final class Ledger {
                 }
                 break;
             }
+            case "sec": {
+                need(AccountRef.parse(e.get("acct").getAsString())).verifyBeforeOps = e.get("verify").getAsBoolean();
+                break;
+            }
             case "key": {
                 Account a = need(AccountRef.parse(e.get("acct").getAsString()));
                 if (a.keyHash != null) {
@@ -912,6 +933,9 @@ final class Ledger {
             PayJson.put(o, "hash", a.keyHash);
             PayJson.put(o, "prefix", a.keyPrefix);
             o.addProperty("keyAt", a.keyCreated);
+            if (a.verifyBeforeOps) {
+                o.addProperty("verify", true);
+            }
             JsonArray rec = new JsonArray();
             for (PayRecord r : a.records) {
                 JsonObject x = new JsonObject();
@@ -1003,6 +1027,7 @@ final class Ledger {
             a.keyHash = PayJson.str(o, "hash");
             a.keyPrefix = PayJson.str(o, "prefix");
             a.keyCreated = PayJson.num(o, "keyAt");
+            a.verifyBeforeOps = o.has("verify") && o.get("verify").getAsBoolean();
             if (a.keyHash != null) {
                 keys.put(a.keyHash, ref);
             }
