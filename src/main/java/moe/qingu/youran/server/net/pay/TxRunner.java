@@ -15,7 +15,7 @@ import java.util.function.LongSupplier;
 /**
  * 动背包的付款、提现（主线程）。每一笔：
  * <ol>
- * <li>账本记“开始”（要拿的、要给的；提现这时就从账户扣掉）；</li>
+ * <li>账本记“开始”（要拿的、要给的；提现、用余额付款的那部分这时就从账户扣掉）；</li>
  * <li>改背包（只改内存）并在玩家数据里加这笔的标记；放不下的先在账本记下掉在哪个区块，再掉在脚边（带标记、暂时不能捡）；</li>
  * <li>把玩家数据写盘、把掉落物所在的区块写盘；</li>
  * <li><b>读文件核对</b>：玩家存档里有这笔的标记（背包的改动存下来了）、区块存档里的掉落物和掉出来的一样；</li>
@@ -75,10 +75,18 @@ final class TxRunner {
 
     /** 付款：从 {@code payer} 背包拿 {@code take}、找 {@code change}，价格记进收款方 */
     Result pay(Ledger.Order order, WorldPort.PlayerPort payer, Map<PayItem, Long> take, Map<PayItem, Long> change) {
+        return pay(order, payer, take, change, Amount.ZERO);
+    }
+
+    /**
+     * 付款，其中 {@code fromBalance} 从付款人的 pay.yr 账户余额里出（“开始”时从账户扣掉；作废、崩溃恢复时按没付退回账户），
+     * 其余从背包拿。只用余额付（背包什么都不拿）时也走同样的标记、存盘、核对，崩溃恢复照同一套规则。
+     */
+    Result pay(Ledger.Order order, WorldPort.PlayerPort payer, Map<PayItem, Long> take, Map<PayItem, Long> change, Amount fromBalance) {
         Ledger.Drops drops = drops(payer, take, change);
         Ledger.Tx tx;
         try {
-            tx = ledger.beginPay(order, payer.id(), payer.name(), take, change, drops, clock.getAsLong());
+            tx = ledger.beginPay(order, payer.id(), payer.name(), take, change, fromBalance, drops, clock.getAsLong());
         } catch (PayException e) {
             return Result.failed(e);
         } catch (IOException e) {

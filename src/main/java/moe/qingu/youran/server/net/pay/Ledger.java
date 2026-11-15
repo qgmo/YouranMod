@@ -112,6 +112,8 @@ final class Ledger {
         long createdAt;
         long expiresAt;
         String origin;
+        /** 只许这个玩家付；谁都能付为 null */
+        UUID onlyPayer;
         OrderStatus status = OrderStatus.OPEN;
         long paidAt;
         UUID payer;
@@ -161,6 +163,8 @@ final class Ledger {
         String paymentId;
         /** 从背包拿走的（付款） */
         Map<PayItem, Long> take = Collections.emptyMap();
+        /** 付款时从付款人 pay.yr 账户余额里出的那部分（开始时就从账户扣掉，作废时退回） */
+        Amount fromBalance = Amount.ZERO;
         /** 给玩家的（找零、提现）：先放背包，放不下的掉在脚边（{@link #drops}） */
         Map<PayItem, Long> give = Collections.emptyMap();
         /** 付款：收款方收到的价格；提现：从账户扣的 */
@@ -292,7 +296,7 @@ final class Ledger {
         Payment p = o.paymentId == null ? null : payments.get(o.paymentId);
         return new OrderInfo(o.id, o.status(now), o.receiver, name(o.receiver), o.site, o.price, o.unit, o.description, o.reference,
                 o.returnUrl, o.cancelUrl, o.createdAt, o.expiresAt, o.paidAt, o.payer, o.payerName, o.paymentId,
-                p == null ? Amount.ZERO : p.refunded, checkoutUrl.apply(o.id));
+                p == null ? Amount.ZERO : p.refunded, checkoutUrl.apply(o.id), o.onlyPayer);
     }
 
     synchronized Payment payment(String id) {
@@ -386,6 +390,7 @@ final class Ledger {
         String cancelUrl;
         long expiresAt;
         String origin;
+        UUID onlyPayer;
     }
 
     synchronized Order createOrder(Draft d, long now) throws IOException {
@@ -403,6 +408,7 @@ final class Ledger {
         e.addProperty("at", now);
         e.addProperty("exp", d.expiresAt);
         PayJson.put(e, "origin", d.origin);
+        PayJson.put(e, "only", d.onlyPayer == null ? null : d.onlyPayer.toString());
         commitEntry(e);
         return orders.get(id);
     }
@@ -434,9 +440,28 @@ final class Ledger {
         return key;
     }
 
-    /** 开始付款：收款单要还能付；记下要拿的、要找的 */
+    /** 开始付款：收款单要还能付；记下要拿的、要找的（全从背包付） */
     synchronized Tx beginPay(Order o, UUID payer, String payerName, Map<PayItem, Long> take, Map<PayItem, Long> change, Drops drops, long now)
             throws IOException, PayException {
+        return beginPay(o, payer, payerName, take, change, Amount.ZERO, drops, now);
+    }
+
+    /**
+     * 开始付款：收款单要还能付；记下要从背包拿的、要找的、要从付款人 pay.yr 账户余额里出的（{@code fromBalance}，这时就从账户扣掉，
+     * 作废时退回）。拿法由调用方算好（{@link CurrencyPlan}）。
+     */
+    synchronized Tx beginPay(Order o, UUID payer, String payerName, Map<PayItem, Long> take, Map<PayItem, Long> change, Amount fromBalance,
+                             Drops drops, long now) throws IOException, PayException {
+        Amount bal = fromBalance == null ? Amount.ZERO : fromBalance;
+        if (o.onlyPayer != null && !o.onlyPayer.equals(payer)) {
+            throw new PayException("wrong_payer", "这张收款单只能由指定的角色付");
+        }
+        if (!bal.isZero()) {
+            Account a = accounts.get(AccountRef.player(payer));
+            if (a == null || !a.balance().covers(bal)) {
+                throw new PayException("insufficient_balance", "pay.yr 账户余额不够");
+            }
+        }
         if (o.status(now) != OrderInfo.Status.OPEN) {
             throw new PayException(o.status(now) == OrderInfo.Status.EXPIRED ? "order_expired" : "order_not_open",
                     o.status(now) == OrderInfo.Status.EXPIRED ? "收款单已经过期了" : "收款单已经付过或取消了");
@@ -455,6 +480,9 @@ final class Ledger {
         e.add("take", PayJson.items(take));
         e.add("give", PayJson.items(change));
         e.add("value", PayJson.amount(o.price));
+        if (!bal.isZero()) {
+            e.add("bal", PayJson.amount(bal));
+        }
         putDrops(e, drops);
         e.addProperty("at", now);
         commitEntry(e);
@@ -680,6 +708,8 @@ final class Ledger {
                 o.createdAt = PayJson.num(e, "at");
                 o.expiresAt = PayJson.num(e, "exp");
                 o.origin = PayJson.str(e, "origin");
+                String only = PayJson.str(e, "only");
+                o.onlyPayer = only == null ? null : UUID.fromString(only);
                 orders.put(o.id, o);
                 break;
             }
@@ -705,6 +735,9 @@ final class Ledger {
                     Order o = orders.get(tx.orderId);
                     if (o != null && o.status == OrderStatus.PAYING) {
                         o.status = OrderStatus.OPEN;
+                    }
+                    if (!tx.fromBalance.isZero()) {
+                        needPlayer(tx.player, tx.playerName).add(tx.fromBalance);
                     }
                 } else {
                     need(tx.account).add(tx.value);
@@ -750,6 +783,7 @@ final class Ledger {
         tx.take = PayJson.items(e.get("take"));
         tx.give = PayJson.items(e.get("give"));
         tx.value = PayJson.amount(e.get("value"));
+        tx.fromBalance = e.has("bal") ? PayJson.amount(e.get("bal")) : Amount.ZERO;
         tx.note = PayJson.str(e, "note");
         tx.at = PayJson.num(e, "at");
         readDrops(tx, e);
@@ -758,6 +792,9 @@ final class Ledger {
             Order o = orders.get(tx.orderId);
             if (o != null) {
                 o.status = OrderStatus.PAYING;
+            }
+            if (!tx.fromBalance.isZero()) {
+                needPlayer(tx.player, tx.playerName).subtract(tx.fromBalance);
             }
         } else {
             need(tx.account).subtract(tx.value);
@@ -797,7 +834,9 @@ final class Ledger {
             recv.add(tx.value);
             recv.record(new PayRecord(at, PayRecord.Kind.RECEIVED, tx.value, tx.playerName, p.id, what));
             Account payer = needPlayer(tx.player, tx.playerName);
-            payer.record(new PayRecord(at, PayRecord.Kind.PAID, tx.value, recv.name, p.id, what));
+            String paidNote = tx.fromBalance.isZero() ? what
+                    : (what == null ? "" : what + "；") + "其中 " + tx.fromBalance + " 用 pay.yr 余额付";
+            payer.record(new PayRecord(at, PayRecord.Kind.PAID, tx.value, recv.name, p.id, paidNote));
             Amount change = Amount.ofItems(back);
             if (!change.isZero()) {
                 payer.add(change);
@@ -897,6 +936,7 @@ final class Ledger {
             x.addProperty("at", o.createdAt);
             x.addProperty("exp", o.expiresAt);
             PayJson.put(x, "origin", o.origin);
+            PayJson.put(x, "only", o.onlyPayer == null ? null : o.onlyPayer.toString());
             x.addProperty("status", o.status.name());
             x.addProperty("paidAt", o.paidAt);
             PayJson.put(x, "payer", o.payer == null ? null : o.payer.toString());
@@ -934,6 +974,9 @@ final class Ledger {
             x.add("take", PayJson.items(t.take));
             x.add("give", PayJson.items(t.give));
             x.add("value", PayJson.amount(t.value));
+            if (!t.fromBalance.isZero()) {
+                x.add("bal", PayJson.amount(t.fromBalance));
+            }
             PayJson.put(x, "note", t.note);
             x.addProperty("at", t.at);
             if (t.drops != null) {
@@ -980,6 +1023,8 @@ final class Ledger {
             o.createdAt = PayJson.num(x, "at");
             o.expiresAt = PayJson.num(x, "exp");
             o.origin = PayJson.str(x, "origin");
+            String only = PayJson.str(x, "only");
+            o.onlyPayer = only == null ? null : UUID.fromString(only);
             o.status = OrderStatus.valueOf(x.get("status").getAsString());
             o.paidAt = PayJson.num(x, "paidAt");
             String payer = PayJson.str(x, "payer");
@@ -1016,6 +1061,7 @@ final class Ledger {
             t.take = PayJson.items(x.get("take"));
             t.give = PayJson.items(x.get("give"));
             t.value = PayJson.amount(x.get("value"));
+            t.fromBalance = x.has("bal") ? PayJson.amount(x.get("bal")) : Amount.ZERO;
             t.note = PayJson.str(x, "note");
             t.at = PayJson.num(x, "at");
             readDrops(t, x);

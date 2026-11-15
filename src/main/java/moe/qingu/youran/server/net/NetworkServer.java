@@ -251,6 +251,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         if (hostAddresses.containsKey(HOST_PAY)) {
             yrRecords.put(PAY_NAME, hostAddresses.get(HOST_PAY));
+            // pay.yr 的开发者文档站（服主 11-15：长说明挪到单独的站），同一台主机，按 Host 分
+            yrRecords.put(moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN, hostAddresses.get(HOST_PAY));
         }
         if (hostAddresses.containsKey(moe.qingu.youran.server.net.nav.NavServer.HOST)) {
             for (String n : moe.qingu.youran.server.net.nav.NavServer.NAMES) {

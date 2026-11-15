@@ -75,8 +75,9 @@ final class PayPages {
         } else {
             sb.append("<a href=\"/\">首页</a>");
         }
+        sb.append(" | <a href=\"").append(esc(docs("/help"))).append("\">帮助</a>");
         sb.append("</td></tr></table></div>\n<div class=\"main\">\n").append(body).append("</div>\n")
-                .append("<div class=\"foot\">pay.yr 由悠然服务器提供 · 每一笔都要在游戏弹出的系统确认框里确认（网页点不到它） · 暂不收手续费</div>\n")
+                .append("<div class=\"foot\">pay.yr · 悠然聚合支付 · <a href=\"").append(esc(docs("/"))).append("\">开发者文档</a></div>\n")
                 .append("</body>\n</html>\n");
         return sb.toString();
     }
@@ -125,7 +126,7 @@ final class PayPages {
             case RECEIVED:
                 return "收款";
             case PAID:
-                return "付款（从背包）";
+                return "付款";
             case CHANGE:
                 return "找零记入";
             case REFUND_IN:
@@ -198,50 +199,27 @@ final class PayPages {
         return sb.toString();
     }
 
-    /** 首页：介绍与给网站作者的接口说明 */
+    /** 开发者文档站的网址（{@code docs.pay.yr}，配了中间 CA 时用 https） */
+    static volatile String docsBase = "http://" + moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN;
+
+    static String docs(String path) {
+        return docsBase + path;
+    }
+
+    /** 首页：一句话 + 登录 / 我的账户；接入说明在 docs.pay.yr */
     static String index(String who, String csrf, boolean idOk, String idDomain, boolean https) {
-        String base = (https ? "https" : "http") + "://pay.yr";
         StringBuilder b = new StringBuilder();
         b.append("<h1>pay.yr 悠然聚合支付</h1>\n")
-                .append("<p>任何游戏内网站接入 pay.yr 就能收款：网站开一张收款单，把你带到这里，你用游戏角色登录、在游戏弹出的确认框里确认，"
-                        + "pay.yr 从你的背包里扣东西，记进收款方的账户，再带你回网站。</p>\n")
-                .append("<p>可以用任何物品付（物品、数据值、NBT 要完全一样）；<b>绿宝石和悠然元可以互换</b>（1 绿宝石 = 2 元），"
-                        + "网站只标一种价，你用哪种付都行、可以混着付。装着东西的容器（有内容的潜影盒、背包等）不收，空的照收。</p>\n");
+                .append("<p>游戏内网站的收款服务。绿宝石、悠然元都能付（1 绿宝石 = 2 元）。</p>\n");
         if (!idOk) {
-            b.append("<p class=\"err\">这个服务器现在没有开游戏角色一键登录（").append(esc(idDomain))
-                    .append("，由 YouranAuth 提供），pay.yr 暂时不能登录、不能付款。</p>\n");
+            b.append("<p class=\"err\">服务器没有开游戏角色登录（").append(esc(idDomain)).append("），暂时不能付款。</p>\n");
         } else if (who == null) {
             b.append("<form method=\"get\" action=\"/login\"><div><input type=\"hidden\" name=\"next\" value=\"/account\" />")
-                    .append("<input type=\"submit\" class=\"go\" value=\"用游戏角色登录，查看我的账户\" /></div></form>\n");
+                    .append("<input type=\"submit\" class=\"go\" value=\"登录\" /></div></form>\n");
         } else {
-            b.append("<p>").append(link("/account", "查看我的账户（余额、收支记录、提现、退款、密钥）")).append("</p>\n");
+            b.append("<p>").append(link("/account", "我的账户")).append("</p>\n");
         }
-        b.append("<h2>给网站作者：怎么收款</h2>\n")
-                .append("<p>1. 用收款人的角色登录 pay.yr，在“我的账户”里生成密钥（只显示一次，可以重置；重置后旧的马上作废）。</p>\n")
-                .append("<p>2. 网站后台（在游戏内网络里）创建收款单：</p>\n<pre>POST ").append(base).append("/api/v1/orders\n")
-                .append("Authorization: Bearer 你的密钥\nContent-Type: application/x-www-form-urlencoded\n\n")
-                .append("emerald=20&amp;description=钻石剑&amp;reference=单号123&amp;return_url=https://shop.yr/done</pre>\n")
-                .append("<table class=\"list\"><tr><th>字段</th><th>说明</th></tr>\n")
-                .append("<tr><td>emerald 或 yuan</td><td>价格（二选一，整数）；付的时候绿宝石、悠然元都能用</td></tr>\n")
-                .append("<tr><td>item1 … item16</td><td>要的别的物品 ID（如 minecraft:diamond，数据值写成 minecraft:wool@14）；"
-                        + "itemN_count 个数（默认 1），itemN_nbt 要求的 NBT（SNBT 写法，要完全一样）</td></tr>\n")
-                .append("<tr><td>return_url</td><td>付完带玩家回哪里（必填，http 或 https，主机就是你的网站；付款页上写的网站域名就是它的主机）。"
-                        + "回来时带 <code>?order=单号&amp;status=paid</code></td></tr>\n")
-                .append("<tr><td>cancel_url</td><td>玩家点“不付了”回哪里（可选，默认 return_url），带 <code>status=canceled</code></td></tr>\n")
-                .append("<tr><td>description</td><td>付款页、确认框上写的“买的是什么”（最多 60 字）</td></tr>\n")
-                .append("<tr><td>reference</td><td>你自己的单号（最多 64 个 ASCII 字符），查询时原样带回</td></tr>\n")
-                .append("<tr><td>expires_in</td><td>多少秒后过期（60–").append(PayConfig.orderMaxTtlSeconds).append("，默认 ")
-                .append(PayConfig.orderTtlSeconds).append("）；每张只能付一次</td></tr>\n")
-                .append("<tr><td>format=text</td><td>回纯文本（一行一项 名字=值，给 Z80 上的程序用）；默认回 JSON</td></tr>\n</table>\n")
-                .append("<p>回 <code>201</code>：<code>id</code>（单号 ord_…）、<code>url</code>（付款页网址，把玩家的浏览器跳过去）、<code>status</code>、<code>expires_at</code> 等。</p>\n")
-                .append("<p>3. 玩家回到 return_url 以后，<b>网站后台一定要再查一次</b>确实付了再发货（网址里的 status 谁都能伪造）：</p>\n")
-                .append("<pre>GET ").append(base).append("/api/v1/orders/单号\nAuthorization: Bearer 你的密钥</pre>\n")
-                .append("<p><code>status</code> 是 <code>open</code>（还没付）、<code>paid</code>（付了：还有 <code>payment</code>、<code>payer_uuid</code>、"
-                        + "<code>payer_name</code>、<code>paid_at</code>、已退的 <code>refunded_yuan</code> 等）、<code>canceled</code>、<code>expired</code>。</p>\n")
-                .append("<p>其他：<code>POST /api/v1/orders/单号/cancel</code> 取消还没付的单；<code>GET /api/v1/balance</code> 查自己账户的余额。"
-                        + "出错时回 4xx，JSON 是 <code>{\"error\":代号,\"message\":说明}</code>。密钥也可以放在表单字段 <code>key</code> 里。</p>\n")
-                .append("<p>退款：在“我的账户”的收款记录里点“退款”，全额或部分（按价值），退进付款人在 pay.yr 的账户，由他自己提现；"
-                        + "从你的账户扣回，余额不够（已经提现了）就退不了。pay.yr 不裁决纠纷。</p>\n");
+        b.append("<p>").append(link(docs("/help"), "付款帮助")).append(" · ").append(link(docs("/"), "开发者文档（接入、接口、错误码）")).append("</p>\n");
         return page("首页", who, csrf, b.toString(), 0, null);
     }
 }

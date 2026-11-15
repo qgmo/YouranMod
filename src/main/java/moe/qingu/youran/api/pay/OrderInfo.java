@@ -46,10 +46,13 @@ public final class OrderInfo {
     public final Amount refunded;
     /** 付款页网址（把浏览器跳到这里） */
     public final String checkoutUrl;
+    /** 只许这个玩家付（{@link OrderSpec#payer}）；谁付都行时为 null */
+    public final UUID requiredPayer;
 
     public OrderInfo(String id, Status status, AccountRef receiver, String receiverName, String site, Amount price, Currency.Unit unit,
                      String description, String reference, String returnUrl, String cancelUrl, long createdAt, long expiresAt,
-                     long paidAt, UUID payer, String payerName, String paymentId, Amount refunded, String checkoutUrl) {
+                     long paidAt, UUID payer, String payerName, String paymentId, Amount refunded, String checkoutUrl,
+                     UUID requiredPayer) {
         this.id = id;
         this.status = status;
         this.receiver = receiver;
@@ -69,6 +72,7 @@ public final class OrderInfo {
         this.paymentId = paymentId;
         this.refunded = refunded;
         this.checkoutUrl = checkoutUrl;
+        this.requiredPayer = requiredPayer;
     }
 
     public boolean isPaid() {
