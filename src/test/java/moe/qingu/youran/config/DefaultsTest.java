@@ -70,5 +70,7 @@ class DefaultsTest {
         assertEquals(10, ItemConfig.swordHealRadius);
         assertEquals(1, ItemConfig.swordHealAmplifier);
         assertEquals(5, ItemConfig.redBloodGemSelfDamage);
+        // 与 YouranAPI 的 chat.lang-dir 留空时相同
+        assertEquals("config/youranapi/lang", LangConfig.dir);
     }
 }

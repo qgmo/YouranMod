@@ -3,6 +3,7 @@ package moe.qingu.youran.server;
 import moe.qingu.youran.server.command.CommandHub;
 import moe.qingu.youran.server.command.CommandYouran;
 import moe.qingu.youran.YouranMod;
+import moe.qingu.youran.api.lang.ServerLang;
 import moe.qingu.youran.logic.SharedState;
 import moe.qingu.youran.network.NetworkHooks;
 import moe.qingu.youran.network.ServerNetworkModule;
@@ -11,7 +12,8 @@ import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
 
 /**
  * 只在服务端（独立服务端或单人游戏的内置服务端）运行的部分的入口：开服时算好配置、登记 tick 处理、主城区块与刷怪的处理、
- * 登录时同步配置、指令、游戏内网络（实现在完整包的 {@code server.net} 里，按类名加载，客户端包里没有），关服时撤掉。
+ * 登录时同步配置、指令、游戏内网络（实现在完整包的 {@code server.net} 里，按类名加载，客户端包里没有），关服时撤掉；
+ * 开服前在后台读服务端翻译（{@code api.lang.ServerLang}，读文件的实现在完整包的 {@code server.lang} 里）。
  * 客户端不会走到这里（单人游戏时由内置服务端那一侧调用）。
  */
 public final class ServerSide {
@@ -27,6 +29,8 @@ public final class ServerSide {
     /** 服务端启动前 */
     public static void start() {
         stop();
+        // 服务端翻译：后台线程读语言目录与模组 jar 里的语言文件，不耽误开服
+        ServerLang.reload();
         Settings.reload();
         playerTick = new PlayerTickHandler();
         worldTick = new WorldTickHandler();
