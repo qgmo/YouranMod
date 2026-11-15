@@ -1,5 +1,6 @@
 package moe.qingu.youran.server.net;
 
+import moe.qingu.youran.api.network.ConfirmText;
 import moe.qingu.youran.api.network.DeviceHandle;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkLayout;
@@ -358,8 +359,11 @@ final class NetCommand extends CommandBase {
             throw new WrongUsageException("/ynet confirm <玩家>");
         }
         EntityPlayerMP player = getPlayer(server, sender, args[1]);
-        moe.qingu.youran.api.network.ConfirmRequest r = new moe.qingu.youran.api.network.ConfirmRequest("测试确认框", "test.yr",
-                Arrays.asList("这是 /ynet confirm 发的测试", "点同意或拒绝都可以"), 30);
+        moe.qingu.youran.api.network.ConfirmRequest r = new moe.qingu.youran.api.network.ConfirmRequest(
+                ConfirmText.translate("youranmod.confirm.test.title", "测试确认框"), "test.yr",
+                Arrays.asList(ConfirmText.translate("youranmod.confirm.test.item1", "这是 /ynet confirm 发的测试"),
+                        ConfirmText.translate("youranmod.confirm.test.item2", "点同意或拒绝都可以")),
+                30, moe.qingu.youran.api.network.ConfirmRequest.Purpose.ACTION);
         net.confirm(null, player.getUniqueID(), r).thenAccept(res -> tell(sender, "§e测试确认框的结果：" + res));
         tell(sender, "§a已给 " + player.getName() + " 弹框（30 秒）");
     }

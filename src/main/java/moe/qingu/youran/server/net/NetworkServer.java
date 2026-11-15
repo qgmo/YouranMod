@@ -828,9 +828,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (!d.hasCapability(DeviceCapability.LOCATION)) {
             return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.NO_LOCATOR));
         }
-        ConfirmRequest req = new ConfirmRequest("获取这台电脑的位置", s, Arrays.asList(
-                "这台电脑的位置：维度 " + d.key.dimension + "，坐标 " + d.key.x + ", " + d.key.y + ", " + d.key.z,
-                "这台电脑的游戏内地址"));
+        // 固定文字用翻译键，按操作者客户端的语言显示（服务端写好的中文是客户端没有这个键时的退路）
+        ConfirmRequest req = new ConfirmRequest(
+                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.title", "获取这台电脑的位置"), s, Arrays.asList(
+                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.position",
+                        "这台电脑的位置：维度 " + d.key.dimension + "，坐标 " + d.key.x + ", " + d.key.y + ", " + d.key.z,
+                        d.key.dimension, d.key.x, d.key.y, d.key.z),
+                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.address", "这台电脑的游戏内地址")),
+                ConfirmRequest.DEFAULT_TIMEOUT_SECONDS, ConfirmRequest.Purpose.SHARE);
         return confirmDevice(p, d, req).thenApply(r -> {
             switch (r.outcome) {
                 case APPROVED:

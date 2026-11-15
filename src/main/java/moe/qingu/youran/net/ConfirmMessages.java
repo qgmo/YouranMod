@@ -2,6 +2,7 @@ package moe.qingu.youran.net;
 
 import io.netty.buffer.ByteBuf;
 import moe.qingu.youran.api.network.ConfirmRequest;
+import moe.qingu.youran.api.network.ConfirmText;
 import moe.qingu.youran.network.NetworkBackend;
 import moe.qingu.youran.network.NetworkHooks;
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -25,11 +26,12 @@ public final class ConfirmMessages {
     /** 服务端 → 客户端：弹框 */
     public static final class Show implements IMessage {
         public long id;
-        public String title;
+        public ConfirmText title;
         /** 网站域名（A-label；客户端自己转成显示用的写法） */
         public String site;
-        public List<String> items;
+        public List<ConfirmText> items;
         public int seconds;
+        public ConfirmRequest.Purpose purpose = ConfirmRequest.Purpose.SHARE;
         /** 包坏了 */
         public boolean bad;
 
@@ -38,23 +40,25 @@ public final class ConfirmMessages {
 
         public Show(long id, ConfirmRequest r, int seconds) {
             this.id = id;
-            this.title = r.title;
+            this.title = r.titleText;
             this.site = r.site;
-            this.items = r.items;
+            this.items = r.itemTexts;
             this.seconds = seconds;
+            this.purpose = r.purpose;
         }
 
         @Override
         public void toBytes(ByteBuf buf) {
             PacketBuffer b = new PacketBuffer(buf);
             b.writeLong(id);
-            b.writeString(title);
+            writeText(b, title);
             b.writeString(site);
             b.writeByte(items.size());
-            for (String i : items) {
-                b.writeString(i);
+            for (ConfirmText i : items) {
+                writeText(b, i);
             }
             b.writeShort(seconds);
+            b.writeByte(purpose.ordinal());
         }
 
         @Override
@@ -62,23 +66,63 @@ public final class ConfirmMessages {
             PacketBuffer b = new PacketBuffer(buf);
             try {
                 id = b.readLong();
-                title = b.readString(ConfirmRequest.MAX_TITLE * 2);
+                title = readText(b, ConfirmRequest.MAX_TITLE * 2, 0);
                 site = b.readString(253);
                 int n = b.readByte();
                 if (n < 0 || n > ConfirmRequest.MAX_ITEMS) {
                     throw new IllegalArgumentException("条目太多");
                 }
-                List<String> list = new ArrayList<>();
+                List<ConfirmText> list = new ArrayList<>();
                 for (int i = 0; i < n; i++) {
-                    list.add(b.readString(ConfirmRequest.MAX_ITEM * 2));
+                    list.add(readText(b, ConfirmRequest.MAX_ITEM * 2, 0));
                 }
                 items = Collections.unmodifiableList(list);
                 seconds = b.readShort();
+                int p = b.readByte();
+                ConfirmRequest.Purpose[] all = ConfirmRequest.Purpose.values();
+                purpose = p >= 0 && p < all.length ? all[p] : ConfirmRequest.Purpose.SHARE;
             } catch (RuntimeException e) {
                 bad = true;
                 buf.skipBytes(buf.readableBytes());
             }
         }
+    }
+
+    /** 一段文字：0 = 原样；1 = 翻译键 + 客户端没有这个键时的整句 + 参数（同样的格式，最多套 {@link ConfirmText#MAX_DEPTH} 层） */
+    static void writeText(PacketBuffer b, ConfirmText t) {
+        if (t.isLiteral()) {
+            b.writeByte(0);
+            b.writeString(t.fallback);
+            return;
+        }
+        b.writeByte(1);
+        b.writeString(t.key);
+        b.writeString(t.fallback);
+        b.writeByte(t.args.size());
+        for (ConfirmText a : t.args) {
+            writeText(b, a);
+        }
+    }
+
+    static ConfirmText readText(PacketBuffer b, int max, int depth) {
+        int kind = b.readByte();
+        if (kind == 0) {
+            return ConfirmText.literal(b.readString(max));
+        }
+        if (kind != 1 || depth >= ConfirmText.MAX_DEPTH) {
+            throw new IllegalArgumentException("文字的格式不对");
+        }
+        String key = b.readString(ConfirmText.MAX_KEY);
+        String fallback = b.readString(max);
+        int n = b.readByte();
+        if (n < 0 || n > ConfirmText.MAX_ARGS) {
+            throw new IllegalArgumentException("参数太多");
+        }
+        Object[] args = new Object[n];
+        for (int i = 0; i < n; i++) {
+            args[i] = readText(b, max, depth + 1);
+        }
+        return ConfirmText.translate(key, fallback, args);
     }
 
     /** 服务端 → 客户端：框作废了（超时、操作者变了） */
@@ -139,7 +183,7 @@ public final class ConfirmMessages {
         @Override
         public IMessage onMessage(Show m, MessageContext ctx) {
             if (!m.bad) {
-                moe.qingu.youran.client.confirm.ClientConfirms.show(m.id, m.title, m.site, m.items, m.seconds);
+                moe.qingu.youran.client.confirm.ClientConfirms.show(m.id, m.title, m.site, m.items, m.seconds, m.purpose);
             }
             return null;
         }
