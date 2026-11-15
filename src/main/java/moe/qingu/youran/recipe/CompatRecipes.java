@@ -51,5 +51,9 @@ public final class CompatRecipes {
         // 炼金化学的化合机、液化器、蒸发器（在它载入完成时应用 CraftTweaker 的删改之前加；没装时什么都不做）
         AlchemistryCompat.registerCombinerRecipe(new ItemStack(ModItems.magnetiteDust));
         AlchemistryCompat.registerAceticAcidConversion(ModFluids.aceticAcid);
+        // 硼的来源：洞穴水晶（电气石）进溶解机（要夸克）
+        if (alchemistry) {
+            BoronRecipes.registerCrystalDissolver();
+        }
     }
 }
