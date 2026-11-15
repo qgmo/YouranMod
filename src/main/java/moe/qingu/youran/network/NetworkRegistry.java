@@ -3,6 +3,7 @@ package moe.qingu.youran.network;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.DnsZone;
 import moe.qingu.youran.api.network.HostService;
+import moe.qingu.youran.api.network.SiteInfo;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,6 +28,7 @@ public final class NetworkRegistry {
     private static final List<TldDecl> tlds = new ArrayList<>();
     private static final List<NameDecl> names = new ArrayList<>();
     private static final Map<Integer, DimensionNetwork> dimensionNetworks = new HashMap<>();
+    private static final List<NavDecl> navs = new ArrayList<>();
 
     private NetworkRegistry() {
     }
@@ -77,6 +79,29 @@ public final class NetworkRegistry {
             this.name = name;
             this.hostKey = hostKey;
         }
+    }
+
+    /** 导航信息（浏览器主页 180.yr 用） */
+    public static final class NavDecl {
+        /** 域名（A-label） */
+        public final String name;
+        public final SiteInfo info;
+        /** 只是兜底（YouranMod 替别的模组写的默认值）：同一个名字有别人登记的就用别人的 */
+        public final boolean fallback;
+
+        NavDecl(String name, SiteInfo info, boolean fallback) {
+            this.name = name;
+            this.info = info;
+            this.fallback = fallback;
+        }
+    }
+
+    public static synchronized void addNav(String name, SiteInfo info, boolean fallback) {
+        navs.add(new NavDecl(name, info, fallback));
+    }
+
+    public static synchronized List<NavDecl> navs() {
+        return Collections.unmodifiableList(new ArrayList<>(navs));
     }
 
     public static synchronized void addDatacenter(String key, long fixedIndex) {
