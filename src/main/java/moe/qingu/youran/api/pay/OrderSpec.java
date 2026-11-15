@@ -2,6 +2,7 @@ package moe.qingu.youran.api.pay;
 
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 
 /**
  * 创建收款单要的东西（{@link PayApi#createOrder}）。收款方、网站域名、价格必填；其余可选。
@@ -24,6 +25,7 @@ public final class OrderSpec {
     String returnUrl;
     String cancelUrl;
     int ttlSeconds;
+    UUID payer;
 
     /** @param site 网站域名（付款页上写给玩家看的，如 {@code minebay.yr}） */
     public OrderSpec(AccountRef receiver, String site) {
@@ -104,6 +106,19 @@ public final class OrderSpec {
     public OrderSpec ttlSeconds(int s) {
         this.ttlSeconds = s;
         return this;
+    }
+
+    /**
+     * 只许这个玩家付（可选）：别的角色登录着 pay.yr 时付款页说明“要由 X 付”，不给付款按钮。
+     * 例如 MineBay 的订单记在 MineBay 登录着的角色名下，钱也从这个角色出（谁坐在电脑前操作不管）。
+     */
+    public OrderSpec payer(UUID player) {
+        this.payer = player;
+        return this;
+    }
+
+    public UUID payer() {
+        return payer;
     }
 
     public Amount price() {

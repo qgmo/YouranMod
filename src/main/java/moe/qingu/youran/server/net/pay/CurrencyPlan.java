@@ -66,6 +66,83 @@ final class CurrencyPlan {
         }
     }
 
+    /**
+     * 付款时用多少 pay.yr 账户余额（服主 11-15：可以直接用账户里的余额付，不用先提现；全部或部分，剩下的从背包拿）。
+     * 余额按价值记：钱（元）不分绿宝石还是悠然元；账户里的别的物品（退款收到的钻石等）只有“能用的全用上”时才用。
+     */
+    static final class BalanceUse {
+        static final BalanceUse NONE = new BalanceUse(0, false);
+        static final BalanceUse ALL = new BalanceUse(-1, true);
+
+        /** 用多少元；-1 为能用多少用多少 */
+        final long yuan;
+        /** 账户里的别的物品也用上 */
+        final boolean items;
+
+        private BalanceUse(long yuan, boolean items) {
+            this.yuan = yuan;
+            this.items = items;
+        }
+
+        /** 只用 {@code yuan} 元余额（别的物品从背包拿） */
+        static BalanceUse yuan(long yuan) {
+            return yuan <= 0 ? NONE : new BalanceUse(yuan, false);
+        }
+
+        /** 表单 / 网址里的写法：{@code none}、{@code all}、或元数（1–9 位整数）；写错为 null */
+        static BalanceUse parse(String s) {
+            if (s == null || s.isEmpty() || s.equals("none")) {
+                return NONE;
+            }
+            if (s.equals("all")) {
+                return ALL;
+            }
+            if (s.matches("[0-9]{1,9}")) {
+                return yuan(Long.parseLong(s));
+            }
+            return null;
+        }
+
+        String code() {
+            return this == ALL || yuan < 0 ? "all" : yuan == 0 ? "none" : Long.toString(yuan);
+        }
+
+        boolean isNone() {
+            return yuan == 0 && !items;
+        }
+    }
+
+    /**
+     * 这笔付款里从余额出多少：不超过价格、不超过余额。{@code use} 指定的元数比余额或价格（钱的部分）多时抛异常（说明原因）。
+     */
+    static Amount fromBalance(Amount price, Amount balance, BalanceUse use) throws moe.qingu.youran.api.pay.PayException {
+        if (use == null || use.isNone()) {
+            return Amount.ZERO;
+        }
+        long yuan;
+        if (use.yuan < 0) {
+            yuan = Math.min(price.yuan, balance.yuan);
+        } else {
+            if (use.yuan > balance.yuan) {
+                throw new moe.qingu.youran.api.pay.PayException("insufficient_balance", "pay.yr 账户余额只有 " + balance.yuan + " 元，不够用 " + use.yuan + " 元");
+            }
+            if (use.yuan > price.yuan) {
+                throw new moe.qingu.youran.api.pay.PayException("invalid_amount", "用余额付的比要付的钱（" + price.yuan + " 元）还多");
+            }
+            yuan = use.yuan;
+        }
+        Map<PayItem, Long> items = new LinkedHashMap<>();
+        if (use.items) {
+            for (Map.Entry<PayItem, Long> e : price.items.entrySet()) {
+                long n = Math.min(e.getValue(), balance.count(e.getKey()));
+                if (n > 0) {
+                    items.put(e.getKey(), n);
+                }
+            }
+        }
+        return Amount.of(yuan, items);
+    }
+
     private CurrencyPlan() {
     }
 
