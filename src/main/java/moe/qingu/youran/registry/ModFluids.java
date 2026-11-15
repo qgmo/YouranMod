@@ -1,6 +1,6 @@
 package moe.qingu.youran.registry;
 
-import moe.qingu.youran.fluid.FluidTrichlorosilane;
+import moe.qingu.youran.fluid.FluidWithPurity;
 import net.minecraft.item.EnumRarity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fluids.Fluid;
@@ -19,6 +19,8 @@ public final class ModFluids {
     public static Fluid aceticAcid;
     /** 三氯氢硅（服主 11-15，芯片线“硅”）：纯度记在 NBT 里（见 fluid.FluidPurity），没有流体方块，只有通用桶 */
     public static Fluid trichlorosilane;
+    /** 三氯氢硅氢气混合气（服主 11-15，晶圆第 6 步）：纯度随做它的三氯氢硅（NBT，见 fluid.FluidPurity），气体，没有流体方块，只有通用桶 */
+    public static Fluid trichlorosilaneHydrogen;
 
     private ModFluids() {
     }
@@ -39,10 +41,15 @@ public final class ModFluids {
         FluidRegistry.registerFluid(aceticAcid);
         FluidRegistry.addBucketForFluid(aceticAcid);
         // 密度 1.342 g/cm³；黏度约 0.33 mPa·s（水为 1000 时记 330）；沸点 31.8 ℃，常温下按液体算
-        trichlorosilane = new FluidTrichlorosilane("trichlorosilane", texture("trichlorosilane_still"), texture("trichlorosilane_flow"))
+        trichlorosilane = new FluidWithPurity("trichlorosilane", texture("trichlorosilane_still"), texture("trichlorosilane_flow"))
                 .setDensity(1342).setViscosity(330).setLuminosity(0).setGaseous(false);
         FluidRegistry.registerFluid(trichlorosilane);
         FluidRegistry.addBucketForFluid(trichlorosilane);
+        // 气体：按氢气过量的混合气算，密度取个小的正数（同本模组的氯气，不往上飘），黏度很低
+        trichlorosilaneHydrogen = new FluidWithPurity("trichlorosilane_hydrogen", texture("trichlorosilane_hydrogen_still"),
+                texture("trichlorosilane_hydrogen_flow")).setDensity(2).setViscosity(20).setLuminosity(0).setGaseous(true);
+        FluidRegistry.registerFluid(trichlorosilaneHydrogen);
+        FluidRegistry.addBucketForFluid(trichlorosilaneHydrogen);
     }
 
     private static ResourceLocation texture(String name) {

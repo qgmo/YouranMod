@@ -6,6 +6,9 @@ import blusunrize.immersiveengineering.api.crafting.CrusherRecipe;
 import blusunrize.immersiveengineering.api.crafting.MetalPressRecipe;
 import blusunrize.immersiveengineering.api.crafting.MixerRecipe;
 import blusunrize.immersiveengineering.api.crafting.RefineryRecipe;
+import moe.qingu.youran.fluid.FluidPurity;
+import moe.qingu.youran.logic.purity.Purity;
+import moe.qingu.youran.logic.purity.WaferRules;
 import moe.qingu.youran.registry.ModFluids;
 import moe.qingu.youran.YouranMod;
 import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
@@ -49,6 +52,40 @@ public final class IeRecipes {
         } else {
             YouranMod.LOG.info("已加沉浸工程炼油厂配方：500 mB {} + 325 mB {} → 500 mB 乙酸", ETHANOL, OXYGEN);
         }
+    }
+
+    /** IC2 电解出来的氢气 */
+    static final String HYDROGEN = "ic2hydrogen";
+
+    /**
+     * 炼油厂：每 tick 10 mB 三氯氢硅 + 40 mB 氢气 → 50 mB 三氯氢硅氢气混合气（芯片线第 6 步，比例 Claude 定，见 logic.purity.WaferRules）。
+     * 只有到了 9 个 9 的三氯氢硅能做；炼油厂按 NBT 比配方，所以 9–32 个 9 每种各一条，混合气的纯度同输入的三氯氢硅。要装了 IC2（氢气）。
+     */
+    public static void registerMixtureRefinery() {
+        FluidStack hydrogen = FluidRegistry.getFluidStack(HYDROGEN, WaferRules.REFINERY_HYDROGEN);
+        if (hydrogen == null) {
+            YouranMod.LOG.info("没有流体 {}（IC2 的氢气），不加沉浸工程炼油厂的混合气配方", HYDROGEN);
+            return;
+        }
+        int added = 0;
+        for (int nines : WaferRules.mixtureGrades()) {
+            FluidStack tcs = FluidPurity.trichlorosilane(WaferRules.REFINERY_TRICHLOROSILANE, nines);
+            FluidStack mixture = FluidPurity.mixture(WaferRules.REFINERY_MIXTURE, WaferRules.mixtureNines(nines));
+            RefineryRecipe.recipeList.add(new PurityRefineryRecipe(mixture, tcs, hydrogen.copy(), WaferRules.REFINERY_ENERGY,
+                    nines == Purity.WAFER_GRADE_NINES));
+            RefineryRecipe found = RefineryRecipe.findRecipe(hydrogen, tcs);
+            if (found == null || !mixture.isFluidStackIdentical(found.output)) {
+                YouranMod.LOG.error("沉浸工程炼油厂的混合气配方（{} 个 9）没生效：同样的输入找到的是 {}", nines, found == null ? null : found.output);
+            } else {
+                added++;
+            }
+        }
+        RefineryRecipe below = RefineryRecipe.findRecipe(FluidPurity.trichlorosilane(WaferRules.REFINERY_TRICHLOROSILANE, Purity.WAFER_GRADE_NINES - 1), hydrogen);
+        if (below != null) {
+            YouranMod.LOG.error("不到 9 个 9 的三氯氢硅在炼油厂里也找到了配方：{}", below.output);
+        }
+        YouranMod.LOG.info("已加沉浸工程炼油厂配方：{} mB 三氯氢硅（{}–{} 个 9，{} 条）+ {} mB 氢气 → {} mB 混合气", WaferRules.REFINERY_TRICHLOROSILANE,
+                Purity.WAFER_GRADE_NINES, Purity.MAX_NINES, added, WaferRules.REFINERY_HYDROGEN, WaferRules.REFINERY_MIXTURE);
     }
 
     /** 灌装机：1 磁粉 + 10 mB 熔融钴 → 1 钴改性磁粉（同装罐机富集模式的那条） */

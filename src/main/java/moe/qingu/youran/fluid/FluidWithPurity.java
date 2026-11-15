@@ -11,8 +11,8 @@ import net.minecraftforge.fluids.FluidStack;
  * <p>名字后面带上纯度，如“三氯氢硅（纯度 99.9%，3 个 9）”：各模组的罐子界面、通用桶、JEI 显示流体名字时都问
  * {@link #getLocalizedName(FluidStack)}，这样不用一个个模组去改悬停说明。没有纯度标记的显示 1 个 9（90%）。
  */
-public class FluidTrichlorosilane extends Fluid {
-    public FluidTrichlorosilane(String name, ResourceLocation still, ResourceLocation flowing) {
+public class FluidWithPurity extends Fluid {
+    public FluidWithPurity(String name, ResourceLocation still, ResourceLocation flowing) {
         super(name, still, flowing);
     }
 

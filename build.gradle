@@ -54,6 +54,15 @@ repositories {
             includeGroup 'mezz.jei'
         }
     }
+    maven {
+        // 匠魂、Mantle（SlimeKnights 的仓库）：与整合包同版本
+        name 'SlimeKnights'
+        url 'https://dvs1.progwml6.com/files/maven/'
+        mavenContent {
+            includeGroup 'slimeknights'
+            includeGroup 'slimeknights.mantle'
+        }
+    }
     mavenCentral()
 }
 
@@ -84,6 +93,10 @@ dependencies {
     // 沉浸原油（只编译、不打包）：仓库没有许可证、也不在 Maven 上，不能放进本仓库；把整合包里的 jar 放到 libs/（不进仓库，见 README）。
     // 只有 compat.immersivepetroleum 与 mixin.immersivepetroleum 引用，没装时不注册 Mixin、不加载这些类
     compileOnly rfg.deobf(files(ipJar))
+    // 匠魂 2.13.0.183 与 Mantle 1.3.3.55（与整合包同版本）：只编译、不打包；只有 compat.tconstruct 引用（浇铸台的事件、合金与浇铸配方），
+    // 没装匠魂时不加载这些类
+    compileOnly(rfg.deobf('slimeknights:TConstruct:1.12.2-2.13.0.183')) { transitive = false }
+    compileOnly(rfg.deobf('slimeknights.mantle:Mantle:1.12-1.3.3.55')) { transitive = false }
     // JEI（与整合包同版本，只编译它的 API、不打包）：只有 compat.jei 引用，JEI 按注解找插件，没装时不加载
     compileOnly rfg.deobf('mezz.jei:jei_1.12.2:4.16.5.1030:api')
 

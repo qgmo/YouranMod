@@ -50,7 +50,7 @@ public final class ClientModels {
 
     @SubscribeEvent
     public static void stitchFluids(TextureStitchEvent.Pre event) {
-        for (Fluid fluid : new Fluid[]{ModFluids.aceticAcid, ModFluids.trichlorosilane}) {
+        for (Fluid fluid : new Fluid[]{ModFluids.aceticAcid, ModFluids.trichlorosilane, ModFluids.trichlorosilaneHydrogen}) {
             if (fluid != null) {
                 event.getMap().registerSprite(fluid.getStill());
                 event.getMap().registerSprite(fluid.getFlowing());

@@ -78,6 +78,7 @@ item.floppy_disk.name=5.25" Floppy Disk
 item.silicon_dust.name=Silicon Dust
 item.borosilicate_slag.name=Borosilicate Slag
 fluid.trichlorosilane=Trichlorosilane
+fluid.trichlorosilane_hydrogen=Trichlorosilane-Hydrogen Mixture
 youranmod.fluid.with_purity=%s (%s)
 youranmod.purity=Purity %s%%, %s nines
 youranmod.purity.long=Purity: %s nines

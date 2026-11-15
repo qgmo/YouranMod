@@ -35,6 +35,16 @@ public final class FluidPurity {
         return stack != null && ModFluids.trichlorosilane != null && stack.getFluid() == ModFluids.trichlorosilane;
     }
 
+    /** 是不是本模组的三氯氢硅氢气混合气 */
+    public static boolean isMixture(@Nullable FluidStack stack) {
+        return stack != null && ModFluids.trichlorosilaneHydrogen != null && stack.getFluid() == ModFluids.trichlorosilaneHydrogen;
+    }
+
+    /** {@code amount} mB 纯度为 {@code nines} 个 9 的三氯氢硅氢气混合气 */
+    public static FluidStack mixture(int amount, int nines) {
+        return withNines(ModFluids.trichlorosilaneHydrogen, amount, nines);
+    }
+
     /** 标记里的个数；没有标记（或标记不是数字）时按 {@link Purity#DEFAULT_NINES} */
     public static int nines(@Nullable NBTTagCompound tag) {
         if (tag == null || !tag.hasKey(TAG_NINES, Constants.NBT.TAG_ANY_NUMERIC)) {

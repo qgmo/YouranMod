@@ -78,6 +78,7 @@ item.floppy_disk.name=軟碟
 item.silicon_dust.name=矽粉
 item.borosilicate_slag.name=硼矽酸鹽渣
 fluid.trichlorosilane=三氯矽烷
+fluid.trichlorosilane_hydrogen=三氯矽烷氫氣混合氣
 youranmod.fluid.with_purity=%s（%s）
 youranmod.purity=純度 %s%%，%s 個 9
 youranmod.purity.long=純度 %s 個 9
