@@ -20,6 +20,8 @@ import java.util.List;
 public final class PayApi {
     /** 付款服务的域名 */
     public static final String DOMAIN = "pay.yr";
+    /** 开发者文档站（接入流程、接口、错误码、示例） */
+    public static final String DOCS_DOMAIN = "docs.pay.yr";
 
     private PayApi() {
     }

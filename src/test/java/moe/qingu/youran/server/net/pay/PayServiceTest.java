@@ -123,6 +123,18 @@ class PayServiceTest {
         assertSame(CurrencyPlan.BalanceUse.NONE, PayService.balanceUse(Collections.singletonMap("bal", "0")));
     }
 
+    /** docs.pay.yr：几页都在、按 Host 分；没有的页为 null */
+    @Test
+    void docsPages() {
+        for (String p : new String[]{"/", "/api", "/errors", "/examples", "/help"}) {
+            String html = PayDocs.page(p, false);
+            assertNotNull(html, p);
+            assertTrue(html.startsWith("<?xml"), p);
+        }
+        assertTrue(PayDocs.page("/api", true).contains("https://pay.yr"));
+        assertNull(PayDocs.page("/nope", false));
+    }
+
     @Test
     void loginErrors() {
         assertTrue(PayService.loginError("login_unavailable", "no_capability").contains("一键登录"));
