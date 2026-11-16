@@ -38,22 +38,26 @@ final class JeiSteps {
     private JeiSteps() {
     }
 
-    /** 灌入容器：汞灯补汞、激光腔灌氩（IC2 装罐机的“装罐”模式、沉浸工程灌装机，匠魂浇铸台补汞另有匠魂页） */
-    static List<StepRecipe> containerFill() {
-        List<StepRecipe> list = new ArrayList<>();
+    /**
+     * 灌入容器：汞灯补汞、激光腔灌氩。IC2 装罐机的“装罐”模式、沉浸工程灌装机都按物品的流体能力灌，没有登记成配方；
+     * 列在装罐机“装罐”模式的页里（{@code FluidItemRecipe}，罐子格放容器、输入罐放流体）。匠魂浇铸台补汞另见匠魂的页。
+     */
+    static List<FluidItemRecipe> containerFills() {
+        List<FluidItemRecipe> list = new ArrayList<>();
         if (ModFluids.hydrargyrum != null) {
+            LampSpec tube = LampSpec.tube(LampGlass.GLASS, WaferMold.GOLD, Purity.DEFAULT_NINES).assembled(LampGas.ARGON);
             ItemStack empty = new ItemStack(ModItems.mercuryLamp);
-            empty.setTagCompound(LampNbt.tag(LampSpec.tube(LampGlass.GLASS, WaferMold.GOLD, Purity.DEFAULT_NINES).assembled(LampGas.ARGON)));
+            empty.setTagCompound(LampNbt.tag(tube));
             ItemStack full = new ItemStack(ModItems.mercuryLamp);
-            full.setTagCompound(LampNbt.tag(LampSpec.tube(LampGlass.GLASS, WaferMold.GOLD, Purity.DEFAULT_NINES).assembled(LampGas.ARGON).refilled()));
-            list.add(new StepRecipe(StepRecipe.list(StepRecipe.one(empty)), new FluidStack(ModFluids.hydrargyrum, LithoNumbers.LAMP_MERCURY),
-                    StepRecipe.list(StepRecipe.one(full)), Arrays.asList(I18n.format("youranmod.jei.container_fill.lamp"))));
+            full.setTagCompound(LampNbt.tag(tube.refilled()));
+            list.add(new FluidItemRecipe(new FluidStack(ModFluids.hydrargyrum, LithoNumbers.LAMP_MERCURY), Collections.singletonList(empty), null,
+                    Collections.singletonList(full), Arrays.asList(I18n.format("youranmod.jei.container_fill.lamp"))));
         }
         if (ModFluids.argon != null) {
             ItemStack empty = ModItems.arfLaserCavity.make(ExcimerSpec.empty(Purity.DEFAULT_NINES));
             ItemStack filled = ModItems.arfLaserCavity.make(ExcimerSpec.empty(Purity.DEFAULT_NINES).withArgon(DuvNumbers.ARGON_PER_FILL));
-            list.add(new StepRecipe(StepRecipe.list(StepRecipe.one(empty)), new FluidStack(ModFluids.argon, DuvNumbers.ARGON_PER_FILL),
-                    StepRecipe.list(StepRecipe.one(filled)), Arrays.asList(I18n.format("youranmod.jei.container_fill.cavity"))));
+            list.add(new FluidItemRecipe(new FluidStack(ModFluids.argon, DuvNumbers.ARGON_PER_FILL), Collections.singletonList(empty), null,
+                    Collections.singletonList(filled), Arrays.asList(I18n.format("youranmod.jei.container_fill.cavity"))));
         }
         return list;
     }

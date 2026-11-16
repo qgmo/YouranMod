@@ -98,39 +98,6 @@ final class StepCategories {
         }
     }
 
-    static IRecipeCategory<StepRecipe> containerFill(IGuiHelper gui, String uid, ItemStack icon) {
-        return new Base(gui, uid, "youranmod.jei.container_fill", icon, 82, 12) {
-            @Override
-            public void setRecipe(IRecipeLayout layout, StepRecipe recipe, IIngredients ingredients) {
-                IGuiItemStackGroup items = layout.getItemStacks();
-                items(items, 0, true, 10, 10, recipe.inputs.isEmpty() ? null : recipe.inputs.get(0));
-                IGuiFluidStackGroup fluids = layout.getFluidStacks();
-                // 流体画在 16×16 里，格子的底要往左上挪 1 格（物品格子 JEI 自己留了边）
-                fluids.init(0, true, 47, 11, 16, 16, 1000, false, null);
-                fluids.setBackground(0, new IDrawable() {
-                    @Override
-                    public int getWidth() {
-                        return slot.getWidth();
-                    }
-
-                    @Override
-                    public int getHeight() {
-                        return slot.getHeight();
-                    }
-
-                    @Override
-                    public void draw(Minecraft minecraft, int xOffset, int yOffset) {
-                        slot.draw(minecraft, xOffset - 1, yOffset - 1);
-                    }
-                });
-                if (recipe.inputFluid != null) {
-                    fluids.set(0, recipe.inputFluid);
-                }
-                items(items, 1, false, 118, 10, recipe.outputs.isEmpty() ? null : recipe.outputs.get(0));
-            }
-        };
-    }
-
     static IRecipeCategory<StepRecipe> uvEraser(IGuiHelper gui, String uid, ItemStack icon) {
         return new Base(gui, uid, "youranmod.jei.uv_eraser", icon, 82, 12) {
             @Override

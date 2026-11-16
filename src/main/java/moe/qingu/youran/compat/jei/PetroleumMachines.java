@@ -22,19 +22,20 @@ final class PetroleumMachines {
     }
 
     /**
-     * 本模组加给精馏塔的、带按概率掉出的物品的配方（杂酚油出萘、空气出氖）：沉浸原油自己没有接 JEI，这里列在我们的精馏塔页里。
-     * 只写“偶尔多出一个”，不写概率。
+     * 精馏塔配方表（{@code DistillationRecipe.recipeList}）里的全部配方（原油、本模组加的空气分离、杂酚油精馏、整合包脚本加的……运行时读，
+     * 不写死）：沉浸原油自己没有接 JEI，这里都列在我们的精馏塔页里。按概率掉出的物品只写“偶尔多出一个”，不写概率。
+     * 三氯氢硅提纯是按输入现给的，不在表里，另见 {@link JeiRecipes#purification}。
      */
-    static List<FluidItemRecipe> byproductRecipes() {
+    static List<FluidItemRecipe> allRecipes() {
         List<FluidItemRecipe> list = new ArrayList<>();
         for (DistillationRecipe r : DistillationRecipe.recipeList) {
-            if (r.itemOutput == null || r.itemOutput.length == 0 || r.fluidOutput == null || r.fluidOutput.length == 0 || r.input == null) {
+            if (r.fluidOutput == null || r.fluidOutput.length == 0 || r.input == null) {
                 continue;
             }
             List<FluidStack> rest = new ArrayList<>(Arrays.asList(r.fluidOutput).subList(1, r.fluidOutput.length));
             List<String> notes = new ArrayList<>();
             List<ItemStack> items = new ArrayList<>();
-            for (ItemStack item : r.itemOutput) {
+            for (ItemStack item : r.itemOutput == null ? new ItemStack[0] : r.itemOutput) {
                 items.add(item);
                 notes.add(I18n.format("youranmod.jei.distillation_tower.byproduct", item.getDisplayName()));
             }

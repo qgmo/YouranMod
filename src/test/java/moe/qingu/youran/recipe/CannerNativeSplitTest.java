@@ -49,4 +49,19 @@ class CannerNativeSplitTest {
         long fluidOnly = PcbRecipes.cannerReactions().stream().filter(CannerReactions::isNativeEnrichment).count();
         assertEquals(PcbRecipes.WATERS.length, fluidOnly, "三氯化铁溶液：每种水一条");
     }
+
+    /** 只出物品（不出流体）的反应走“装罐”模式；出流体的（含又出物品的）留在富集模式；同一条只在一边 */
+    @Test
+    void bottlingSplit() {
+        assertTrue(CannerReactions.isBottling(CannerReactions.<SiliconReactionsTest.Stack>silicaFromSlag()), "硼硅酸盐渣去硼：只出物品");
+        assertTrue(CannerReactions.isBottling(CannerReactions.pvcFromPolyethylene()), "聚氯乙烯：只出物品");
+        assertTrue(CannerReactions.isBottling(CannerReactions.wafer(moe.qingu.youran.logic.purity.WaferMold.GOLD)), "硅晶圆：只出物品（产物仍按输入现算）");
+        assertFalse(CannerReactions.isBottling(CannerReactions.smallMagnetite()), "小撮磁粉又出氢气：留在富集模式");
+        assertFalse(CannerReactions.isBottling(CannerReactions.<SiliconReactionsTest.Stack>trichlorosilane()), "只出流体：原生富集");
+        for (FluidItemReaction<net.minecraft.item.ItemStack, ReactionItem> r : PcbRecipes.cannerReactions()) {
+            assertFalse(CannerReactions.isBottling(r) && CannerReactions.isNativeEnrichment(r), "同一条不能两边都做：" + r);
+        }
+        long bottled = PcbRecipes.cannerReactions().stream().filter(CannerReactions::isBottling).count();
+        assertTrue(bottled > 0, "主板涂胶、蚀刻、酚醛基板、三氯化铁粉都只出物品");
+    }
 }

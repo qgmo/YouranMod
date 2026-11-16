@@ -87,6 +87,13 @@ public final class CannerReactions {
     public static final ReactionTable<ItemStack, ReactionItem> TABLE = new ReactionTable<>(STACKS);
 
     /**
+     * IC2 流体/固体装罐机“装罐”模式（{@code Mode.BottleLiquid}，罐子格里放东西、输入罐里的流体灌进去）的反应：
+     * “流体 + 固体 → 固体”（只出物品、不出流体）。固体放在“罐子”格里（把流体灌进 / 涂到固体上），产物按输入现算的（硅晶圆、涂胶主板）也在这里。
+     * 同一条反应只在一个模式里能做：出物品又出流体的、出流体的留在 {@link #TABLE}（富集模式）。
+     */
+    public static final ReactionTable<ItemStack, ReactionItem> BOTTLING = new ReactionTable<>(STACKS);
+
+    /**
      * 内置的“流体 + 物品 → 只出流体”的反应：不放进 {@link #TABLE}，改登记进 IC2 自己的富集配方表
      * （{@code compat.ic2.CannerEnrichRecipes}，后初始化时），这样它们和 IC2 原生配方一样处理、显示在 IC2 自己的装罐机 JEI 页里。
      */
@@ -108,9 +115,16 @@ public final class CannerReactions {
                 && (r.inputItem().oreName() != null || r.inputItem().itemId() != null);
     }
 
+    /** 只出物品（不出流体）：装罐模式的反应 */
+    public static boolean isBottling(FluidItemReaction<?, ?> r) {
+        return r.outputFluid() == null && r.outputItem() != null;
+    }
+
     private static void addBuiltin(FluidItemReaction<ItemStack, ReactionItem> r) {
         if (isNativeEnrichment(r)) {
             NATIVE.add(r);
+        } else if (isBottling(r)) {
+            BOTTLING.add(r);
         } else {
             TABLE.add(r);
         }
@@ -167,7 +181,8 @@ public final class CannerReactions {
         for (FluidItemReaction<ItemStack, ReactionItem> r : PositiveResistRecipes.cannerReactions()) {
             addBuiltin(r);
         }
-        YouranMod.LOG.info("装罐机反应配方：内置 {} 条，另有 {} 条只出流体的交给 IC2 原生的富集配方表", TABLE.reactions().size(), NATIVE.size());
+        YouranMod.LOG.info("装罐机反应配方：富集模式内置 {} 条，装罐模式 {} 条，另有 {} 条只出流体的交给 IC2 原生的富集配方表", TABLE.reactions().size(),
+                BOTTLING.reactions().size(), NATIVE.size());
     }
 
     /** 小撮磁粉：3 小撮铁粉（dustTinyIron）+ 5000 mB 过热蒸汽 → 1 小撮磁粉 + 20 mB 氢气 */
