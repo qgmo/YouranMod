@@ -23,7 +23,9 @@ public final class ChipQuality {
     public enum Reason {
         NONE, RESOLUTION, ALIGNMENT, DEFECT,
         /** 涂的是变质（已曝光）的光刻胶：一定报废（服主 11-16） */
-        EXPOSED_RESIST
+        EXPOSED_RESIST,
+        /** 对准时激光源用的是 DUV（ArF 激光腔 / 准分子激光光源），把涂好的胶照了：一定报废（服主 11-16） */
+        ALIGN_EXPOSED
     }
 
     /** 做这片芯片时记下的条件 */
@@ -34,6 +36,8 @@ public final class ChipQuality {
         public ResistType resist = ResistType.NEGATIVE;
         /** 有哪一层涂的是变质（已曝光）的光刻胶 */
         public boolean exposedResist;
+        /** 有哪一层涂好胶以后被对准用的 DUV 激光照过 */
+        public boolean alignExposed;
         /** 各层显影里最差的溶剂品质（0–1） */
         public double solvent = 1;
         /** 各层曝光时最差的对准率（千分比） */
@@ -111,6 +115,9 @@ public final class ChipQuality {
     public static Result evaluate(Inputs in, Random random) {
         if (in.exposedResist) {
             return new Result(Reason.EXPOSED_RESIST, 0, 0, 0);
+        }
+        if (in.alignExposed) {
+            return new Result(Reason.ALIGN_EXPOSED, 0, 0, 0);
         }
         if (effectiveResolution(in) > in.model.nodeUm) {
             return new Result(Reason.RESOLUTION, 0, 0, 0);

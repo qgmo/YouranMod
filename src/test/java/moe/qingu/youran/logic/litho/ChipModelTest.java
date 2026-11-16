@@ -22,15 +22,20 @@ class ChipModelTest {
         assertFalse(ChipModel.DRAM_4164.isCpu());
     }
 
-    /** 型号按物品元数据区分（服主 11-16）：每型一个元数据，不重、定了不改；ROM 都能做（负胶 2.5 μm 做得了） */
+    /**
+     * 型号按物品元数据区分（服主 11-16）：每型一个元数据，不重、定了不改；除了 DUV 一档的 YR-2000（0.13 μm，要 ArF 光源 + 改良正胶），
+     * 都是负胶（2.5 μm）做得了的
+     */
     @Test
     void metasAreStableAndUnique() {
         java.util.Set<Integer> seen = new java.util.HashSet<>();
         for (ChipModel m : ChipModel.values()) {
             assertTrue(seen.add(m.meta), "元数据重复：" + m);
             assertSame(m, ChipModel.byMeta(m.meta));
-            assertTrue(m.nodeUm >= 2.5, "负胶做不了：" + m);
+            assertTrue(m == ChipModel.YR2000 || m.nodeUm >= 2.5, "负胶做不了：" + m);
         }
+        assertEquals(10, ChipModel.YR2000.meta);
+        assertEquals(11, ChipModel.ROM_LASER_ALIGN.meta);
         assertEquals(0, ChipModel.Z80.meta);
         assertEquals(1, ChipModel.I8088.meta);
         assertEquals(2, ChipModel.DRAM_4164.meta);

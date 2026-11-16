@@ -13,7 +13,7 @@ import moe.qingu.youran.logic.purity.WaferMold;
  *     <li>汞（服主 11-16）：每曝光 {@link LithoNumbers#MERCURY_EXPOSURES_PER_MB} 次用掉 1 mB，用完不亮；拿出来能补到 {@link LithoNumbers#LAMP_MERCURY} mB。</li>
  * </ul>
  */
-public final class LampSpec {
+public final class LampSpec implements LightSpec {
     public final LampGlass glass;
     /** 低档玻璃管浇注用的铸模；石英管、没有记录时为 null（按粘土算） */
     public final WaferMold mold;
@@ -64,6 +64,7 @@ public final class LampSpec {
     }
 
     /** 曝光一次之后 */
+    @Override
     public LampSpec afterExposure() {
         int wear = mercuryWear + 1;
         int hg = mercury;
@@ -106,11 +107,24 @@ public final class LampSpec {
         return xenon() ? life * LithoNumbers.XENON_LIFE_PERCENT / 100 : life;
     }
 
+    @Override
     public boolean burntOut() {
         return used >= life();
     }
 
+    /** 没汞了 */
+    @Override
+    public boolean noFuel() {
+        return mercury <= 0;
+    }
+
+    @Override
+    public int exposeFePerTick() {
+        return LithoNumbers.FE_EXPOSE;
+    }
+
     /** 现在的亮度（0–1）：随用量线性变暗，到寿命时剩 {@link LithoNumbers#LAMP_END_BRIGHTNESS}，之后烧坏为 0；没汞也是 0 */
+    @Override
     public double brightness() {
         if (burntOut() || mercury <= 0) {
             return 0;
@@ -120,13 +134,9 @@ public final class LampSpec {
     }
 
     /** 这盏灯最细能做到多少 μm */
+    @Override
     public double resolutionUm() {
         return glass == LampGlass.GLASS ? LithoNumbers.GLASS_LAMP_RESOLUTION_UM : LithoNumbers.QUARTZ_LAMP_RESOLUTION_UM;
     }
 
-    /** 曝光一层要多少 tick：基准 ÷ 亮度；不亮时返回 -1 */
-    public int exposeTicks() {
-        double b = brightness();
-        return b <= 0 ? -1 : (int) Math.ceil(LithoNumbers.EXPOSE_TICKS / b);
-    }
 }
