@@ -7,7 +7,13 @@ import moe.qingu.youran.litho.LithoStatus;
 import moe.qingu.youran.logic.litho.LithoStep;
 import moe.qingu.youran.net.LithoMessages;
 import moe.qingu.youran.net.YouranNetwork;
+import moe.qingu.youran.litho.SlotHints;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.renderer.GlStateManager;
+import net.minecraft.client.renderer.RenderHelper;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.text.TextFormatting;
 import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.inventory.Slot;
@@ -39,6 +45,7 @@ public class GuiLitho extends GuiContainer {
     @Override
     public void initGui() {
         super.initGui();
+        GhostItems.clear();
         buttonList.add(new GuiButton(0, guiLeft + 132, guiTop + 87, 100, 16, I18n.format("youranmod.litho.microscope")));
     }
 
@@ -68,12 +75,18 @@ public class GuiLitho extends GuiContainer {
                 drawHoveringText(lines, mouseX, mouseY);
             }
         }
-        // 激光对准的两格空着时提示放什么
-        for (Slot slot : container.inventorySlots) {
-            if (slot instanceof net.minecraftforge.items.SlotItemHandler && ((net.minecraftforge.items.SlotItemHandler) slot).getItemHandler() == container.master.laserAligner().inventory()
-                    && !slot.getHasStack() && isPointInRegion(slot.xPos, slot.yPos, 16, 16, mouseX, mouseY)) {
-                drawHoveringText(I18n.format(slot.getSlotIndex() == moe.qingu.youran.litho.LaserAligner.SLOT_BOARD ? "youranmod.litho.slot.board"
-                        : "youranmod.litho.slot.laser"), mouseX, mouseY);
+        // 空着的格子：悬停说明它收什么、做什么用（有物品时由原版的物品说明负责）
+        Slot hovered = getSlotUnderMouse();
+        if (hovered != null && !hovered.getHasStack()) {
+            String id = container.hintId(hovered);
+            if (id != null) {
+                String key = SlotHints.key(id);
+                List<String> lines = new ArrayList<>();
+                lines.add(I18n.format(key));
+                if (I18n.hasKey(key + ".2")) {
+                    lines.add(TextFormatting.GRAY + I18n.format(key + ".2"));
+                }
+                drawHoveringText(lines, mouseX, mouseY);
             }
         }
         int ex = guiLeft + 8;
@@ -90,6 +103,7 @@ public class GuiLitho extends GuiContainer {
         for (Slot s : inventorySlots.inventorySlots) {
             LithoDraw.sunken(guiLeft + s.xPos - 1, guiTop + s.yPos - 1, 18, 18);
         }
+        drawGhosts();
         NBTTagList tanks = container.data.getTagList("Tanks", 10);
         for (int i = 0; i < ContainerLitho.TANK_X.length; i++) {
             int x = guiLeft + ContainerLitho.TANK_X[i] - 1;
@@ -112,6 +126,30 @@ public class GuiLitho extends GuiContainer {
             int pw = Math.round(98 * Math.min(1F, container.data.getInteger("Progress") / (float) req));
             LithoDraw.sunken(guiLeft + 132, guiTop + 106, 100, 6);
             drawRect(guiLeft + 133, guiTop + 107, guiLeft + 133 + pw, guiTop + 111, 0xFF40A040);
+        }
+    }
+
+    /** 空格子里画半透明的示意物品：先画物品，再盖一层格子底色（物品往下压到约 40% 的浓度） */
+    private void drawGhosts() {
+        long now = Minecraft.getSystemTime();
+        for (Slot s : inventorySlots.inventorySlots) {
+            if (s.getHasStack()) {
+                continue;
+            }
+            String id = container.hintId(s);
+            ItemStack ghost = id == null ? null : GhostItems.pick(id, now);
+            if (ghost == null) {
+                continue;
+            }
+            int x = guiLeft + s.xPos;
+            int y = guiTop + s.yPos;
+            GlStateManager.enableDepth();
+            RenderHelper.enableGUIStandardItemLighting();
+            itemRender.renderItemIntoGUI(ghost, x, y);
+            RenderHelper.disableStandardItemLighting();
+            GlStateManager.disableDepth();
+            drawRect(x, y, x + 16, y + 16, 0x998B8B8B);
+            GlStateManager.enableDepth();
         }
     }
 

@@ -1,1 +1,39 @@
-{}
+{
+  "litho.hum": {
+    "category": "block",
+    "sounds": [
+      {"name": "youranmod:ic2/machines/forcefieldloop", "stream": false}
+    ],
+    "subtitle": "youranmod.subtitle.litho.hum"
+  },
+  "litho.duv": {
+    "category": "block",
+    "sounds": [
+      {"name": "immersiveengineering:spark0", "stream": false},
+      {"name": "immersiveengineering:spark1", "stream": false},
+      {"name": "immersiveengineering:spark2", "stream": false}
+    ],
+    "subtitle": "youranmod.subtitle.litho.duv"
+  },
+  "litho.step": {
+    "category": "block",
+    "sounds": [
+      {"name": "minecraft:block.stone_button.click_on", "type": "event"}
+    ],
+    "subtitle": "youranmod.subtitle.litho.step"
+  },
+  "litho.chime": {
+    "category": "block",
+    "sounds": [
+      {"name": "minecraft:block.note.pling", "type": "event"}
+    ],
+    "subtitle": "youranmod.subtitle.litho.chime"
+  },
+  "litho.alarm": {
+    "category": "block",
+    "sounds": [
+      {"name": "youranmod:ic2/machines/machineoverload", "stream": false}
+    ],
+    "subtitle": "youranmod.subtitle.litho.alarm"
+  }
+}

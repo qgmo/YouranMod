@@ -26,6 +26,8 @@ import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.inventory.InventoryHelper;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.network.NetworkManager;
+import net.minecraft.network.play.server.SPacketUpdateTileEntity;
 import net.minecraft.nbt.NBTTagList;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.EnumFacing;
@@ -144,6 +146,18 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
     final List<UUID> microscopeViewers = new ArrayList<>();
 
     private int tickCount;
+
+    // ---- 声音（服主 11-16）----
+    private final LithoSoundCues.Hum hum = new LithoSoundCues.Hum();
+    private final LithoSoundCues.AlarmGate alarmGate = new LithoSoundCues.AlarmGate();
+    @Nullable
+    private LithoStatus lastStatus;
+    /** 嗡嗡声的模式（{@link LithoSoundCues#HUM_OFF} 等）：服务端算出来、状态变了才同步；客户端是收到的；不存档 */
+    private int humMode;
+    /** 客户端：正在放的循环声音（{@code client.litho.LithoSoundClient} 管，用 Object 免得服务端加载客户端类） */
+    @Nullable
+    public Object clientSounds;
+    private int clientTicks;
 
     static boolean is(FluidStack f, String name) {
         return f != null && f.getFluid() != null && name.equals(f.getFluid().getName());
@@ -390,6 +404,11 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         return laser.press(world.rand);
     }
 
+    /** 激光对准收敛完成、锁定（LaserAligner 调） */
+    void laserLocked() {
+        soundEvent(LithoSoundCues.EVENT_ALIGNED);
+    }
+
     public LaserAligner laserAligner() {
         return laser;
     }
@@ -419,7 +438,15 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
 
     @Override
     public void update() {
-        if (world.isRemote || !formed) {
+        if (world.isRemote) {
+            if (formed && ++clientTicks % moe.qingu.youran.client.litho.LithoSoundClient.CHECK_INTERVAL == 0) {
+                moe.qingu.youran.client.litho.LithoSoundClient.tick(this, humMode);
+            }
+            return;
+        }
+        if (!formed) {
+            hum.reset();
+            setHumMode(LithoSoundCues.HUM_OFF);
             return;
         }
         tickCount++;
@@ -439,6 +466,72 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         if (light != null) {
             light.setLit(exposing);
         }
+        setHumMode(hum.update(exposing, light != null && light.excimer()));
+        if (lastStatus != null && lastStatus != status && alarmGate.tryAlarm(lastStatus, status, world.getTotalWorldTime())) {
+            soundEvent(LithoSoundCues.EVENT_FAULT);
+        }
+        lastStatus = status;
+    }
+
+    /** 嗡嗡声现在的模式（客户端是收到的） */
+    public int humMode() {
+        return humMode;
+    }
+
+    /** 嗡嗡声模式变了才同步（随方块实体更新包，所有在看这个区块的玩家都收到，包括之后才进来的） */
+    private void setHumMode(int mode) {
+        if (mode != humMode) {
+            humMode = mode;
+            IBlockState st = world.getBlockState(pos);
+            world.notifyBlockUpdate(pos, st, st, 2);
+        }
+    }
+
+    /** 一次性的声音：方块事件，服务端只发给 64 格内的玩家 */
+    void soundEvent(int event) {
+        if (world != null && !world.isRemote) {
+            world.addBlockEvent(pos, getBlockType(), event, 0);
+        }
+    }
+
+    @Override
+    public boolean receiveClientEvent(int id, int type) {
+        if (world != null && id >= LithoSoundCues.EVENT_STEP && id <= LithoSoundCues.EVENT_FAULT) {
+            // 服务端也要返回 true，原版才把这个方块事件发给附近的玩家；只有客户端出声
+            if (world.isRemote) {
+                moe.qingu.youran.client.litho.LithoSoundClient.playOnce(this, id);
+            }
+            return true;
+        }
+        return super.receiveClientEvent(id, type);
+    }
+
+    @Override
+    public NBTTagCompound getUpdateTag() {
+        NBTTagCompound tag = super.getUpdateTag();
+        tag.setInteger("HumMode", humMode);
+        return tag;
+    }
+
+    @Override
+    public SPacketUpdateTileEntity getUpdatePacket() {
+        // 不能先 super 再取 getNbtCompound：它是只在客户端有的方法，专用服务端上调用会 NoSuchMethodError 崩服
+        NBTTagCompound tag = new NBTTagCompound();
+        writePart(tag);
+        tag.setInteger("HumMode", humMode);
+        return new SPacketUpdateTileEntity(pos, 0, tag);
+    }
+
+    @Override
+    public void onDataPacket(NetworkManager net, SPacketUpdateTileEntity pkt) {
+        super.onDataPacket(net, pkt);
+        humMode = pkt.getNbtCompound().getInteger("HumMode");
+    }
+
+    @Override
+    public void handleUpdateTag(NBTTagCompound tag) {
+        super.handleUpdateTag(tag);
+        humMode = tag.getInteger("HumMode");
     }
 
     /** 走一 tick 工序；返回这一 tick 是不是在曝光（光源发光） */
@@ -712,6 +805,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
 
     private void finishStep() {
         int layers = activeModel == null ? 1 : activeModel.layers;
+        LithoStep done = step;
         if (step == LithoStep.PACKAGE) {
             produceChip();
         }
@@ -721,6 +815,11 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         stepStarted = false;
         progress = 0;
         required = 0;
+        if (done == LithoStep.EXPOSE) {
+            soundEvent(LithoSoundCues.EVENT_STEP);
+        } else if (done == LithoStep.PACKAGE) {
+            soundEvent(LithoSoundCues.EVENT_BATCH);
+        }
         if (step == LithoStep.IDLE) {
             resetProcess();
         }
@@ -887,6 +986,8 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
                 }
             }
             formed = false;
+            hum.reset();
+            setHumMode(LithoSoundCues.HUM_OFF);
             TileLightSource light = light();
             if (light != null && pos.equals(light.master())) {
                 light.link(null);

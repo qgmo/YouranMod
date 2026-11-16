@@ -19,6 +19,11 @@ public final class Registration {
     }
 
     @SubscribeEvent
+    public static void registerSounds(RegistryEvent.Register<net.minecraft.util.SoundEvent> event) {
+        ModSounds.register(event.getRegistry());
+    }
+
+    @SubscribeEvent
     public static void registerItems(RegistryEvent.Register<Item> event) {
         ModItems.register(event.getRegistry());
     }

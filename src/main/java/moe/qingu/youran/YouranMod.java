@@ -56,6 +56,9 @@ public final class YouranMod {
         // 顺序同 1.3.4：流体与创造模式物品栏在方块、物品的注册事件之前
         // 两端都登记网络频道（同步配置；游戏内网络的网卡）
         YouranNetwork.register();
+        if (event.getSide().isClient()) {
+            moe.qingu.youran.client.ClientSetup.preInit();
+        }
         NicChannel.register();
         ModFluids.register();
         YouranTab.create();
