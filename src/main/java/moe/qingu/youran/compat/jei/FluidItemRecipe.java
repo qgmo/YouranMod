@@ -35,9 +35,17 @@ final class FluidItemRecipe implements IRecipeWrapper {
     /** 输出物品（没有为空列表） */
     final List<ItemStack> outputItems;
     private final List<String> notes;
+    /** 除 {@link #outputFluid} 以外的输出流体（精馏塔一次出几种）；多数配方为空 */
+    final List<FluidStack> extraOutputFluids;
 
     FluidItemRecipe(@Nullable FluidStack inputFluid, List<ItemStack> inputItems, @Nullable FluidStack outputFluid,
                     List<ItemStack> outputItems, List<String> notes) {
+        this(inputFluid, inputItems, outputFluid, Collections.<FluidStack>emptyList(), outputItems, notes);
+    }
+
+    FluidItemRecipe(@Nullable FluidStack inputFluid, List<ItemStack> inputItems, @Nullable FluidStack outputFluid,
+                    List<FluidStack> extraOutputFluids, List<ItemStack> outputItems, List<String> notes) {
+        this.extraOutputFluids = extraOutputFluids;
         this.inputFluid = inputFluid;
         this.inputItems = inputItems;
         this.outputFluid = outputFluid;
@@ -64,7 +72,10 @@ final class FluidItemRecipe implements IRecipeWrapper {
             ingredients.setInputLists(VanillaTypes.ITEM, Collections.singletonList(inputItems));
         }
         if (outputFluid != null) {
-            ingredients.setOutput(VanillaTypes.FLUID, outputFluid);
+            List<FluidStack> all = new java.util.ArrayList<>();
+            all.add(outputFluid);
+            all.addAll(extraOutputFluids);
+            ingredients.setOutputs(VanillaTypes.FLUID, all);
         }
         if (!outputItems.isEmpty()) {
             ingredients.setOutputs(VanillaTypes.ITEM, outputItems);

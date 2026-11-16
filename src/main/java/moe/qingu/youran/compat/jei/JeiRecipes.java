@@ -35,8 +35,19 @@ final class JeiRecipes {
 
     /** 装罐机反应配方表里的全部配方；输入、输出的流体或物品不存在的（没装对应模组）跳过 */
     static List<FluidItemRecipe> cannerReactions() {
+        return reactions(CannerReactions.TABLE.reactions());
+    }
+
+    /** 装罐模式的装罐反应（流体 + 固体 → 固体）；另加上汞灯补汞、激光腔灌氩（靠物品的流体能力，没有登记成配方） */
+    static List<FluidItemRecipe> cannerBottlings() {
+        List<FluidItemRecipe> list = reactions(CannerReactions.BOTTLING.reactions());
+        list.addAll(JeiSteps.containerFills());
+        return list;
+    }
+
+    private static List<FluidItemRecipe> reactions(List<FluidItemReaction<ItemStack, ReactionItem>> reactions) {
         List<FluidItemRecipe> list = new ArrayList<>();
-        for (FluidItemReaction<ItemStack, ReactionItem> r : CannerReactions.TABLE.reactions()) {
+        for (FluidItemReaction<ItemStack, ReactionItem> r : reactions) {
             FluidStack in = moe.qingu.youran.fluid.FluidVariants.stack(r.inputFluid(), r.inputAmount());
             if (in != null && CannerReactions.MIXTURE.equals(r.inputFluid())) {
                 // 混合气只有 9 个 9 起的（配方表按流体种类比，这里显示能做出来的最低纯度，JEI 才能连到炼油厂、冶炼炉）

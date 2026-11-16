@@ -34,7 +34,12 @@ final class Ic2Categories {
     }
 
     static IRecipeCategory<?> canner(IGuiHelper gui, String uid, ItemStack icon) {
-        return new CannerReactionCategory(gui, uid, icon);
+        return new CannerReactionCategory(gui, uid, icon, false);
+    }
+
+    /** 装罐机的“装罐”模式页：固体放在左上的“罐子”格，输入罐的流体灌进去，成品在右上格 */
+    static IRecipeCategory<?> cannerBottling(IGuiHelper gui, String uid, ItemStack icon) {
+        return new CannerReactionCategory(gui, uid, icon, true);
     }
 
     static IRecipeCategory<?> waferWashing(IGuiHelper gui, String uid, ItemStack icon) {
@@ -57,14 +62,25 @@ final class Ic2Categories {
         private static final int OUT_ITEM_X = 78;
         private static final int OUT_ITEM_Y = 0;
 
+        /** “装罐”（BottleLiquid）模式图标在界面贴图里的位置：四个模式图标每个 14 高，富集 60、固体装罐 18，按模式顺序往下排 */
+        private static final int BOTTLE_LIQUID_ICON_V = 46;
+
         private final String uid;
+        private final boolean bottling;
         private final IDrawable tankOverlay;
         @Nullable
         private final IDrawable icon;
 
-        CannerReactionCategory(IGuiHelper gui, String uid, ItemStack iconStack) {
+        CannerReactionCategory(IGuiHelper gui, String uid, ItemStack iconStack, boolean bottling) {
             super(CanningActivity.ENRICHING, gui);
             this.uid = uid;
+            this.bottling = bottling;
+            if (bottling) {
+                // 把父类画的“富集模式”图标（第二个元素）换成“装罐”模式的
+                this.elements.set(1, new ic2.core.util.Tuple.T2<IDrawable, ic2.jeiIntegration.SlotPosition>(
+                        gui.createDrawable(ic2.core.block.machine.gui.GuiCanner.texture, 176, BOTTLE_LIQUID_ICON_V, 50, 14),
+                        new ic2.jeiIntegration.SlotPosition(23, 65)));
+            }
             // 与 IC2 同一块刻度覆盖图（common.png 的 38,100，20×55，四边各出去 4 格盖住罐子的边）
             this.tankOverlay = gui.createDrawable(GuiElement.commonTexture, 38, 100, 20, 55, -4, -4, -4, -4);
             this.icon = iconStack.isEmpty() ? null : gui.createDrawableIngredient(iconStack);
@@ -77,7 +93,7 @@ final class Ic2Categories {
 
         @Override
         public String getTitle() {
-            return I18n.format("youranmod.jei.canner_reaction");
+            return I18n.format(bottling ? "youranmod.jei.canner_bottling" : "youranmod.jei.canner_reaction");
         }
 
         @Override
@@ -105,7 +121,7 @@ final class Ic2Categories {
                 fluids.set(1, recipe.outputFluid);
             }
             if (!recipe.inputItems.isEmpty()) {
-                items.init(0, true, IN_ITEM_X, IN_ITEM_Y);
+                items.init(0, true, bottling ? 0 : IN_ITEM_X, bottling ? 0 : IN_ITEM_Y);
                 items.set(0, recipe.inputItems);
             }
             if (!recipe.outputItems.isEmpty()) {

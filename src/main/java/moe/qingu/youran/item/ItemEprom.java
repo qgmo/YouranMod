@@ -94,7 +94,12 @@ public class ItemEprom extends ItemLangTooltip {
 
     @Override
     public void getSubItems(CreativeTabs tab, NonNullList<ItemStack> items) {
-        // 没有芯片数据的 EPROM 没有意义（同芯片），创造物品栏不列
+        // 没有芯片数据的 EPROM 没有意义（同芯片）；创造物品栏列一块标准的空白 EPROM（见 CreativeStandards）
+        if (isInCreativeTab(tab)) {
+            ItemStack s = new ItemStack(this);
+            s.setTagCompound(CreativeStandards.eprom());
+            items.add(s);
+        }
     }
 
     @SideOnly(Side.CLIENT)

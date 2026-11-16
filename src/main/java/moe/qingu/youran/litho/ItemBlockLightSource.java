@@ -22,6 +22,22 @@ public class ItemBlockLightSource extends ItemBlock {
         setMaxStackSize(1);
     }
 
+    /**
+     * 创造物品栏：汞灯光源带一盏标准的灯（没数据的是没装好的灯，不亮）；准分子激光光源照旧是空激光腔（不公开气体配比，
+     * 要自己灌）。取代没有数据的那个。
+     */
+    @Override
+    public void getSubItems(net.minecraft.creativetab.CreativeTabs tab, net.minecraft.util.NonNullList<ItemStack> items) {
+        if (!isInCreativeTab(tab)) {
+            return;
+        }
+        ItemStack s = new ItemStack(this);
+        if (!(getBlock() instanceof BlockLightSource && ((BlockLightSource) getBlock()).excimer)) {
+            s.setTagCompound(moe.qingu.youran.item.CreativeStandards.lamp());
+        }
+        items.add(s);
+    }
+
     @SideOnly(Side.CLIENT)
     @Override
     public void addInformation(ItemStack stack, @Nullable World world, List<String> lines, ITooltipFlag flag) {

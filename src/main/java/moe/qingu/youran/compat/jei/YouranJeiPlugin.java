@@ -41,6 +41,9 @@ public final class YouranJeiPlugin implements IModPlugin {
     static final String SOLAR_DISTILLER = YouranMod.MODID + ".solar_distiller";
     static final String DISTILLATION_TOWER = YouranMod.MODID + ".distillation_tower";
     static final String ORE_WASHING_WAFER = YouranMod.MODID + ".ore_washing_wafer";
+    /** 灌入容器（汞灯补汞、激光腔灌氩）与紫外擦除器：只展示用 */
+    static final String CANNER_BOTTLING = YouranMod.MODID + ".canner_bottling";
+    static final String UV_ERASER = YouranMod.MODID + ".uv_eraser";
     /** 匠魂冶炼炉合金的分类（匠魂自己的 JEI 插件） */
     static final String TIC_ALLOY = "tconstruct.alloy";
     /** 沉浸原油的精馏塔（多方块的“主方块”物品，沉浸原油自己的多方块示意图也用它） */
@@ -62,7 +65,11 @@ public final class YouranJeiPlugin implements IModPlugin {
             registry.addRecipeCategories(
                     Ic2Categories.canner(gui, CANNER, Ic2Machines.canner()),
                     new SolarDistillerCategory(gui, SOLAR_DISTILLER, Ic2Machines.solarDistiller()),
-                    Ic2Categories.waferWashing(gui, ORE_WASHING_WAFER, Ic2Machines.oreWashingPlant()));
+                    Ic2Categories.waferWashing(gui, ORE_WASHING_WAFER, Ic2Machines.oreWashingPlant()),
+                    Ic2Categories.cannerBottling(gui, CANNER_BOTTLING, Ic2Machines.canner()));
+        }
+        if (ModBlocks.uvEraser != null) {
+            registry.addRecipeCategories(StepCategories.uvEraser(gui, UV_ERASER, new ItemStack(ModItems.uvEraser)));
         }
         if (petroleum()) {
             registry.addRecipeCategories(PetroleumCategories.distillationTower(gui, DISTILLATION_TOWER,
@@ -72,12 +79,21 @@ public final class YouranJeiPlugin implements IModPlugin {
 
     @Override
     public void register(IModRegistry registry) {
+        ingredients = registry.getIngredientRegistry();
+        blacklist = registry.getJeiHelpers().getIngredientBlacklist();
         // 主城传送门方块的物品形式只为占住物品编号，没有模型、不该被拿到（同原版下界传送门），JEI 里不显示
         if (ModBlocks.mainCityPortal != null) {
             registry.getJeiHelpers().getIngredientBlacklist().addIngredientToBlacklist(new ItemStack(ModBlocks.mainCityPortal));
         }
         if (ic2()) {
-            registry.addRecipes(JeiRecipes.cannerReactions(), CANNER);
+            List<FluidItemRecipe> canner = new ArrayList<>(JeiRecipes.cannerReactions());
+            FluidItemRecipe uu = JeiSteps.improvedResist();
+            if (uu != null) {
+                canner.add(uu);
+            }
+            registry.addRecipes(canner, CANNER);
+            registry.addRecipes(JeiRecipes.cannerBottlings(), CANNER_BOTTLING);
+            registry.addRecipeCatalyst(Ic2Machines.canner(), CANNER_BOTTLING);
             registry.addRecipeCatalyst(Ic2Machines.canner(), CANNER);
             List<FluidItemRecipe> solar = new ArrayList<>();
             FluidItemRecipe water = JeiRecipes.fluid("water", 1, "ic2distilled_water", 1, "youranmod.jei.solar_distiller.water");
@@ -93,11 +109,23 @@ public final class YouranJeiPlugin implements IModPlugin {
         if (petroleum()) {
             registry.addRecipes(JeiRecipes.purification("youranmod.jei.distillation_tower.purify", PetroleumMachines.energy()),
                     DISTILLATION_TOWER);
+            registry.addRecipes(PetroleumMachines.allRecipes(), DISTILLATION_TOWER);
             ItemStack tower = JeiRecipes.item(IP_MULTIBLOCK, IP_TOWER_META);
             if (!tower.isEmpty()) {
                 registry.addRecipeCatalyst(tower, DISTILLATION_TOWER);
             }
         }
+        registry.addRecipes(JeiSteps.uvEraser(), UV_ERASER);
+        registry.addRecipeCatalyst(new ItemStack(ModItems.uvEraser), UV_ERASER);
+        if (Loader.isModLoaded("tconstruct")) {
+            TicSteps.register(registry);
+        }
+        registry.addIngredientInfo(JeiSteps.lampExample(), VanillaTypes.ITEM, "youranmod.jei.mercury_lamp.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.eprom), VanillaTypes.ITEM, "youranmod.jei.eprom.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.epromProgrammer), VanillaTypes.ITEM, "youranmod.jei.eprom_programmer.info");
+        registry.addIngredientInfo(JeiSteps.etchedBoards(), VanillaTypes.ITEM, "youranmod.jei.hand_punch.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.floppyJacket, 1, moe.qingu.youran.item.ItemFloppyJacket.UNPUNCHED), VanillaTypes.ITEM,
+                "youranmod.jei.hand_punch_jacket.info");
         if (ModFluids.trichlorosilane != null) {
             FluidStack fluid = FluidPurity.trichlorosilane(1000, Purity.DEFAULT_NINES);
             registry.addIngredientInfo(fluid, VanillaTypes.FLUID, "youranmod.jei.trichlorosilane.info");
@@ -136,8 +164,46 @@ public final class YouranJeiPlugin implements IModPlugin {
         subtypes.registerSubtypeInterpreter(ModItems.precisionSiliconWafer, byMold);
     }
 
+    /**
+     * 靠 NBT 区分的流体（服主 11-16：JEI 里对光刻胶按 R / U 什么都查不到）：JEI 4.16 认流体按“名字 + NBT”（{@code FluidStackHelper#getUniqueId}），
+     * 配方里登记的是带 NBT 的变种，而 JEI 列表里只有 Forge 注册的不带 NBT 的那个，两边对不上。所以把配方里用到的变种
+     * 加进 JEI 的物品列表（光刻胶负胶、正胶、改良正胶，带叠氮基的芳烃，三氯氢硅按纯度、混合气），再把不带 NBT 的光刻胶藏起来
+     * （它不是任何配方的东西）。变质的光刻胶不列。
+     */
+    private static mezz.jei.api.ingredients.IIngredientRegistry ingredients;
+    private static mezz.jei.api.ingredients.IIngredientBlacklist blacklist;
+
+    private static void addFluidVariants() {
+        if (ingredients == null) {
+            return;
+        }
+        List<FluidStack> variants = new ArrayList<>();
+        if (ModFluids.photoresist != null) {
+            for (moe.qingu.youran.logic.litho.ResistType t : moe.qingu.youran.logic.litho.ResistType.values()) {
+                variants.add(moe.qingu.youran.fluid.FluidVariants.photoresist(t, 1000));
+            }
+            blacklist.addIngredientToBlacklist(new FluidStack(ModFluids.photoresist, 1000));
+        }
+        if (ModFluids.arene != null) {
+            variants.add(moe.qingu.youran.fluid.FluidVariants.azideArene(1000));
+        }
+        if (ModFluids.trichlorosilane != null) {
+            for (int n = Purity.DEFAULT_NINES + 1; n <= Purity.WAFER_GRADE_NINES; n++) {
+                variants.add(FluidPurity.trichlorosilane(1000, n));
+            }
+        }
+        if (!variants.isEmpty()) {
+            ingredients.addIngredientsAtRuntime(VanillaTypes.FLUID, variants);
+        }
+    }
+
     @Override
     public void onRuntimeAvailable(IJeiRuntime runtime) {
+        addFluidVariants();
+        // IC2 热能离心机分铜矿偶尔多出小撮钼粉：在 JEI 里换成带钼粉的展示版
+        if (ic2()) {
+            Ic2CentrifugeSteps.apply(runtime.getRecipeRegistry());
+        }
         // 冶炼炉按纯度多登记的混合气合金配方（9 个 9 以外的）不列（炼油厂、灌装机的由沉浸工程按 listInJEI 不列）
         if (Loader.isModLoaded("tconstruct")) {
             TicHidden.hide(runtime.getRecipeRegistry(), TIC_ALLOY);

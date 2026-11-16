@@ -1,6 +1,7 @@
 package moe.qingu.youran.compat.ic2;
 
 import ic2.api.recipe.ICannerEnrichRecipeManager;
+import ic2.api.recipe.IFillFluidContainerRecipeManager;
 import ic2.api.recipe.MachineRecipe;
 import ic2.api.recipe.MachineRecipeResult;
 import ic2.core.block.machine.tileentity.TileEntityCanner;
@@ -81,6 +82,45 @@ public final class CannerReactionHooks {
         ItemStack made = r.outputItem() == null ? ItemStack.EMPTY : r.outputItem().toStack(tank.copy(), additive.copy());
         CannerReactionOutput output = new CannerReactionOutput(outputFluid(r), made);
         return new Outcome(true, new MachineRecipeResult<>(new MachineRecipe<Object, Object>(r, output), adjusted));
+    }
+
+    /**
+     * “装罐”模式（{@code Mode.BottleLiquid}）下这一 tick 要不要做装罐反应（流体 + 固体 → 固体，{@link CannerReactions#BOTTLING}）：
+     * 固体放在“罐子”格里，输入罐的流体灌进去。罐子格里是真正的流体容器（汞灯、激光腔、单元、桶）时表里对不上，照 IC2 原来的走。
+     */
+    public static Outcome getBottlingOutput(TileEntityCanner canner) {
+        ItemStack solid = canner.canInputSlot.get();
+        FluidStack tank = canner.inputTank.getFluid();
+        if (tank == null || tank.amount <= 0 || StackUtil.isEmpty(solid)) {
+            return Outcome.NOT_HANDLED;
+        }
+        ReactionPlan<ItemStack, ReactionItem> plan = CannerReactions.BOTTLING.plan(moe.qingu.youran.fluid.FluidVariants.key(tank), tank.amount, solid,
+                r -> outputsFit(canner, r));
+        if (plan.status() == ReactionPlan.Status.NO_MATCH) {
+            return Outcome.NOT_HANDLED;
+        }
+        if (plan.status() != ReactionPlan.Status.READY) {
+            return Outcome.IDLE;
+        }
+        FluidItemReaction<ItemStack, ReactionItem> r = plan.reaction();
+        FluidStack left = tank.copy();
+        left.amount -= r.inputAmount();
+        // 调整后的输入：照 IC2 装罐模式自己的写法（IFillFluidContainerRecipeManager.Input：罐子格里剩下的、输入罐里剩下的流体）
+        IFillFluidContainerRecipeManager.Input adjusted = new IFillFluidContainerRecipeManager.Input(
+                StackUtil.copyShrunk(solid, r.inputItem().count()), left.amount > 0 ? left : null);
+        ItemStack made = r.outputItem().toStack(tank.copy(), solid.copy());
+        CannerReactionOutput output = new CannerReactionOutput(null, made);
+        return new Outcome(true, new MachineRecipeResult<>(new MachineRecipe<Object, Object>(r, output), adjusted));
+    }
+
+    /** 装罐模式下“罐子”格收不收这个物品（IC2 自己收的是流体容器，不收时再问装罐反应表） */
+    public static boolean acceptsBottling(TileEntityCanner canner, ItemStack stack) {
+        if (canner.getMode() != TileEntityCanner.Mode.BottleLiquid || StackUtil.isEmpty(stack)) {
+            return false;
+        }
+        FluidStack tank = canner.inputTank.getFluid();
+        String fluid = tank == null || tank.amount <= 0 ? null : moe.qingu.youran.fluid.FluidVariants.key(tank);
+        return CannerReactions.BOTTLING.accepts(fluid, stack);
     }
 
     /** 物品输出槽、流体输出罐都放得下（IC2 的规则：{@code InvSlotOutput#canAdd}、{@code FluidTank#fill} 模拟） */

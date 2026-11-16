@@ -16,7 +16,7 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 import javax.annotation.Nullable;
 import java.util.List;
 
-/** 芯片（光刻机产出，每个都独一无二，NBT 见 {@link ChipNbt}；型号是元数据，NBT 里的 {@code Model} 照样写一份，芯片数据抄进主板、EPROM 时带着型号）。报废的名字前加“报废的”。创造模式物品栏里不列（没有参数的芯片没有意义） */
+/** 芯片（光刻机产出，每个都独一无二，NBT 见 {@link ChipNbt}；型号是元数据，NBT 里的 {@code Model} 照样写一份，芯片数据抄进主板、EPROM 时带着型号）。报废的名字前加“报废的”。创造模式物品栏里每个型号列一片标准品质的（{@link CreativeStandards}；没有参数的芯片没有意义） */
 public class ItemChip extends ItemModelled {
     public ItemChip() {
         super("chip");
@@ -35,6 +35,14 @@ public class ItemChip extends ItemModelled {
 
     @Override
     public void getSubItems(CreativeTabs tab, NonNullList<ItemStack> items) {
+        // 没有参数的芯片没有意义（没 NBT 的当不认得）：创造物品栏每个型号列一片标准品质的（见 CreativeStandards），不会报废
+        if (isInCreativeTab(tab)) {
+            for (ChipModel m : ChipModel.values()) {
+                ItemStack chip = make(m);
+                chip.setTagCompound(CreativeStandards.chip(m));
+                items.add(chip);
+            }
+        }
     }
 
     @SideOnly(Side.CLIENT)
