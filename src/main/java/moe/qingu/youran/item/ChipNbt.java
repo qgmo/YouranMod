@@ -7,6 +7,7 @@ import net.minecraft.nbt.NBTTagCompound;
 /**
  * 芯片的 NBT（服主 11-15：每个都独一无二，NBT 记各项参数）。
  * <pre>
+ * 型号是物品元数据（{@code ChipModel#meta}）；NBT 里的 {@code Model} 照样写（芯片数据抄进主板、EPROM、汉卡时靠它认型号）。
  * {Model:"z80", Serial:"Z80-3F2A9C1E", Scrapped:0b,
  *  HeatTolerance:22100,   // 耐热性 K·s（最近 1 分钟温度对时间积分的上限）
  *  MaxFreq:4870,          // 最大频率 kHz
