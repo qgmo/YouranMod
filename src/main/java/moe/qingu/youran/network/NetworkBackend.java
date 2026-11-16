@@ -26,6 +26,12 @@ public interface NetworkBackend {
     /** 登记过的主机的地址；没有为 null */
     Ipv6Address hostAddress(String key);
 
+    /** 登记过的原始主机；没有（没登记、没分到地址）为 null。任意线程 */
+    moe.qingu.youran.api.network.RawHost rawHost(String key);
+
+    /** 整个服务器内网的 /48 前缀 */
+    Ipv6Address networkPrefix();
+
     /** 递归解析器地址（设备上的协议栈只问它） */
     Ipv6Address resolverAddress();
 

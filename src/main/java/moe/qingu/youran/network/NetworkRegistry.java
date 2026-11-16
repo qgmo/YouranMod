@@ -3,6 +3,7 @@ package moe.qingu.youran.network;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.DnsZone;
 import moe.qingu.youran.api.network.HostService;
+import moe.qingu.youran.api.network.RawHostService;
 import moe.qingu.youran.api.network.SiteInfo;
 
 import java.util.ArrayList;
@@ -50,12 +51,19 @@ public final class NetworkRegistry {
         /** 指定的主机号（/96 里的低 32 位）；-1 表示按顺序分 */
         public final long fixedHost;
         public final HostService service;
+        /** 原始主机的回调；不为 null 时这是原始主机（不建协议栈，{@link #service} 为 null） */
+        public final RawHostService rawService;
 
-        HostDecl(String key, String datacenter, long fixedHost, HostService service) {
+        HostDecl(String key, String datacenter, long fixedHost, HostService service, RawHostService rawService) {
             this.key = key;
             this.datacenter = datacenter;
             this.fixedHost = fixedHost;
             this.service = service;
+            this.rawService = rawService;
+        }
+
+        public boolean isRaw() {
+            return rawService != null;
         }
     }
 
@@ -109,7 +117,11 @@ public final class NetworkRegistry {
     }
 
     public static synchronized void addHost(String key, String datacenter, long fixedHost, HostService service) {
-        hosts.add(new HostDecl(key, datacenter, fixedHost, service));
+        hosts.add(new HostDecl(key, datacenter, fixedHost, service, null));
+    }
+
+    public static synchronized void addRawHost(String key, String datacenter, long fixedHost, RawHostService service) {
+        hosts.add(new HostDecl(key, datacenter, fixedHost, null, service));
     }
 
     public static synchronized void addTld(String tld, String hostKey, DnsZone zone) {

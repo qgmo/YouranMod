@@ -60,6 +60,19 @@ public final class YouranNetworkApi {
     }
 
     /**
+     * 在机房 {@code datacenter} 里登记一个<b>原始主机</b>（{@link RawHost}）：一个 /128，进出的都是完整的 IPv6 包，
+     * 不跑协议栈。地址和普通主机一样按“模组 ID:名字”分，第一次分到以后不变；可以用 {@link #registerDomainName} 给它起名字。
+     * 网络启动时在网络线程上调用 {@code service}（每次开服一次）；运行时也可以用 {@link #rawHost} 拿到它。
+     * 原始主机上没有 YouranMod 的协议栈，不能用来跑 {@link #registerTopLevelDomain} 带 {@code zone} 的权威 DNS、也没有 {@link HostContext#tls()}。
+     */
+    public static void registerRawHost(String key, String datacenter, RawHostService service) {
+        if (service == null) {
+            throw new IllegalArgumentException("service 不能为 null");
+        }
+        NetworkRegistry.addRawHost(checkKey(key), checkHostDatacenter(datacenter), -1, service);
+    }
+
+    /**
      * 登记一个顶级域，由主机 {@code hostKey} 做它的权威服务器（根服务器把这个顶级域委派给它）。
      * {@code zone} 不为 null 时，YouranMod 在这台主机的 UDP 53 上替你跑权威 DNS 服务器、按 {@code zone} 回答；
      * 为 null 时由你自己在这台主机上跑 DNS 服务器。{@code .com}、{@code .yr} 是 YouranMod 的，不能再登记。
@@ -140,6 +153,24 @@ public final class YouranNetworkApi {
     public static Ipv6Address hostAddress(String key) {
         NetworkBackend b = NetworkHooks.backend();
         return b == null ? null : b.hostAddress(key);
+    }
+
+    /** 原始主机（{@link #registerRawHost}）；没登记、没分到地址、网络没在运行时为 null。任意线程 */
+    public static RawHost rawHost(String key) {
+        NetworkBackend b = NetworkHooks.backend();
+        return b == null ? null : b.rawHost(key);
+    }
+
+    /** 服务器内网前缀的长度（整个服务器是一个 /48） */
+    public static final int NETWORK_PREFIX_LENGTH = 48;
+
+    /**
+     * 整个服务器内网的前缀（长度 {@link #NETWORK_PREFIX_LENGTH}，如 {@code fd12:3456:789a::}）：机房、设备、玩家临时地址都在里面。
+     * 游戏外接进来的机器（原始主机）把这一段路由进来就能到网络里的所有地址。网络没在运行时为 null
+     */
+    public static Ipv6Address networkPrefix() {
+        NetworkBackend b = NetworkHooks.backend();
+        return b == null ? null : b.networkPrefix();
     }
 
     /** 递归解析器的地址（设备上的协议栈只问它） */
