@@ -73,8 +73,18 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
         }
     }
 
-    int machineSlots() {
+    public int machineSlots() {
         return 1 + LithoSlots.CONTAINERS + LithoSlots.WAFERS + 6 + LithoSlots.OUTPUTS + 2 + LaserAligner.SLOTS;
+    }
+
+    /** 这个格子（空着时）的提示编号（{@link SlotHints}）；玩家背包格、输出格为 null */
+    @javax.annotation.Nullable
+    public String hintId(Slot slot) {
+        if (slot.slotNumber >= machineSlots() || !(slot instanceof SlotItemHandler)) {
+            return null;
+        }
+        return ((SlotItemHandler) slot).getItemHandler() == master.laserAligner().inventory()
+                ? SlotHints.forLaserSlot(slot.getSlotIndex()) : SlotHints.forMachineSlot(slot.getSlotIndex());
     }
 
     @Override
