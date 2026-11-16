@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 /**
  * 系统确认框的服务端账本（只在主线程上用；纯逻辑，时间、玩家在不在线、发给客户端都经 {@link Env}，单元测试换成假的）。
  * 每个玩家同一时间最多一个；到时限按拒绝；操作者变了作废；只收被问的玩家、题号对得上的回应。
+ * 调用方 {@code cancel} 了返回的 future 就撤回这个框（叫客户端关掉，不再占着这个玩家）。
  */
 final class ConfirmPrompts {
     /** 外面的东西 */
@@ -66,6 +67,11 @@ final class ConfirmPrompts {
         if (player == null || !env.isOnline(player) || !player.equals(operatorNow.get())) {
             return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
         }
+        Pending old = byPlayer.get(player);
+        if (old != null && old.future.isCancelled()) {
+            // 调用方撤回了（例如 id.yr 的“重新弹出”）：先关掉旧的
+            finish(old, ConfirmResult.Outcome.UNAVAILABLE, true);
+        }
         if (byPlayer.containsKey(player)) {
             return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.BUSY, player, name));
         }
@@ -86,7 +92,9 @@ final class ConfirmPrompts {
         }
         long now = env.nowMillis();
         for (Pending p : new ArrayList<>(byPlayer.values())) {
-            if (!stillValid(p)) {
+            if (p.future.isCancelled()) {
+                finish(p, ConfirmResult.Outcome.UNAVAILABLE, true);
+            } else if (!stillValid(p)) {
                 finish(p, ConfirmResult.Outcome.OPERATOR_CHANGED, true);
             } else if (now >= p.deadline) {
                 finish(p, ConfirmResult.Outcome.TIMEOUT, true);

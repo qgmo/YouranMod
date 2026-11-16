@@ -735,8 +735,17 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                 out.complete(new ConfirmResult(ConfirmResult.Outcome.UNAVAILABLE, null, null));
                 return;
             }
+            if (out.isCancelled()) {
+                return;
+            }
             CompletableFuture<ConfirmResult> f = source != null ? confirmSource(p, source, request) : confirmPlayer(p, player, request);
             f.whenComplete((r, e) -> out.complete(r != null ? r : new ConfirmResult(ConfirmResult.Outcome.UNAVAILABLE, null, null)));
+            // 调用方撤回：框还开着就关掉（下一 tick，或同一个人再弹框时）
+            out.whenComplete((r, e) -> {
+                if (out.isCancelled()) {
+                    f.cancel(false);
+                }
+            });
         });
         return out;
     }
