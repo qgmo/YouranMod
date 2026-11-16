@@ -9,10 +9,12 @@ import net.minecraftforge.fml.common.network.IGuiHandler;
 
 import javax.annotation.Nullable;
 
-/** 光刻机的两个界面：主界面、对准显微镜。界面编号 1、2（本模组只有这两个） */
+/** 本模组的界面：光刻机的主界面、对准显微镜（1、2），紫外擦除器（3） */
 public class LithoGuiHandler implements IGuiHandler {
     public static final int MAIN = 1;
     public static final int MICROSCOPE = 2;
+    /** 紫外擦除器（服主 11-16） */
+    public static final int UV_ERASER = 3;
 
     public static void openMain(EntityPlayer player, World world, BlockPos master) {
         player.openGui(YouranMod.instance, MAIN, world, master.getX(), master.getY(), master.getZ());
@@ -20,6 +22,16 @@ public class LithoGuiHandler implements IGuiHandler {
 
     public static void openMicroscope(EntityPlayer player, World world, BlockPos master) {
         player.openGui(YouranMod.instance, MICROSCOPE, world, master.getX(), master.getY(), master.getZ());
+    }
+
+    @Nullable
+    static moe.qingu.youran.pcb.TileUvEraser uvEraser(World world, int x, int y, int z) {
+        BlockPos p = new BlockPos(x, y, z);
+        if (!world.isBlockLoaded(p)) {
+            return null;
+        }
+        TileEntity te = world.getTileEntity(p);
+        return te instanceof moe.qingu.youran.pcb.TileUvEraser ? (moe.qingu.youran.pcb.TileUvEraser) te : null;
     }
 
     @Nullable
@@ -35,6 +47,10 @@ public class LithoGuiHandler implements IGuiHandler {
     @Nullable
     @Override
     public Object getServerGuiElement(int id, EntityPlayer player, World world, int x, int y, int z) {
+        if (id == UV_ERASER) {
+            moe.qingu.youran.pcb.TileUvEraser t = uvEraser(world, x, y, z);
+            return t == null || !t.usableBy(player) ? null : new moe.qingu.youran.pcb.ContainerUvEraser(player.inventory, t);
+        }
         TileLithoMaster m = master(world, x, y, z);
         if (m == null || !m.usableBy(player)) {
             return null;
@@ -51,6 +67,10 @@ public class LithoGuiHandler implements IGuiHandler {
     @Nullable
     @Override
     public Object getClientGuiElement(int id, EntityPlayer player, World world, int x, int y, int z) {
+        if (id == UV_ERASER) {
+            moe.qingu.youran.pcb.TileUvEraser t = uvEraser(world, x, y, z);
+            return t == null ? null : new moe.qingu.youran.client.pcb.GuiUvEraser(new moe.qingu.youran.pcb.ContainerUvEraser(player.inventory, t));
+        }
         TileLithoMaster m = master(world, x, y, z);
         if (m == null) {
             return null;

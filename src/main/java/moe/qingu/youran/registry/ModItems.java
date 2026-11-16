@@ -94,6 +94,14 @@ public final class ModItems {
     public static Item smallMolybdenumDust;
     public static Item molybdenumDust;
     public static Item mercuryLightSource;
+    /** 主板线（服主 11-16）：酚醛基板、三氯化铁粉、线路板（各道工序按元数据）、线路底片、冲孔模具、EPROM、紫外擦除器 */
+    public static Item phenolicSubstrate;
+    public static Item ferricChlorideDust;
+    public static moe.qingu.youran.item.ItemPcb pcb;
+    public static moe.qingu.youran.item.ItemPcbFilm pcbFilm;
+    public static Item punchMold;
+    public static moe.qingu.youran.item.ItemEprom eprom;
+    public static Item uvEraser;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -185,6 +193,14 @@ public final class ModItems {
         net.minecraftforge.oredict.OreDictionary.registerOre("dustMolybdenum", molybdenumDust);
         alignmentTable = add(registry, itemBlock(ModBlocks.alignmentTable));
         mercuryLightSource = add(registry, new moe.qingu.youran.litho.ItemBlockLightSource(ModBlocks.mercuryLightSource));
+        phenolicSubstrate = add(registry, new moe.qingu.youran.item.ItemLangTooltip("phenolic_substrate", 64));
+        ferricChlorideDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("ferric_chloride_dust", 64));
+        net.minecraftforge.oredict.OreDictionary.registerOre("dustFerricChloride", ferricChlorideDust);
+        pcb = (moe.qingu.youran.item.ItemPcb) add(registry, new moe.qingu.youran.item.ItemPcb());
+        pcbFilm = (moe.qingu.youran.item.ItemPcbFilm) add(registry, new moe.qingu.youran.item.ItemPcbFilm());
+        punchMold = add(registry, new moe.qingu.youran.item.ItemLangTooltip("punch_mold", 1));
+        eprom = (moe.qingu.youran.item.ItemEprom) add(registry, new moe.qingu.youran.item.ItemEprom());
+        uvEraser = add(registry, itemBlock(ModBlocks.uvEraser));
     }
 
     private static Item itemBlock(Block block) {

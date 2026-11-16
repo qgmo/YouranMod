@@ -19,7 +19,7 @@ class AlchemistryCompatTest {
             assertTrue(c.meta > 512, c.name);
             assertTrue(metas.add(c.meta), c.name);
         }
-        assertEquals(5, AlchemistryCompat.COMPOUNDS.size());
+        assertEquals(6, AlchemistryCompat.COMPOUNDS.size());
         assertSpec(0, "triiron_tetroxide", 600, "iron", 3, "oxygen", 4);
         assertSpec(1, "acetic_acid", 601, "carbon", 2, "hydrogen", 4, "oxygen", 2);
         assertSpec(2, "cellulose_acetate", 602, "carbon", 12, "hydrogen", 16, "oxygen", 8);
@@ -27,6 +27,8 @@ class AlchemistryCompatTest {
         assertSpec(3, "borate", 603, "boron", 1, "oxygen", 3);
         // 服主 11-15：四氯化锡，锡 1 氯 4（光刻胶线）
         assertSpec(4, "tin_tetrachloride", 604, "tin", 1, "chlorine", 4);
+        // 服主 11-16：三氯化铁，铁 1 氯 3（主板蚀刻）
+        assertSpec(5, "ferric_chloride", 605, "iron", 1, "chlorine", 3);
     }
 
     private static void assertSpec(int i, String name, int meta, Object... components) {

@@ -30,6 +30,8 @@ public final class ModBlocks {
     public static Block alignmentTable;
     public static Block mercuryLightSource;
     public static Block lithoPart;
+    /** 紫外擦除器（服主 11-16）：擦 EPROM、给涂胶主板曝光 */
+    public static Block uvEraser;
 
     private ModBlocks() {
     }
@@ -53,6 +55,10 @@ public final class ModBlocks {
         mercuryLightSource = new moe.qingu.youran.litho.BlockLightSource("mercury_light_source");
         lithoPart = new moe.qingu.youran.litho.BlockLithoPart("lithography_machine");
         registry.registerAll(alignmentTable, mercuryLightSource, lithoPart);
+        uvEraser = new moe.qingu.youran.pcb.BlockUvEraser("uv_eraser");
+        registry.register(uvEraser);
+        net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.pcb.TileUvEraser.class,
+                new net.minecraft.util.ResourceLocation("youranmod", "uv_eraser"));
         net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.litho.TileLightSource.class,
                 new net.minecraft.util.ResourceLocation("youranmod", "mercury_light_source"));
         net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.litho.TileLithoPart.class,

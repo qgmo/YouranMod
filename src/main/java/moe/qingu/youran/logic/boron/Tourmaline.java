@@ -65,7 +65,7 @@ public enum Tourmaline {
         public final int count;
         public final int percent;
 
-        Portion(String name, int count, int percent) {
+        public Portion(String name, int count, int percent) {
             this.name = name;
             this.count = count;
             this.percent = percent;

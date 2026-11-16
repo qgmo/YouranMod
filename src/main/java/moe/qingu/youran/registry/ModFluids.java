@@ -33,6 +33,10 @@ public final class ModFluids {
     public static Fluid argon;
     /** 液氙（服主 11-16）：沉浸工程挤压机挤 IC2 枯竭燃料棒得到，165 K，没有流体方块 */
     public static Fluid xenon;
+    /** 主板线（服主 11-16，这一轮只加这三种流体）：乙醛、酚醛树脂、三氯化铁水溶液；都没有流体方块 */
+    public static Fluid acetaldehyde;
+    public static Fluid phenolicResin;
+    public static Fluid ferricChloride;
 
     private ModFluids() {
     }
@@ -71,6 +75,15 @@ public final class ModFluids {
                 .setDensity(950).setViscosity(8000));
         argon = registerArgon();
         xenon = registerXenon();
+        // 乙醛：0.784 g/cm³、约 0.22 mPa·s，沸点 20 ℃（按液体算）；酚醛树脂（线性酚醛的溶液）很稠；三氯化铁水溶液 约 1.4 g/cm³
+        acetaldehyde = noBlock(fluid("acetaldehyde", "acetaldehyde").setDensity(784).setViscosity(220));
+        phenolicResin = noBlock(fluid("phenolic_resin", "phenolic_resin").setDensity(1200).setViscosity(50000));
+        ferricChloride = noBlock(fluid("ferric_chloride", "ferric_chloride").setDensity(1400).setViscosity(1100));
+    }
+
+    /** 主板线的流体 */
+    public static Fluid[] pcbFluids() {
+        return new Fluid[]{acetaldehyde, phenolicResin, ferricChloride};
     }
 
     /** 液氩：别的模组已经注册了 argon 时用它的 */
