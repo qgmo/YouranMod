@@ -76,6 +76,11 @@ public class LaserAligner {
         this.master = master;
     }
 
+    /** 两个格（{@link #SLOT_BOARD}、{@link #SLOT_LASER}）：只给界面用，不进任何能力 */
+    public net.minecraftforge.items.IItemHandler inventory() {
+        return inv;
+    }
+
     /** 激光源格收的东西：氦氖激光管；ArF 激光腔、准分子激光光源也收（不拦，会把胶照了） */
     public static boolean isLaserSource(ItemStack s) {
         return !s.isEmpty() && (s.getItem() instanceof ItemHeNeTube || isDuv(s));

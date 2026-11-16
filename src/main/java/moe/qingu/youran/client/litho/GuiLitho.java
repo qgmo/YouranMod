@@ -69,12 +69,11 @@ public class GuiLitho extends GuiContainer {
             }
         }
         // 激光对准的两格空着时提示放什么
-        for (int i = 0; i < 2; i++) {
-            int x = guiLeft + ContainerLitho.BOARD_X + i * 18;
-            int y = guiTop + 18;
-            Slot slot = container.getSlot(container.inventorySlots.size() - 36 - 2 + i);
-            if (!slot.getHasStack() && mouseX >= x - 1 && mouseX < x + 17 && mouseY >= y - 1 && mouseY < y + 17) {
-                drawHoveringText(I18n.format(i == 0 ? "youranmod.litho.slot.board" : "youranmod.litho.slot.laser"), mouseX, mouseY);
+        for (Slot slot : container.inventorySlots) {
+            if (slot instanceof net.minecraftforge.items.SlotItemHandler && ((net.minecraftforge.items.SlotItemHandler) slot).getItemHandler() == container.master.laserAligner().inventory()
+                    && !slot.getHasStack() && isPointInRegion(slot.xPos, slot.yPos, 16, 16, mouseX, mouseY)) {
+                drawHoveringText(I18n.format(slot.getSlotIndex() == moe.qingu.youran.litho.LaserAligner.SLOT_BOARD ? "youranmod.litho.slot.board"
+                        : "youranmod.litho.slot.laser"), mouseX, mouseY);
             }
         }
         int ex = guiLeft + 8;
@@ -120,7 +119,8 @@ public class GuiLitho extends GuiContainer {
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         fontRenderer.drawString(I18n.format("youranmod.litho.title"), 8, 6, LithoDraw.TEXT);
         fontRenderer.drawString(I18n.format("youranmod.litho.slot.mask"), 132, 9, LithoDraw.TEXT, false);
-        fontRenderer.drawString(I18n.format("youranmod.litho.slot.laser_align"), ContainerLitho.BOARD_X, 9, LithoDraw.TEXT, false);
+        fontRenderer.drawString(I18n.format("youranmod.litho.slot.laser_align"), ContainerLitho.BOARD_X - 4 - fontRenderer.getStringWidth(
+                I18n.format("youranmod.litho.slot.laser_align")), ContainerLitho.BOARD_Y + 4, LithoDraw.TEXT, false);
         NBTTagCompound d = container.data;
         LithoStep step = LithoStep.byOrdinal(d.getInteger("Step"));
         int layers = d.getInteger("Layers");
