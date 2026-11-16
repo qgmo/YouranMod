@@ -382,6 +382,7 @@ item.ferric_chloride_dust.tooltip=Ferric chloride (FeCl₃) dust. Dissolved in w
 youranmod.board.computer=Computer
 youranmod.board.pc=Personal Computer
 youranmod.board.hanzi=Hanzi Card
+youranmod.board.furniture=Furniture Computer
 item.pcb.blank.name=Blank Circuit Board
 item.pcb.blank.tooltip=A copper-clad phenolic board with no traces yet.
 item.pcb.coated.name=Resist-Coated Board

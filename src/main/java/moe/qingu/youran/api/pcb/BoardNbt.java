@@ -9,16 +9,17 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /**
- * 装了芯片的板子（主板、汉卡）的数据（服主 11-16：芯片品质数据都带进主板，再带进电脑方块，供以后“芯片品质接进电脑”用）。
+ * 装了芯片的板子（主板、汉卡、家具电脑主板）的数据（服主 11-16：芯片品质数据都带进主板，再带进电脑方块，供以后“芯片品质接进电脑”用）。
  * 在物品 NBT 的 {@value #TAG} 里：
  * <pre>
  * {Type:"computer",
- *  Cpu:{芯片 NBT},                         // CPU（普通电脑 Z80、个人电脑 8088）
+ *  Cpu:{芯片 NBT},                         // CPU（普通电脑 Z80、个人电脑 8088、家具电脑 YR-2000）
  *  Rom:{芯片 NBT…, Content:{RomContent}},   // ROM：掩模 ROM 或 EPROM（EPROM 另有 Eprom:1b、Window:{玻璃管}）
  *  Ram:[{芯片 NBT}, …],                     // 4164：普通电脑 6 颗、个人电脑 20 颗
  *  Font:[{芯片 NBT} ×4]}                    // 汉卡：字库 ROM 1–4
  * </pre>
  * 芯片 NBT 同光刻机出来的芯片（{@code item.ChipNbt}，带 {@code Model}）。
+ * 家具电脑主板（{@code Type:"furniture"}，服主 11-16）只有 {@code Cpu}（YR-2000），没有 ROM、内存。
  */
 public final class BoardNbt {
     public static final String TAG = "Board";
@@ -37,15 +38,15 @@ public final class BoardNbt {
     /** 这种板子要的 CPU；不要 CPU 时 null */
     @Nullable
     public static ChipModel cpu(BoardType t) {
-        return t == BoardType.COMPUTER ? ChipModel.Z80 : t == BoardType.PC ? ChipModel.I8088 : null;
+        return t == BoardType.COMPUTER ? ChipModel.Z80 : t == BoardType.PC ? ChipModel.I8088 : t == BoardType.FURNITURE ? ChipModel.YR2000 : null;
     }
 
-    /** 要几颗 4164（服主 11-16：普通电脑 6 颗 = 48 KB，个人电脑简化成 20 颗） */
+    /** 要几颗 4164（服主 11-16：普通电脑 6 颗 = 48 KB，个人电脑简化成 20 颗；家具电脑不插） */
     public static int ramCount(BoardType t) {
         return t == BoardType.COMPUTER ? 6 : t == BoardType.PC ? 20 : 0;
     }
 
-    /** 这种主板的 ROM 槽认的掩模 ROM（EPROM 也认）；没有 ROM 槽时 null */
+    /** 这种主板的 ROM 槽认的掩模 ROM（EPROM 也认）；没有 ROM 槽（汉卡、家具电脑主板）时 null */
     @Nullable
     public static ChipModel romMask(BoardType t) {
         return t == BoardType.COMPUTER ? ChipModel.ROM_MONITOR : t == BoardType.PC ? ChipModel.ROM_BIOS : null;
@@ -127,7 +128,34 @@ public final class BoardNbt {
         if (t == BoardType.HANZI) {
             return fontCount(b) == fonts(t).length;
         }
-        return hasCpu(b) && hasRom(b) && ram(b) == ramCount(t);
+        return (cpu(t) == null || hasCpu(b)) && (romMask(t) == null || hasRom(b)) && ram(b) == ramCount(t);
+    }
+
+    /**
+     * CPU 实际跑的频率（kHz）：设定的频率 {@code settingKHz}，被这片芯片的最大频率封顶（服主 11-16，家具电脑：先按标准频率，
+     * 芯片的最大频率比它低就按最大频率）。没装 CPU、CPU 报废了（没有最大频率）为 0。
+     */
+    public static int cpuClockKHz(NBTTagCompound b, int settingKHz) {
+        if (!hasCpu(b)) {
+            return 0;
+        }
+        NBTTagCompound cpu = b.getCompoundTag(CPU);
+        if (cpu.getBoolean(moe.qingu.youran.item.ChipNbt.SCRAPPED)) {
+            return 0;
+        }
+        int max = cpu.getInteger(moe.qingu.youran.item.ChipNbt.MAX_FREQ);
+        return Math.max(0, Math.min(settingKHz, max));
+    }
+
+    /** 这片 CPU 的标准频率（kHz）：芯片数据里写的，没写时按型号 */
+    public static int cpuStandardKHz(NBTTagCompound b) {
+        NBTTagCompound cpu = b.getCompoundTag(CPU);
+        int std = cpu.getInteger(moe.qingu.youran.item.ChipNbt.STD_FREQ);
+        if (std > 0) {
+            return std;
+        }
+        ChipModel m = ChipModel.byId(cpu.getString(ChipModel.TAG));
+        return m == null ? 0 : m.ratedKHz;
     }
 
     /** 一片要装的芯片：型号、芯片 NBT；ROM 另带内容（掩模 ROM 是那种掩模，EPROM 是烧进去的） */

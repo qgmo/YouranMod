@@ -88,4 +88,56 @@ class BoardNbtTest {
                 "同一片字库 ROM 不能装两片");
         assertNull(BoardNbt.install(BoardNbt.empty(BoardType.HANZI), rams(1)));
     }
+
+    static BoardNbt.Part cpu(ChipModel m, int maxFreq, boolean scrapped) {
+        NBTTagCompound t = new NBTTagCompound();
+        t.setString(ChipModel.TAG, m.id);
+        t.setString("Serial", m.id + "-1");
+        t.setBoolean("Scrapped", scrapped);
+        if (!scrapped) {
+            t.setInteger("MaxFreq", maxFreq);
+        }
+        if (m.isCpu()) {
+            t.setInteger("StdFreq", m.ratedKHz);
+        }
+        return new BoardNbt.Part(m, t);
+    }
+
+    /** 家具电脑主板（服主 11-16）：只装一片 YR-2000 就齐了，不收 ROM、内存、别的 CPU */
+    @Test
+    void furnitureBoardIsJustTheCpu() {
+        NBTTagCompound empty = BoardNbt.empty(BoardType.FURNITURE);
+        assertFalse(BoardNbt.complete(empty));
+        NBTTagCompound b = BoardNbt.install(empty, Collections.singletonList(cpu(ChipModel.YR2000, 2_100_000, false)));
+        assertNotNull(b);
+        assertTrue(BoardNbt.complete(b));
+        assertEquals(BoardType.FURNITURE, BoardNbt.type(b));
+        assertNull(BoardNbt.install(b, Collections.singletonList(cpu(ChipModel.YR2000, 2_100_000, false))), "只有一个 CPU 位");
+        assertNull(BoardNbt.install(empty, Collections.singletonList(cpu(ChipModel.I8088, 5000, false))), "不收 8088");
+        assertNull(BoardNbt.install(empty, rams(1)), "不插内存");
+        assertNull(BoardNbt.install(empty, Collections.singletonList(chip(ChipModel.ROM_BIOS, "bios"))), "不插 ROM");
+        // 个人电脑主板也不收 YR-2000
+        assertNull(BoardNbt.install(BoardNbt.empty(BoardType.PC), Collections.singletonList(cpu(ChipModel.YR2000, 2_100_000, false))));
+        // 报废的照样装得上（同别的主板），开机时才知道
+        assertTrue(BoardNbt.complete(BoardNbt.install(empty, Collections.singletonList(cpu(ChipModel.YR2000, 0, true)))));
+    }
+
+    /** 实际频率：设定的频率被芯片的最大频率封顶；报废、没装 CPU 为 0 */
+    @Test
+    void cpuClockIsCappedByMaxFrequency() {
+        NBTTagCompound fast = BoardNbt.install(BoardNbt.empty(BoardType.FURNITURE), Collections.singletonList(cpu(ChipModel.YR2000, 2_400_000, false)));
+        NBTTagCompound slow = BoardNbt.install(BoardNbt.empty(BoardType.FURNITURE), Collections.singletonList(cpu(ChipModel.YR2000, 1_730_000, false)));
+        NBTTagCompound dead = BoardNbt.install(BoardNbt.empty(BoardType.FURNITURE), Collections.singletonList(cpu(ChipModel.YR2000, 0, true)));
+        assertEquals(2_000_000, BoardNbt.cpuStandardKHz(fast));
+        assertEquals(2_000_000, BoardNbt.cpuClockKHz(fast, 2_000_000));
+        assertEquals(1_730_000, BoardNbt.cpuClockKHz(slow, 2_000_000));
+        assertEquals(0, BoardNbt.cpuClockKHz(dead, 2_000_000));
+        assertEquals(0, BoardNbt.cpuClockKHz(BoardNbt.empty(BoardType.FURNITURE), 2_000_000));
+        // 芯片数据里没写标准频率时按型号
+        NBTTagCompound bare = BoardNbt.empty(BoardType.FURNITURE);
+        NBTTagCompound c = new NBTTagCompound();
+        c.setString(ChipModel.TAG, "yr2000");
+        bare.setTag(BoardNbt.CPU, c);
+        assertEquals(ChipModel.YR2000.ratedKHz, BoardNbt.cpuStandardKHz(bare));
+    }
 }

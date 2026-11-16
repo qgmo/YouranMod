@@ -72,7 +72,7 @@ public final class PcbRecipes {
             l.add(new FluidItemReaction<>(FluidVariants.photoresistKey(r, true), PcbNumbers.COAT_RESIST, ItemIngredient.item(pcb, PcbStage.BLANK, 1),
                     null, 0, new ReactionItem(pcb, PcbStage.COATED_SPOILED, 1, null)));
         }
-        for (BoardType t : BoardType.values()) {
+        for (BoardType t : BoardType.circuits()) {
             for (boolean spoiled : new boolean[]{false, true}) {
                 int in = PcbStage.exposed(t, spoiled);
                 l.add(new FluidItemReaction<>("ferric_chloride", PcbNumbers.ETCH_FECL3, ItemIngredient.item(pcb, in, 1),
@@ -98,7 +98,7 @@ public final class PcbRecipes {
         // 手工打孔：光板 + 螺丝刀 → 打好孔的光板（螺丝刀还回，25% 打坏）
         Item screwdriver = ForgeRegistries.ITEMS.getValue(new ResourceLocation(SCREWDRIVER));
         if (screwdriver != null) {
-            for (BoardType t : BoardType.values()) {
+            for (BoardType t : BoardType.circuits()) {
                 ResourceLocation id = new ResourceLocation(YouranMod.MODID, "pcb_hand_punch_" + t.name);
                 registry.register(new ScrewdriverPunch(id, new ItemStack(ModItems.pcb, 1, PcbStage.etched(t)), new ItemStack(screwdriver),
                         new ItemStack(ModItems.pcb, 1, PcbStage.punched(t)), PcbStage.SCRAP, PcbNumbers.HAND_PUNCH_BREAK));
@@ -228,7 +228,7 @@ public final class PcbRecipes {
                 blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe.addRecipe(new ItemStack(ModItems.pcb, 1, PcbStage.COATED_SPOILED),
                         new ItemStack(ModItems.pcb, 1, PcbStage.BLANK), FluidVariants.photoresist(r, PcbNumbers.COAT_RESIST, true));
             }
-            for (BoardType t : BoardType.values()) {
+            for (BoardType t : BoardType.circuits()) {
                 for (boolean spoiled : new boolean[]{false, true}) {
                     int in = PcbStage.exposed(t, spoiled);
                     blusunrize.immersiveengineering.api.crafting.BottlingMachineRecipe.addRecipe(new ItemStack(ModItems.pcb, 1, PcbStage.afterEtching(in)),
@@ -260,7 +260,7 @@ public final class PcbRecipes {
             blusunrize.immersiveengineering.api.crafting.MetalPressRecipe.addRecipe(new ItemStack(ModItems.floppyJacket, 1,
                     moe.qingu.youran.item.ItemFloppyJacket.PUNCHED), new ItemStack(ModItems.pvcLump), mold, PcbNumbers.PRESS_ENERGY)
                     .setInputSize(PcbNumbers.JACKET_LUMPS);
-            for (BoardType t : BoardType.values()) {
+            for (BoardType t : BoardType.circuits()) {
                 blusunrize.immersiveengineering.api.crafting.MetalPressRecipe.addRecipe(new ItemStack(ModItems.pcb, 1, PcbStage.punched(t)),
                         new ItemStack(ModItems.pcb, 1, PcbStage.etched(t)), mold, PcbNumbers.PRESS_ENERGY);
             }

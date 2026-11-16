@@ -382,6 +382,7 @@ item.ferric_chloride_dust.tooltip=三氯化鐵（FeCl₃）粉，溶在水裡用
 youranmod.board.computer=普通電腦
 youranmod.board.pc=個人電腦
 youranmod.board.hanzi=漢卡
+youranmod.board.furniture=家具電腦
 item.pcb.blank.name=空白主機板
 item.pcb.blank.tooltip=覆了銅的酚醛基板，還沒有線路。
 item.pcb.coated.name=塗膠主機板

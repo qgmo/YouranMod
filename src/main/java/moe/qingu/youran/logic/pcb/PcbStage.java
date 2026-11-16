@@ -12,7 +12,7 @@ import javax.annotation.Nullable;
  * 32 + 种类  光板（三氯化铁蚀刻出线路，没孔、没零件）
  * 48 + 种类  打好孔的光板（手工螺丝刀或冲床冲孔模具）
  * </pre>
- * 种类见 {@link BoardType}。变质胶（已经感光、整片交联）照样能曝光，但蚀刻时整块铜都被保护着，出不来线路，蚀刻出来就是报废主板。
+ * 种类见 {@link BoardType}（只有有自己线路的几种，{@link BoardType#circuits()}）。变质胶（已经感光、整片交联）照样能曝光，但蚀刻时整块铜都被保护着，出不来线路，蚀刻出来就是报废主板。
  * 纯逻辑，测试见 {@code PcbStageTest}。
  */
 public final class PcbStage {
@@ -68,7 +68,7 @@ public final class PcbStage {
         if (base != EXPOSED && base != EXPOSED_SPOILED && base != ETCHED && base != PUNCHED) {
             return null;
         }
-        return BoardType.byId(meta & 7);
+        return BoardType.circuitById(meta & 7);
     }
 
     /** 涂的是变质胶（涂胶后、曝光后两道） */
@@ -95,7 +95,7 @@ public final class PcbStage {
     public static int[] all() {
         java.util.List<Integer> l = new java.util.ArrayList<>(java.util.Arrays.asList(BLANK, COATED, COATED_SPOILED, SCRAP));
         for (int base : new int[]{EXPOSED, EXPOSED_SPOILED, ETCHED, PUNCHED}) {
-            for (BoardType t : BoardType.values()) {
+            for (BoardType t : BoardType.circuits()) {
                 l.add(base + t.id);
             }
         }

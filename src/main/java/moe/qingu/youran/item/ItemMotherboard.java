@@ -19,8 +19,8 @@ import java.util.List;
 
 /**
  * 主板（服主 11-16）：打好孔的光板在工程师装配台“主板”蓝图上装芯片，一次一块（芯片的品质数据都记进来，{@link BoardNbt}）。
- * 元数据 = 种类（普通电脑 0、个人电脑 1）。装配台只有 6 个输入格、芯片一片一格，所以分几次装：CPU、ROM、内存（一次最多 5 颗），
- * 装齐了（{@link BoardNbt#complete}）才能合成电脑。
+ * 元数据 = 种类（普通电脑 0、个人电脑 1、家具电脑 3）。装配台只有 6 个输入格、芯片一片一格，所以分几次装：CPU、ROM、内存（一次最多 5 颗），
+ * 装齐了（{@link BoardNbt#complete}）才能合成电脑。家具电脑主板是打好孔的个人电脑光板装一片 YR-2000（服主 11-16），一次就装齐。
  */
 public class ItemMotherboard extends Item implements MetaModelled {
     public ItemMotherboard() {
@@ -85,11 +85,12 @@ public class ItemMotherboard extends Item implements MetaModelled {
 
     @Override
     public int[] modelMetas() {
-        return new int[]{BoardType.COMPUTER.id, BoardType.PC.id};
+        return new int[]{BoardType.COMPUTER.id, BoardType.PC.id, BoardType.FURNITURE.id};
     }
 
     @Override
     public String modelName(int meta) {
-        return "motherboard_" + (meta == BoardType.PC.id ? "pc" : "computer");
+        BoardType t = BoardType.byId(meta);
+        return "motherboard_" + (t != null && t.motherboard ? t.name : "computer");
     }
 }
