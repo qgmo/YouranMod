@@ -247,6 +247,13 @@ public class BlockLithoPart extends Block {
         return !stack.isEmpty() && stack.getItem().getToolClasses(stack).contains("IE_HAMMER");
     }
 
+    /** 方块事件交给方块实体（原版只有 BlockContainer 才转交；光刻机的一次性声音走这里，服务端返回 true 才会发给附近的玩家） */
+    @Override
+    public boolean eventReceived(IBlockState state, World world, BlockPos pos, int id, int param) {
+        TileEntity te = world.getTileEntity(pos);
+        return te != null && te.receiveClientEvent(id, param);
+    }
+
     @Override
     public boolean onBlockActivated(World world, BlockPos pos, IBlockState state, EntityPlayer player, EnumHand hand, EnumFacing side,
                                     float hitX, float hitY, float hitZ) {

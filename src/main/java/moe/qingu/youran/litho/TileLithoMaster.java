@@ -496,8 +496,11 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
 
     @Override
     public boolean receiveClientEvent(int id, int type) {
-        if (world != null && world.isRemote && id >= LithoSoundCues.EVENT_STEP && id <= LithoSoundCues.EVENT_FAULT) {
-            moe.qingu.youran.client.litho.LithoSoundClient.playOnce(this, id);
+        if (world != null && id >= LithoSoundCues.EVENT_STEP && id <= LithoSoundCues.EVENT_FAULT) {
+            // 服务端也要返回 true，原版才把这个方块事件发给附近的玩家；只有客户端出声
+            if (world.isRemote) {
+                moe.qingu.youran.client.litho.LithoSoundClient.playOnce(this, id);
+            }
             return true;
         }
         return super.receiveClientEvent(id, type);
@@ -512,9 +515,11 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
 
     @Override
     public SPacketUpdateTileEntity getUpdatePacket() {
-        SPacketUpdateTileEntity pkt = super.getUpdatePacket();
-        pkt.getNbtCompound().setInteger("HumMode", humMode);
-        return pkt;
+        // 不能先 super 再取 getNbtCompound：它是只在客户端有的方法，专用服务端上调用会 NoSuchMethodError 崩服
+        NBTTagCompound tag = new NBTTagCompound();
+        writePart(tag);
+        tag.setInteger("HumMode", humMode);
+        return new SPacketUpdateTileEntity(pos, 0, tag);
     }
 
     @Override
