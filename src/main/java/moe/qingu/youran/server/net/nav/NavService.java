@@ -408,7 +408,7 @@ final class NavService {
             b.append("<p class=\"err\">付款服务 pay.yr 没开，暂停投放。</p>");
         }
         long tick = env.tick();
-        b.append("<table class=\"list\"><tr><th>广告位</th><th>尺寸</th><th>价格 / 游戏天</th><th>最早上线</th><th></th></tr>");
+        b.append("<table class=\"list\"><tr><th>广告位</th><th>尺寸</th><th>价格 / 天</th><th>最早上线</th><th></th></tr>");
         for (AdSlot slot : AdSlot.values()) {
             long start = book.nextStart(slot, tick);
             b.append("<tr><td>").append(slot.label).append(" ×").append(book.rules().positions(slot)).append("</td><td>")
@@ -417,7 +417,7 @@ final class NavService {
                     .append(start < 0 ? "<span class=\"gray\">排满了</span>" : start == 0 ? "马上" : NavPages.ticks(start) + "后").append("</td><td>")
                     .append(start < 0 ? "" : "<a href=\"/buy?slot=" + slot.code + "\">投放</a>").append("</td></tr>");
         }
-        b.append("</table>\n<p class=\"small gray\">按游戏天计时（一天约 20 分钟）。可以用绿宝石或悠然元付（1 绿宝石 = 2 元）。<a href=\"")
+        b.append("</table>\n<p class=\"small gray\">按现实时间计时，一天 24 小时。可以用绿宝石或悠然元付（1 绿宝石 = 2 元）。<a href=\"")
                 .append(NavPages.esc(NavPages.url(scheme, HELP, "/ads"))).append("\">投放说明</a> · <a href=\"")
                 .append(NavPages.esc(NavPages.url(scheme, HELP, "/rules"))).append("\">广告规则</a></p>\n");
         if (s == null) {
@@ -494,7 +494,7 @@ final class NavService {
             return frame("投放", s, scheme, b.toString());
         }
         long start = book.nextStart(slot, env.tick());
-        b.append("<p>").append(book.rules().emeraldsPerDay.get(slot)).append(" 绿宝石 / 游戏天 · ")
+        b.append("<p>").append(book.rules().emeraldsPerDay.get(slot)).append(" 绿宝石 / 天 · ")
                 .append(start < 0 ? "排满了" : start == 0 ? "付款后马上上线" : "约 " + NavPages.ticks(start) + "后上线").append("</p>\n");
         b.append("<form method=\"post\" action=\"/buy\"><div><input type=\"hidden\" name=\"csrf\" value=\"").append(NavPages.esc(s.csrf))
                 .append("\" /><input type=\"hidden\" name=\"slot\" value=\"").append(slot.code).append("\" /></div>\n<table class=\"form\">");
@@ -555,7 +555,7 @@ final class NavService {
             return done(page(422, buyPage(s, scheme, slot, e.getMessage(), days, link, text, echo)));
         }
         byte[] img = png;
-        return gated(r, s, "投放" + slot.label, java.util.Arrays.asList(d + " 游戏天，" + (book.rules().emeraldsPerDay.get(slot) * (long) d) + " 绿宝石", "链接：" + okLink),
+        return gated(r, s, "投放" + slot.label, java.util.Arrays.asList(d + " 天，" + (book.rules().emeraldsPerDay.get(slot) * (long) d) + " 绿宝石", "链接：" + okLink),
                 () -> order(s, scheme, slot, d, okText, okLink, img, System.currentTimeMillis(),
                         p -> page(p.status, buyPage(s, scheme, slot, p.message, days, link, text, echo))),
                 (why, again) -> page(403, buyPage(s, scheme, slot, why + "没有下单。填的内容都在。", again, days, link, text, echo)));
@@ -627,7 +627,7 @@ final class NavService {
         b.append("<tr><th>内容</th><td>").append(NavPages.preview(a)).append(a.slot.isImage() && !a.text.isEmpty() ? "<br />" + NavPages.esc(a.text) : "")
                 .append("</td></tr>");
         b.append("<tr><th>链接</th><td>").append(NavPages.esc(a.link)).append("</td></tr>");
-        b.append("<tr><th>时长</th><td>").append(a.days).append(" 游戏天 · ").append(NavPages.yuan(a.priceYuan)).append("</td></tr>");
+        b.append("<tr><th>时长</th><td>").append(a.days).append(" 天 · ").append(NavPages.yuan(a.priceYuan)).append("</td></tr>");
         b.append("<tr><th>状态</th><td>").append(stateText(a, tick)).append("</td></tr>");
         if (a.state == AdBook.State.REMOVED && a.removeReason != null && !a.removeReason.isEmpty()) {
             b.append("<tr><th>下架理由</th><td>").append(NavPages.esc(a.removeReason)).append("</td></tr>");
@@ -670,7 +670,7 @@ final class NavService {
             return done(page(429, frame("太快了", s, scheme, "<p class=\"err\">提交太快了，过一会再试。</p>")));
         }
         byte[] img = png;
-        return gated(r, s, "重新下单广告 #" + a.id, java.util.Arrays.asList(a.slot.label + "，" + a.days + " 游戏天", "链接：" + a.link),
+        return gated(r, s, "重新下单广告 #" + a.id, java.util.Arrays.asList(a.slot.label + "，" + a.days + " 天", "链接：" + a.link),
                 () -> order(s, scheme, a.slot, a.days, a.text, a.link, img, System.currentTimeMillis(),
                         p -> page(p.status, frame("不能重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(p.message) + "</p>"))),
                 (why, again) -> page(403, frame("没有重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "</p>" + again

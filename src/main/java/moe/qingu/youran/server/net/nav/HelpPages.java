@@ -78,15 +78,15 @@ final class HelpPages {
         StringBuilder b = new StringBuilder();
         b.append("<p>1. 打开 <a href=\"").append(NavPages.esc(NavPages.url(scheme, NavService.PLATFORM, "/"))).append("\">platform.180.yr</a>，用游戏角色登录。<br />")
                 .append("2. 选广告位，点“投放”。<br />3. 填天数和链接，画图或写字。<br />4. 点“去付款”，在 pay.yr 付款。<br />5. 付完马上上线；位置满了就排队，轮到时自动上线。</p>\n");
-        b.append("<h3>价格</h3>\n<table class=\"list\"><tr><th>广告位</th><th>尺寸</th><th>位置数</th><th>每游戏天</th></tr>");
+        b.append("<h3>价格</h3>\n<table class=\"list\"><tr><th>广告位</th><th>尺寸</th><th>位置数</th><th>每天</th></tr>");
         for (AdSlot s : AdSlot.values()) {
             b.append("<tr><td>").append(s.label).append("</td><td>").append(s.isImage() ? s.width + "×" + s.height + " 图片" : "最多 " + AdInput.MAX_TEXT + " 个字")
                     .append("</td><td class=\"num\">").append(rules.positions(s)).append("</td><td class=\"num\">").append(rules.emeraldsPerDay.get(s))
                     .append(" 绿宝石</td></tr>");
         }
-        b.append("</table>\n<p>绿宝石、悠然元都能付（1 绿宝石 = 2 元）。一条最多买 ").append(rules.maxDays).append(" 游戏天；每个位置在播的后面最多排 ")
+        b.append("</table>\n<p>绿宝石、悠然元都能付（1 绿宝石 = 2 元）。一条最多买 ").append(rules.maxDays).append(" 天；每个位置在播的后面最多排 ")
                 .append(rules.queue).append(" 条。</p>\n");
-        b.append("<h3>计时</h3>\n<p>按游戏天算：一天 24000 tick，约 20 分钟。服务器关着时不走，睡觉跳过的夜不算。</p>\n");
+        b.append("<h3>计时</h3>\n<p>按现实时间算，一天 24 小时；服务器关着时也照走。</p>\n");
         b.append("<h3>画图</h3>\n<p>图片在浏览器里画：点画板放大编辑，16 种颜色，有铅笔、橡皮、油漆桶、直线、取色。只能用这 16 种颜色，不能全空白。</p>\n");
         b.append("<h3>没付款</h3>\n<p>下单后 15 分钟内没付，订单作废、位置让出。可以在“我的广告”里用同样的内容重新下单。</p>\n");
         return b.toString();

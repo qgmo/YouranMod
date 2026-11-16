@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 广告排队、计时、到期、下架退款、封禁、举报、存取 */
 class AdBookTest {
-    static final long DAY = AdRules.DAY_TICKS;
+    static final long DAY = AdRules.DAY_MS;
     final UUID alice = UUID.fromString("00000000-0000-0000-0000-00000000000a");
     final UUID bob = UUID.fromString("00000000-0000-0000-0000-00000000000b");
     int saves;
@@ -171,7 +171,7 @@ class AdBookTest {
         assertEquals(new ArrayList<String>(), problems);
         AdBook.Ad a2 = copy.get(a.id);
         assertEquals(AdBook.State.LIVE, a2.state);
-        assertEquals(500 + 3 * AdRules.DAY_TICKS, a2.endTick);
+        assertEquals(500 + 3 * AdRules.DAY_MS, a2.endTick);
         assertEquals("pay_" + a.id, a2.paymentId);
         assertEquals(1, a2.reports.size());
         assertEquals("刷屏", copy.get(b.id).removeReason);

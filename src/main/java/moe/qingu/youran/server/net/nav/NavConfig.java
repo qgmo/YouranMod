@@ -23,22 +23,22 @@ public final class NavConfig {
     @Config.RequiresMcRestart
     public static boolean opsAreAdmins = true;
 
-    @Config.Comment({"顶部横幅（468×60 图片，1 个位置）每游戏天多少绿宝石（付款时也可以付悠然元，1 绿宝石 = 2 元）。默认 4。"})
+    @Config.Comment({"顶部横幅（468×60 图片，1 个位置）每天多少绿宝石（付款时也可以付悠然元，1 绿宝石 = 2 元）。默认 4。"})
     @Config.RangeInt(min = 1, max = 10000)
     @Config.RequiresMcRestart
     public static int priceBanner = 4;
 
-    @Config.Comment({"侧栏方块（125×125 图片）每游戏天多少绿宝石。默认 2。"})
+    @Config.Comment({"侧栏方块（125×125 图片）每天多少绿宝石。默认 2。"})
     @Config.RangeInt(min = 1, max = 10000)
     @Config.RequiresMcRestart
     public static int priceSquare = 2;
 
-    @Config.Comment({"文字链（导航下面一排）每游戏天多少绿宝石。默认 1。"})
+    @Config.Comment({"文字链（导航下面一排）每天多少绿宝石。默认 1。"})
     @Config.RangeInt(min = 1, max = 10000)
     @Config.RequiresMcRestart
     public static int priceText = 1;
 
-    @Config.Comment({"小按钮（最底下一排 88×31 图片）每游戏天多少绿宝石。默认 1。"})
+    @Config.Comment({"小按钮（最底下一排 88×31 图片）每天多少绿宝石。默认 1。"})
     @Config.RangeInt(min = 1, max = 10000)
     @Config.RequiresMcRestart
     public static int priceButton = 1;
@@ -63,7 +63,7 @@ public final class NavConfig {
     @Config.RequiresMcRestart
     public static int queuePerSlot = 3;
 
-    @Config.Comment({"一条广告最多买几游戏天（一游戏天 = 24000 tick，约 20 分钟；关服时不走）。默认 30。"})
+    @Config.Comment({"一条广告最多买几天（按现实时间，关服时也照走）。默认 30。"})
     @Config.RangeInt(min = 1, max = 365)
     @Config.RequiresMcRestart
     public static int maxDays = 30;

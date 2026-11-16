@@ -337,13 +337,18 @@ final class NavPages {
         return TIME.format(Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()));
     }
 
-    /** 多少 tick 换成“x 天 y 小时”的游戏时间，后面括上大约多少现实分钟 */
+    /** 多少毫秒换成“x 天 y 小时”（现实时间） */
     static String ticks(long t) {
-        long days = t / AdRules.DAY_TICKS;
-        long hours = (t % AdRules.DAY_TICKS) / 1000;
-        long minutes = (t + 1199) / 1200;
-        String g = days > 0 ? days + " 天" + (hours > 0 ? " " + hours + " 小时" : "") : hours > 0 ? hours + " 小时" : "不到 1 小时";
-        return g + "（约 " + minutes + " 分钟）";
+        long days = t / AdRules.DAY_MS;
+        long hours = (t % AdRules.DAY_MS) / 3_600_000L;
+        if (days > 0) {
+            return days + " 天" + (hours > 0 ? " " + hours + " 小时" : "");
+        }
+        if (hours > 0) {
+            return hours + " 小时";
+        }
+        long minutes = (t + 59_999) / 60_000;
+        return minutes <= 1 ? "不到 1 分钟" : minutes + " 分钟";
     }
 
     static String yuan(long y) {

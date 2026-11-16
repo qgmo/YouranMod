@@ -363,7 +363,7 @@ class NavServiceTest {
         NavService.Session root = service.addSession(admin, "Admin", System.currentTimeMillis());
         AdBook.Ad a = book.draft(AdSlot.BANNER, alice, "Alice", 4, "", "http://a.yr/", 0, 1);
         book.paid(a, "pay_1", 0, 1);
-        env.tick = AdRules.DAY_TICKS;
+        env.tick = AdRules.DAY_MS;
         // 不是管理员
         assertEquals(403, get("platform.180.yr", "/admin", s).status);
         assertEquals(403, post("platform.180.yr", "/admin/remove", "csrf=" + s.csrf + "&ad=1&refund=full", s, PC).status);

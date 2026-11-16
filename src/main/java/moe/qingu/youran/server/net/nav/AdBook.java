@@ -16,7 +16,7 @@ import java.util.UUID;
  * <ul>
  * <li>下单：选一个还能排的位置（正在播的 + 排队的 + 还没付的不超过 1 + {@link AdRules#queue}），先占着，记成“待付款”；</li>
  * <li>付了：变成“排队中”，那个位置空着就马上上线（先上后审）；</li>
- * <li>计时按游戏 tick（主世界的总 tick，关服时不走、睡觉跳夜不算），到期下线，同一位置下一条接上；</li>
+ * <li>计时按现实时间（毫秒，服主 11-16；关服时也照走；字段名里的 tick 指这个时钟），到期下线，同一位置下一条接上；</li>
  * <li>管理员下架（退多少由调用方先在 pay.yr 退好）、封禁投放者（封了不能再买）；任何人可以举报。</li>
  * </ul>
  * 改动后调 {@link Listener#changed}（存盘）。
@@ -114,7 +114,7 @@ final class AdBook {
         }
 
         long durationTicks() {
-            return days * AdRules.DAY_TICKS;
+            return days * AdRules.DAY_MS;
         }
 
         /** 还剩多少 tick（在播的按现在算，排队的是全部，结束的为 0） */

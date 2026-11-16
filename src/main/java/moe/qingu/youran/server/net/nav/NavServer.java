@@ -64,7 +64,7 @@ public final class NavServer implements NavService.Env {
         @Override
         public void onPaid(OrderInfo order, PaymentInfo payment) {
             AdBook.Ad ad = book.byOrder(order.id);
-            if (ad != null && book.paid(ad, payment.id, tick, System.currentTimeMillis())) {
+            if (ad != null && book.paid(ad, payment.id, System.currentTimeMillis(), System.currentTimeMillis())) {
                 NavService.LOG.info("180.yr：{} 付了广告 #{}（{}）", payment.payerName, ad.id, payment.id);
             }
         }
@@ -73,7 +73,6 @@ public final class NavServer implements NavService.Env {
         public void onRefunded(PaymentInfo payment, Amount refund) {
         }
     };
-    private volatile long tick;
     private volatile Today today = Today.UNKNOWN;
     private volatile Set<String> ops = Collections.emptySet();
     private volatile boolean https;
@@ -206,20 +205,20 @@ public final class NavServer implements NavService.Env {
                 return;
             }
             snapshot();
-            book.tick(tick, System.currentTimeMillis());
+            long now = System.currentTimeMillis();
+            book.tick(now, now);
             if (ticks % 200 == 0) {
                 reconcile(System.currentTimeMillis());
             }
         }
     }
 
-    /** 拍“今日”、游戏 tick、OP 名单 */
+    /** 拍“今日”、OP 名单 */
     private void snapshot() {
         WorldServer w = server.getWorld(0);
         if (w == null) {
             return;
         }
-        tick = w.getTotalWorldTime();
         Today.Weather weather = w.isThundering() ? Today.Weather.THUNDER : w.isRaining() ? Today.Weather.RAIN : Today.Weather.CLEAR;
         today = Today.of(w.getWorldTime(), weather, server.getCurrentPlayerCount(), server.getMaxPlayers());
         Set<String> o = new HashSet<>();
@@ -247,7 +246,7 @@ public final class NavServer implements NavService.Env {
                     book.cancelDraft(a, now);
                 }
             } else if (o.status == OrderInfo.Status.PAID) {
-                if (book.paid(a, o.paymentId, tick, now)) {
+                if (book.paid(a, o.paymentId, now, now)) {
                     NavService.LOG.info("180.yr：广告 #{} 的付款补记上了（{}）", a.id, o.paymentId);
                 }
             } else if (o.status == OrderInfo.Status.EXPIRED || o.status == OrderInfo.Status.CANCELED) {
@@ -263,9 +262,10 @@ public final class NavServer implements NavService.Env {
         return today;
     }
 
+    /** 广告的时钟：现实时间（毫秒，服主 11-16） */
     @Override
     public long tick() {
-        return tick;
+        return System.currentTimeMillis();
     }
 
     @Override
