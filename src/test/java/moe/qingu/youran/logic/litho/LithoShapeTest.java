@@ -3,6 +3,10 @@ package moe.qingu.youran.logic.litho;
 import moe.qingu.youran.logic.litho.LithoShape.Box;
 import moe.qingu.youran.logic.litho.LithoShape.Piece;
 import moe.qingu.youran.logic.litho.LithoShape.Side;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import moe.qingu.youran.logic.litho.LithoShape.Layer;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -170,7 +174,7 @@ class LithoShapeTest {
             for (Piece p : LithoShape.pieces(LithoStructure.index(port.h, port.l, port.w))) {
                 String s = p.tex().sprite;
                 marked |= s.endsWith("port_in") || s.endsWith("port_out") || s.endsWith("hatch_in") || s.endsWith("hatch_out")
-                        || s.endsWith("light_engineering") || s.endsWith("redstone_engineering");
+                        || s.endsWith("metal_multiblock_refinery") || s.endsWith("redstone_engineering");
                 if (port.isFluid() && (s.endsWith("port_in") || s.endsWith("port_out"))) {
                     assertEquals(port.input, s.endsWith("port_in"), "流体口的颜色（蓝入橙出）不对：" + port);
                     assertEquals(Side.BACK, p.side);
@@ -178,5 +182,133 @@ class LithoShapeTest {
             }
             assertTrue(marked, "接口在模型上看不出来：" + port);
         }
+    }
+
+    /**
+     * 外壳没有缝：把不透明的长方体按 0.25 像素体素化，从机器外面灌空气（玻璃当透明、1 像素的缝也灌得进），
+     * 凡是挨着灌得到的空气的体素面，都必须有一个长方体在这个位置画了这一面；没画的就是能看穿到长方体内部或外面的缝。
+     * 光源那格只当作一块盖到顶棚高度的法兰（光源方块自己画外形，排气管坐在它上面）。
+     */
+    @Test
+    void shellHasNoSeeThroughGaps() {
+        final int r = 4;
+        int nx = LithoShape.SIZE_X * r;
+        int ny = LithoShape.SIZE_Y * r;
+        int nz = LithoShape.SIZE_Z * r;
+        List<Box> solid = new ArrayList<>();
+        for (Box b : LithoShape.boxes()) {
+            if (b.layer != Layer.TRANSLUCENT) {
+                solid.add(b);
+            }
+        }
+        boolean[] fill = new boolean[nx * ny * nz];
+        for (Box b : solid) {
+            fillRange(fill, ny, nz, b.min, b.max, r);
+        }
+        float[] lampMin = {3 * 16, 44, 1 * 16};
+        float[] lampMax = {4 * 16, 46, 2 * 16};
+        fillRange(fill, ny, nz, lampMin, lampMax, r);
+        boolean[] air = new boolean[fill.length];
+        ArrayDeque<int[]> queue = new ArrayDeque<>();
+        for (int x = 0; x < nx; x++) {
+            for (int y = 0; y < ny; y++) {
+                for (int z = 0; z < nz; z++) {
+                    boolean edge = x == 0 || z == 0 || x == nx - 1 || z == nz - 1 || y == ny - 1;
+                    int id = (x * ny + y) * nz + z;
+                    if (edge && !fill[id] && !air[id]) {
+                        air[id] = true;
+                        queue.add(new int[]{x, y, z});
+                    }
+                }
+            }
+        }
+        int[][] dirs = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        while (!queue.isEmpty()) {
+            int[] p = queue.poll();
+            for (int[] d : dirs) {
+                int x = p[0] + d[0];
+                int y = p[1] + d[1];
+                int z = p[2] + d[2];
+                if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) {
+                    continue;
+                }
+                int id = (x * ny + y) * nz + z;
+                if (!fill[id] && !air[id]) {
+                    air[id] = true;
+                    queue.add(new int[]{x, y, z});
+                }
+            }
+        }
+        int[] n = {nx, ny, nz};
+        List<String> gaps = new ArrayList<>();
+        for (Box b : solid) {
+            for (Side s : Side.values()) {
+                if (b.tex(s) != null) {
+                    continue;
+                }
+                int ax = s.axis;
+                int t1 = (ax + 1) % 3;
+                int t2 = (ax + 2) % 3;
+                float plane = s.sign > 0 ? b.max[ax] : b.min[ax];
+                int pc = Math.round(plane * r);
+                int nb = s.sign > 0 ? pc : pc - 1;
+                if (nb < 0 && s == Side.DOWN) {
+                    continue; // 贴着地面的底面
+                }
+                if (nb < 0 || nb >= n[ax]) {
+                    gaps.add(b.min[0] + "," + b.min[1] + "," + b.min[2] + " 的 " + s + " 面在外框上没画");
+                    continue;
+                }
+                int uncovered = 0;
+                for (int i = Math.round(b.min[t1] * r); i < Math.round(b.max[t1] * r); i++) {
+                    for (int j = Math.round(b.min[t2] * r); j < Math.round(b.max[t2] * r); j++) {
+                        int[] c = new int[3];
+                        c[ax] = nb;
+                        c[t1] = i;
+                        c[t2] = j;
+                        if (!air[(c[0] * ny + c[1]) * nz + c[2]] || coveredByOther(solid, b, s, plane, i, j, r)) {
+                            continue;
+                        }
+                        uncovered++;
+                    }
+                }
+                if (uncovered > 0) {
+                    gaps.add("长方体 (" + b.min[0] + "," + b.min[1] + "," + b.min[2] + ")-(" + b.max[0] + "," + b.max[1] + "," + b.max[2]
+                            + ") 的 " + s + " 面没画，露出 " + uncovered / (float) (r * r) + " 平方像素");
+                }
+            }
+        }
+        assertTrue(gaps.isEmpty(), "外壳有缝：" + gaps);
+    }
+
+    private static void fillRange(boolean[] fill, int ny, int nz, float[] min, float[] max, int r) {
+        for (int x = Math.round(min[0] * r); x < Math.round(max[0] * r); x++) {
+            for (int y = Math.round(min[1] * r); y < Math.round(max[1] * r); y++) {
+                for (int z = Math.round(min[2] * r); z < Math.round(max[2] * r); z++) {
+                    fill[(x * ny + y) * nz + z] = true;
+                }
+            }
+        }
+    }
+
+    /** 别的长方体在同一个平面、同一个位置画了这一面（相邻两个长方体各画一半时） */
+    private static boolean coveredByOther(List<Box> boxes, Box self, Side s, float plane, int i, int j, int r) {
+        int ax = s.axis;
+        int t1 = (ax + 1) % 3;
+        int t2 = (ax + 2) % 3;
+        for (Box o : boxes) {
+            if (o == self || o.tex(s) == null) {
+                continue;
+            }
+            float op = s.sign > 0 ? o.max[ax] : o.min[ax];
+            if (Math.abs(op - plane) > 1e-4f) {
+                continue;
+            }
+            if (i >= Math.round(o.min[t1] * r) && i < Math.round(o.max[t1] * r)
+                    && j >= Math.round(o.min[t2] * r) && j < Math.round(o.max[t2] * r)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

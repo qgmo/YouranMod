@@ -190,7 +190,8 @@ public final class LithoShape {
     static final Tex BRICK = tile(IE + "stone_decoration_blastbrick_reinforced");
     static final Tex RADIATOR = tile(IE + "metal_decoration0_radiator");
     static final Tex SCAFFOLD = tile(IE + "metal_decoration1_steel_scaffolding_noctm");
-    static final Tex IE_LIGHT = fit(IE + "metal_decoration0_light_engineering");
+    /** 沉浸工程多方块的电口：炼油厂贴图（128 × 128）右下角那一格 16 × 16（同铁板配一圈圈凹进去的方框、正中橙色接线点） */
+    static final Tex IE_POWER = fit(IE + "metal_multiblock_refinery", 10, 14, 12, 16);
     static final Tex IE_REDSTONE = fit(IE + "metal_decoration0_redstone_engineering");
     // 自己画的
     static final Tex FRAME = tile(OWN + "frame");
@@ -245,12 +246,20 @@ public final class LithoShape {
 
     static {
         frame();
+        plinth();
         furnace();
         booth();
         aligner();
         backOfBooth();
         wetBench();
         exhaust();
+    }
+
+    /** 底座：炉段、湿法段、小间后面的踢脚空腔（离地 3 像素高，门洞与小间里能看进去）填上，只画面不挡人 */
+    private static void plinth() {
+        box(2, 0, 2, 32, 3, 62).all(PANEL).deco();
+        box(80, 0, 2, 110, 3, 62).all(PANEL).deco();
+        box(32, 0, 48, 80, 3, 62).all(PANEL).deco();
     }
 
     /** 外框：底边、顶边、竖柱（贴着外轮廓，面板都往里缩 1 像素，看起来是一台机器的骨架） */
@@ -295,7 +304,7 @@ public final class LithoShape {
         // 第 2 层：散热百叶
         box(1, 32, 1, 31, 46, 16).front(VENT).left(PANEL).right(PANEL).top(ROOF);
         // 炉膛
-        box(1, 3, 16, 32, 46, 48).left(BRICK).top(BRICK).right(PANEL);
+        box(1, 3, 16, 32, 46, 48).left(BRICK).top(BRICK).right(PANEL).front(PANEL);
         box(2, 46, 17, 31, 47, 47).all(ROOF);
         // 左端进料口（漏斗，蓝 = 入）
         box(0, 4, 34, 2, 14, 46).left(HATCH_IN).face(FRAME, Side.UP, Side.DOWN, Side.FRONT, Side.BACK);
@@ -327,12 +336,12 @@ public final class LithoShape {
         // 工作台（对准台那一排）：柜体、台面、背板、右边隔板
         box(32, 0, 17, 80, 16, 32).front(DESK_FRONT).top(DESK_TOP);
         box(32, 16, 16, 80, 18, 32).top(DESK_TOP).front(FRAME).bottom(FRAME);
-        box(32, 18, 31, 79, 32, 32).front(PANEL_LIGHT);
+        box(32, 18, 31, 79, 32, 32).front(PANEL_LIGHT).top(FRAME);
         box(79, 16, 16, 80, 32, 48).left(PANEL_LIGHT).right(BENCH).front(FRAME);
         // 左：掩模架；右：操作台与屏幕
         box(34, 18, 22, 46, 30, 30).front(MASK_RACK).sides(PANEL).front(MASK_RACK).top(PANEL);
-        box(66, 18, 18, 78, 23, 30).front(CONSOLE).top(fit(OWN + "console", 0, 0, 16, 6)).left(PANEL).right(PANEL);
-        box(67, 23, 24, 77, 30, 30).front(SCREEN).left(PANEL).right(PANEL).top(PANEL);
+        box(66, 18, 18, 78, 23, 30).back(PANEL).front(CONSOLE).top(fit(OWN + "console", 0, 0, 16, 6)).left(PANEL).right(PANEL);
+        box(67, 23, 24, 77, 30, 30).back(PANEL).front(SCREEN).left(PANEL).right(PANEL).top(PANEL);
         // 小间顶棚两侧（中间是光源）
         box(32, 32, 16, 48, 46, 32).front(PANEL).bottom(PANEL_LIGHT).top(ROOF).right(PANEL);
         box(64, 32, 16, 80, 46, 32).front(PANEL).bottom(PANEL_LIGHT).top(ROOF).left(PANEL);
@@ -373,15 +382,16 @@ public final class LithoShape {
         box(32, 32, 32, 80, 46, 48).top(ROOF).bottom(PANEL).front(PANEL);
         box(32, 3, 48, 80, 46, 62).back(PANEL).top(ROOF);
         box(32, 3, 62, 80, 46, 63).back(SCAFFOLD).cutout();
-        // 能量口（沉浸工程轻型工程块的面）、溶剂入口
-        box(50, 18, 60, 62, 30, 64).back(IE_LIGHT).face(FRAME, Side.UP, Side.DOWN, Side.LEFT, Side.RIGHT);
+        // 能量口（沉浸工程多方块电口的面）、溶剂入口
+        // 电口：和沉浸工程多方块一样，整格一块与外壳齐平的面板（不凸出）
+        box(48, 16, 62, 64, 32, 64).all(FRAME).back(IE_POWER);
         box(67, 4, 61, 77, 14, 64).back(PORT_IN).face(FRAME, Side.UP, Side.DOWN, Side.LEFT, Side.RIGHT);
     }
 
     /** 湿法段（w5–w6）：白色湿法台、台上的槽、玻璃挡板、排风罩，背面排风格栅和两个流体口，右端出芯片 */
     private static void wetBench() {
-        box(80, 3, 1, 111, 14, 48).front(BENCH_FRONT).right(BENCH_FRONT);
-        box(80, 14, 0.5f, 111.5f, 16, 48).top(BENCH).front(BENCH).right(BENCH);
+        box(80, 3, 1, 111, 14, 48).front(BENCH_FRONT).right(BENCH_FRONT).left(BENCH_FRONT);
+        box(80, 14, 0.5f, 111.5f, 16, 48).top(BENCH).front(BENCH).right(BENCH).left(BENCH).bottom(BENCH_FRONT);
         // 右端出芯片口（投掷器，橙 = 出）
         box(110, 4, 34, 112, 14, 46).right(HATCH_OUT).face(FRAME, Side.UP, Side.DOWN, Side.FRONT, Side.BACK);
         // 台上：涂胶的甩胶盘、显影槽、刻蚀槽、清洗槽、晶圆花篮
@@ -398,7 +408,7 @@ public final class LithoShape {
         box(110, 16, 2, 112, 18, 47).all(FRAME);
         box(110.75f, 18, 2, 111.25f, 32, 47).all(GLASS_CLEAR).glass();
         // 排风罩
-        box(80, 32, 1, 111, 46, 48).front(HOOD_FRONT).right(PANEL).top(ROOF).bottom(HOOD_LIGHT);
+        box(80, 32, 1, 111, 46, 48).front(HOOD_FRONT).left(PANEL).right(PANEL).top(ROOF).bottom(HOOD_LIGHT);
         // 背面：下半面板 + 两个流体口，上半排风格栅
         box(80, 3, 48, 111, 32, 63).front(BENCH).back(PANEL).right(PANEL);
         box(80, 32, 48, 111, 46, 63).front(PANEL).back(GRILLE).right(PANEL).top(ROOF).bottom(PANEL);
