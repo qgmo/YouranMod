@@ -4,7 +4,7 @@ import blusunrize.immersiveengineering.api.crafting.MixerRecipe;
 import net.minecraftforge.fluids.FluidStack;
 
 /**
- * 输入、输出流体不一样多的搅拌机配方（如 3000 mB 盐酸 + 1 硅粉 → 1000 mB 三氯氢硅；1000 mB 氯气 + 4 小撮锡粉 → 64 mB 四氯化锡）。
+ * 输入、输出流体不一样多的搅拌机配方（如 3000 mB 盐酸 + 1 硅粉 → 1000 mB 三氯氢硅；2000 mB 氯气 + 4 小撮锡粉 → 64 mB 四氯化锡）。
  *
  * <p>沉浸工程的搅拌机本来按 1:1 换流体：每个配方一共抽 {@code fluidAmount}（= 输出的量）mB 输入，抽多少就出多少，
  * 处理时间是输出的量（tick）。这里照它的时间与电耗规则（输出 1000 mB 就是 1000 tick），

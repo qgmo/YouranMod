@@ -42,7 +42,7 @@ public final class ResistRecipes {
     public static final int REFINERY_CHLORINE = 1000;
     public static final int REFINERY_SNCL4 = 72;
     public static final int TINY_TIN = 4;
-    public static final int TINY_TIN_CHLORINE = 1000;
+    public static final int TINY_TIN_CHLORINE = 2000;
     public static final int TINY_TIN_SNCL4 = 64;
     public static final int SNCL4_COMPOUNDS = 16;
     public static final int SNCL4_COMPOUND_MB = 144;
