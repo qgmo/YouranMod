@@ -77,6 +77,8 @@ public final class YouranMod {
         if (net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering")) {
             moe.qingu.youran.compat.immersiveengineering.LithoMultiblock.register();
         }
+        // Carry On：光刻机的方块不能搬（用它的 IMC 接口，不写整合包配置；服主 11-16）
+        moe.qingu.youran.compat.carryon.CarryOnCompat.sendBlacklist();
         if (event.getSide().isClient()) {
             moe.qingu.youran.client.network.ClientNetwork.init();
         }
