@@ -122,9 +122,9 @@ public final class PcbRecipes {
         // 两张蓝图（服主 11-16 定）。主板：铜板 / 酚醛基板 / 铜板；钴锭 ×3（矿辞 ingotCobalt）；纸 ×3
         blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.MOTHERBOARD,
                 "CSC", "KKK", 'C', "plateCopper", 'S', new ItemStack(ModItems.phenolicSubstrate), 'K', "ingotCobalt");
-        // 扩展卡：酚醛基板 / 任意一张芯片设计图或任意一块掩模 / 酚醛基板；青金石粉 ×3（矿辞 dustLapis）；纸 ×3
+        // 扩展卡：酚醛基板 / 任意一张芯片设计图 / 酚醛基板；青金石粉 ×3（矿辞 dustLapis）；纸 ×3（服主 11-16：不收掩模，掩模太珍贵）
         blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.EXPANSION,
-                "SXS", "LLL", 'S', new ItemStack(ModItems.phenolicSubstrate), 'X', designOrMask(), 'L', "dustLapis");
+                "SXS", "LLL", 'S', new ItemStack(ModItems.phenolicSubstrate), 'X', anyDesign(), 'L', "dustLapis");
         // EPROM：2764 芯片本体 + 玻璃管（石英小窗）
         ResourceLocation eprom = new ResourceLocation(YouranMod.MODID, "eprom");
         registry.register(new EpromRecipe(eprom));
@@ -159,11 +159,10 @@ public final class PcbRecipes {
         registry.register(new ShapedOreRecipe(id, out, in).setRegistryName(id));
     }
 
-    /** 任意型号的芯片设计图或掩模（型号按元数据区分，都认；掩模的磨损数据不看） */
-    static net.minecraft.item.crafting.Ingredient designOrMask() {
+    /** 任意型号的芯片设计图（型号按元数据区分，都认） */
+    static net.minecraft.item.crafting.Ingredient anyDesign() {
         return net.minecraft.item.crafting.Ingredient.fromStacks(
-                new ItemStack(ModItems.chipDesign, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE),
-                new ItemStack(ModItems.photomask, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE));
+                new ItemStack(ModItems.chipDesign, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE));
     }
 
     /** 电路板两种都认：IC2 电路板（矿物词典 circuitBasic）或沉浸工程电路板（material:27，没登记矿物词典） */
