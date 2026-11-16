@@ -14,7 +14,8 @@ import net.minecraft.nbt.NBTTagCompound;
  *  StdFreq:4000, MinFreq:2500, MaxAdjFreq:6000,  // 这型 CPU 自带的标准频率与可调范围 kHz
  *  Made:{Nines:9, Mold:"gold", Resist:"negative", Solvent:900, Align:930, Lamp:780, Package:"gold", MaskWear:12}}
  * </pre>
- * 报废的芯片 {@code Scrapped:1b}、{@code ScrapReason}（resolution / alignment / defect），没有三项指标。
+ * 报废的芯片 {@code Scrapped:1b}、{@code ScrapReason}（resolution / alignment / defect / exposed_resist），没有三项指标。
+ * 涂过变质（已曝光）光刻胶的，{@code Made} 里另记 {@code ExposedResist:1b}。
  */
 public final class ChipNbt {
     public static final String SERIAL = "Serial";

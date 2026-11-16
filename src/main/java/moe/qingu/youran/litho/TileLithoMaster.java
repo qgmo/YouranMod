@@ -117,6 +117,8 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
     double lampResolution;
     @Nullable
     ResistType resist;
+    /** 这片晶圆有哪一层涂了变质（已曝光）的光刻胶：做出来一定报废 */
+    boolean exposedResist;
     @Nullable
     ChipPackage pack;
     int boronQuarters;
@@ -515,6 +517,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         worstLamp = 1000;
         lampResolution = 0;
         resist = null;
+        exposedResist = false;
         pack = null;
     }
 
@@ -548,6 +551,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
                 }
                 tanks[TANK_RESIST].drainInternal(LithoNumbers.COAT_RESIST, true);
                 resist = ResistType.worse(resist, type);
+                exposedResist |= FluidVariants.isExposedResist(r);
                 return null;
             }
             case EXPOSE: {
@@ -668,6 +672,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         in.waferNines = WaferNbt.nines(wafer.getTagCompound());
         in.mold = WaferNbt.mold(wafer.getTagCompound());
         in.resist = resist == null ? ResistType.NEGATIVE : resist;
+        in.exposedResist = exposedResist;
         in.solvent = worstSolvent / 1000.0;
         in.alignPermille = worstAlign;
         in.lampBrightness = worstLamp / 1000.0;
@@ -682,6 +687,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
             made.setString("Mold", in.mold.id);
         }
         made.setString("Resist", in.resist.id);
+        if (exposedResist) {
+            made.setBoolean("ExposedResist", true);
+        }
         made.setInteger("Solvent", worstSolvent);
         made.setInteger("Align", worstAlign);
         made.setInteger("Lamp", worstLamp);
@@ -912,6 +920,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         worstLamp = nbt.hasKey("WorstLamp") ? nbt.getInteger("WorstLamp") : 1000;
         lampResolution = nbt.getDouble("LampRes");
         resist = ResistType.byId(nbt.getString("Resist"));
+        exposedResist = nbt.getBoolean("ExposedResist");
         pack = ChipPackage.byId(nbt.getString("Package"));
         boronQuarters = nbt.getInteger("BoronQ");
         aluminumQuarters = nbt.getInteger("AlQ");
@@ -948,6 +957,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         nbt.setDouble("LampRes", lampResolution);
         if (resist != null) {
             nbt.setString("Resist", resist.id);
+        }
+        if (exposedResist) {
+            nbt.setBoolean("ExposedResist", true);
         }
         if (pack != null) {
             nbt.setString("Package", pack.id);

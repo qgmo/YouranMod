@@ -40,6 +40,24 @@ class ChipQualityTest {
         assertEquals(ChipQuality.Reason.ALIGNMENT, ChipQuality.evaluate(in, new Random(1)).reason);
     }
 
+    /** 涂过变质（已曝光）的光刻胶：条件再好也一定报废，不看随机数（服主 11-16） */
+    @Test
+    void exposedResistAlwaysScraps() {
+        ChipQuality.Inputs in = good();
+        in.waferNines = 30;
+        in.solvent = 1;
+        in.alignPermille = 1000;
+        in.lampBrightness = 1;
+        in.exposedResist = true;
+        for (long seed = 0; seed < 500; seed++) {
+            ChipQuality.Result r = ChipQuality.evaluate(in, new Random(seed));
+            assertTrue(r.scrapped());
+            assertEquals(ChipQuality.Reason.EXPOSED_RESIST, r.reason);
+        }
+        in.exposedResist = false;
+        assertEquals(ChipQuality.Reason.NONE, ChipQuality.evaluate(in, new Random(0)).reason);
+    }
+
     /** 纯度高、溶剂好、制程粗的存活率高；8088 用负胶比 Z80 难得多 */
     @Test
     void survivalMonotonic() {

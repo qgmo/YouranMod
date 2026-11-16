@@ -21,7 +21,9 @@ public final class ChipQuality {
     }
 
     public enum Reason {
-        NONE, RESOLUTION, ALIGNMENT, DEFECT
+        NONE, RESOLUTION, ALIGNMENT, DEFECT,
+        /** 涂的是变质（已曝光）的光刻胶：一定报废（服主 11-16） */
+        EXPOSED_RESIST
     }
 
     /** 做这片芯片时记下的条件 */
@@ -30,6 +32,8 @@ public final class ChipQuality {
         public int waferNines = Purity.WAFER_GRADE_NINES;
         public WaferMold mold = WaferMold.GOLD;
         public ResistType resist = ResistType.NEGATIVE;
+        /** 有哪一层涂的是变质（已曝光）的光刻胶 */
+        public boolean exposedResist;
         /** 各层显影里最差的溶剂品质（0–1） */
         public double solvent = 1;
         /** 各层曝光时最差的对准率（千分比） */
@@ -105,6 +109,9 @@ public final class ChipQuality {
     }
 
     public static Result evaluate(Inputs in, Random random) {
+        if (in.exposedResist) {
+            return new Result(Reason.EXPOSED_RESIST, 0, 0, 0);
+        }
         if (effectiveResolution(in) > in.model.nodeUm) {
             return new Result(Reason.RESOLUTION, 0, 0, 0);
         }
