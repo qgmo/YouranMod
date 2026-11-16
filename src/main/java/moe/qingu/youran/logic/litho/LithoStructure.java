@@ -44,7 +44,7 @@ public final class LithoStructure {
         HOPPER('h'),
         DROPPER('d'),
         ALIGNER('A'),
-        /** 输出口的输液管：结构里也是 {@code |}，成形后单独一种（模型上画橙点） */
+        /** 输出口的输液管：结构里也是 {@code |}，成形后单独一种（拆开时同样放回输液管） */
         PIPE_OUT('|');
 
         public final char symbol;
@@ -70,15 +70,6 @@ public final class LithoStructure {
         /** 从这一格右键能不能开界面（设计稿：只从小间这几格，免得拿锤子、扳手干活时误开） */
         public boolean opensGui() {
             return this == ALIGNER || this == YELLOW_GLASS;
-        }
-
-        /** 透明的（渲染层） */
-        public boolean translucent() {
-            return this == YELLOW_GLASS;
-        }
-
-        public boolean cutout() {
-            return this == GLASS || this == SCAFFOLDING || this == PIPE || this == PIPE_OUT || this == HOPPER || this == DROPPER;
         }
     }
 
