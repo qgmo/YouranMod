@@ -94,6 +94,20 @@ public final class ModItems {
     public static Item smallMolybdenumDust;
     public static Item molybdenumDust;
     public static Item mercuryLightSource;
+    /** 主板线（服主 11-16）：酚醛基板、三氯化铁粉、线路板（各道工序按元数据）、线路底片、冲孔模具、EPROM、紫外擦除器 */
+    public static Item phenolicSubstrate;
+    public static Item ferricChlorideDust;
+    public static moe.qingu.youran.item.ItemPcb pcb;
+    public static moe.qingu.youran.item.ItemPcbFilm pcbFilm;
+    public static Item punchMold;
+    public static moe.qingu.youran.item.ItemEprom eprom;
+    public static Item uvEraser;
+    /** 主板（服主 11-16）：装了芯片的普通电脑 / 个人电脑主板（元数据 = 种类） */
+    public static moe.qingu.youran.item.ItemMotherboard motherboard;
+    /** EPROM 烧录器（外设，服主 11-16） */
+    public static Item epromProgrammer;
+    /** 软盘套（服主 11-16，取代原来的“6 聚氯乙烯片”）：未冲孔 0、已冲孔 1、冲坏 2 */
+    public static Item floppyJacket;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -148,7 +162,7 @@ public final class ModItems {
         refinedPlatter = add(registry, new ItemWithTooltip("refined_platter", 64, "烘过的盘片，还要压光"));
         polishedPlatter = add(registry, new ItemWithTooltip("polished_platter", 64, "压光的盘片，装进软套就是软盘"));
         pvcLump = add(registry, new ItemWithTooltip("pvc_lump", 64, "聚氯乙烯（PVC）"));
-        pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做软盘的软套"));
+        pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做外设的塑料外壳"));
         polyethyleneLump = add(registry, new ItemWithTooltip("polyethylene_lump", 64, "聚乙烯（PE）"));
         floppyDisk = add(registry, new ItemFloppyDisk());
         siliconDust = add(registry, new ItemWithTooltip("silicon_dust", 64, "粗硅（Si）打成的粉，加盐酸做成三氯氢硅"));
@@ -160,9 +174,9 @@ public final class ModItems {
         scrapSiliconWafer = add(registry, new ItemWithTooltip("scrap_silicon_wafer", 64, "洗坏了的硅晶圆，放进熔炉或电弧炉烧回硅锭，从头再来"));
         // 定位模块也是外设（服主 11-15）：没有 I/O 端口，装上就有“位置”能力
         locatorModule = add(registry, new ItemPeripheral(moe.qingu.youran.api.network.location.LocatorModule.NAME,
-                Peripherals.KIND_LOCATOR, Peripherals.CAP_LOCATION));
-        floppyDrive = add(registry, new ItemPeripheral("floppy_drive", Peripherals.KIND_FLOPPY));
-        hanziCard = add(registry, new ItemPeripheral("hanzi_card", Peripherals.KIND_HANZI));
+                Peripherals.KIND_LOCATOR, Peripherals.CAP_LOCATION).withCasings());
+        floppyDrive = add(registry, new ItemPeripheral("floppy_drive", Peripherals.KIND_FLOPPY).withCasings());
+        hanziCard = add(registry, new moe.qingu.youran.item.ItemHanziCard("hanzi_card", Peripherals.KIND_HANZI));
         Peripherals.register(floppyDrive);
         Peripherals.register(hanziCard);
         Peripherals.register(locatorModule);
@@ -185,6 +199,18 @@ public final class ModItems {
         net.minecraftforge.oredict.OreDictionary.registerOre("dustMolybdenum", molybdenumDust);
         alignmentTable = add(registry, itemBlock(ModBlocks.alignmentTable));
         mercuryLightSource = add(registry, new moe.qingu.youran.litho.ItemBlockLightSource(ModBlocks.mercuryLightSource));
+        phenolicSubstrate = add(registry, new moe.qingu.youran.item.ItemLangTooltip("phenolic_substrate", 64));
+        ferricChlorideDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("ferric_chloride_dust", 64));
+        net.minecraftforge.oredict.OreDictionary.registerOre("dustFerricChloride", ferricChlorideDust);
+        pcb = (moe.qingu.youran.item.ItemPcb) add(registry, new moe.qingu.youran.item.ItemPcb());
+        pcbFilm = (moe.qingu.youran.item.ItemPcbFilm) add(registry, new moe.qingu.youran.item.ItemPcbFilm());
+        punchMold = add(registry, new moe.qingu.youran.item.ItemLangTooltip("punch_mold", 1));
+        eprom = (moe.qingu.youran.item.ItemEprom) add(registry, new moe.qingu.youran.item.ItemEprom());
+        uvEraser = add(registry, itemBlock(ModBlocks.uvEraser));
+        motherboard = (moe.qingu.youran.item.ItemMotherboard) add(registry, new moe.qingu.youran.item.ItemMotherboard());
+        epromProgrammer = add(registry, new ItemPeripheral("eprom_programmer", Peripherals.KIND_PROGRAMMER).withCasings());
+        Peripherals.register(epromProgrammer);
+        floppyJacket = add(registry, new moe.qingu.youran.item.ItemFloppyJacket());
     }
 
     private static Item itemBlock(Block block) {

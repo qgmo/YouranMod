@@ -1,0 +1,9 @@
+{
+  "variants": {
+    "facing=north": {"model": "youranmod:uv_eraser"},
+    "facing=east": {"model": "youranmod:uv_eraser", "y": 90},
+    "facing=south": {"model": "youranmod:uv_eraser", "y": 180},
+    "facing=west": {"model": "youranmod:uv_eraser", "y": 270},
+    "inventory": {"model": "youranmod:uv_eraser"}
+  }
+}

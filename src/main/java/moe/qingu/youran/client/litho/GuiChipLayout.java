@@ -10,7 +10,7 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 
 /**
  * 芯片设计图 / 掩模的版图画面（服主 11-15：右键可以欣赏，没有实际作用）。版图是自己画的风格化像素版图
- * （{@code textures/gui/layout_<型号>.png}，128 × 128），掩模看的是铬版上的样子（{@code mask_<型号>.png}）。
+ * （{@code textures/gui/layout_<型号>.png}，128 × 128；四片字库 ROM 共用一张，见 {@code ChipModel#layoutId}），掩模看的是铬版上的样子（{@code mask_<型号>.png}）。
  */
 @SideOnly(Side.CLIENT)
 public class GuiChipLayout extends GuiScreen {
@@ -30,7 +30,7 @@ public class GuiChipLayout extends GuiScreen {
         int y = (height - size) / 2 + 6;
         drawRect(x - 3, y - 3, x + size + 3, y + size + 3, 0xFF101010);
         GlStateManager.color(1F, 1F, 1F, 1F);
-        mc.getTextureManager().bindTexture(new ResourceLocation("youranmod", "textures/gui/" + (mask ? "mask_" : "layout_") + model.id + ".png"));
+        mc.getTextureManager().bindTexture(new ResourceLocation("youranmod", "textures/gui/" + (mask ? "mask_" : "layout_") + model.layoutId() + ".png"));
         drawModalRectWithCustomSizedTexture(x, y, 0, 0, size, size, size, size);
         String title = I18n.format(mask ? "youranmod.layout.mask" : "youranmod.layout.design",
                 I18n.format("youranmod.chip.model." + model.id), String.valueOf(model.nodeUm), model.layers);

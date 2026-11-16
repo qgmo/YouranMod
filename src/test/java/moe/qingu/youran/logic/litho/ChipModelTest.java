@@ -22,6 +22,30 @@ class ChipModelTest {
         assertFalse(ChipModel.DRAM_4164.isCpu());
     }
 
+    /** 型号按物品元数据区分（服主 11-16）：每型一个元数据，不重、定了不改；ROM 都能做（负胶 2.5 μm 做得了） */
+    @Test
+    void metasAreStableAndUnique() {
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
+        for (ChipModel m : ChipModel.values()) {
+            assertTrue(seen.add(m.meta), "元数据重复：" + m);
+            assertSame(m, ChipModel.byMeta(m.meta));
+            assertTrue(m.nodeUm >= 2.5, "负胶做不了：" + m);
+        }
+        assertEquals(0, ChipModel.Z80.meta);
+        assertEquals(1, ChipModel.I8088.meta);
+        assertEquals(2, ChipModel.DRAM_4164.meta);
+        assertEquals(3, ChipModel.ROM_MONITOR.meta);
+        assertEquals(4, ChipModel.ROM_BIOS.meta);
+        assertEquals(5, ChipModel.EPROM_2764.meta);
+        assertEquals(9, ChipModel.FONT_ROM_4.meta);
+        assertEquals(null, ChipModel.byMeta(99));
+        assertEquals("font_rom", ChipModel.FONT_ROM_3.layoutId());
+        assertEquals("2764", ChipModel.EPROM_2764.layoutId());
+        assertTrue(ChipModel.EPROM_2764.isRom());
+        assertEquals(250, ChipModel.accessNs(ChipModel.ROM_BIOS.ratedKHz));
+        assertEquals(450, ChipModel.accessNs(ChipModel.ROM_MONITOR.ratedKHz));
+    }
+
     /** 额定 150 ns ≈ 6.67 MHz */
     @Test
     void ramRatedAccessTime() {

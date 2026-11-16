@@ -695,7 +695,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         made.setInteger("Lamp", worstLamp);
         made.setString("Package", in.pack.id);
         made.setInteger("MaskWear", ItemPhotomask.wear(mask));
-        ItemStack chip = new ItemStack(ModItems.chip);
+        ItemStack chip = ModItems.chip.make(model);
         chip.setTagCompound(ChipNbt.tag(model, ChipNbt.serial(model, world.rand.nextLong()), result, made));
         inv.setStackInSlot(freeOutput(), chip);
         inv.setStackInSlot(activeWafer, ItemStack.EMPTY);

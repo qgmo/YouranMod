@@ -134,13 +134,20 @@ public final class Ic2Recipes {
     }
 
     /**
-     * 流体/固体装罐机的固体装罐模式（容器放“罐子”槽，填充物放输入槽）：1 抛光盘片 + 6 聚氯乙烯片 → 1 软盘。
-     * 套子只用聚氯乙烯（服主 11-15：聚乙烯太软、标签和衬布粘不牢，不做套子；聚乙烯可以先加氯气变成聚氯乙烯）。
+     * 软盘（服主 11-16 改）：流体/固体装罐机的固体装罐模式（容器放“罐子”槽，填充物放输入槽）：1 已冲孔的软盘套 + 1 抛光盘片 → 1 软盘
+     * （取代原来的“抛光盘片 + 6 聚氯乙烯片”）；IC2 压缩机：6 聚氯乙烯团 → 未冲孔的软盘套（还要在工作台用螺丝刀冲孔）。
+     * 套子只用聚氯乙烯（服主 11-15：聚乙烯太软、标签和衬布粘不牢；聚乙烯可以先加氯气变成聚氯乙烯）。
      */
     static void registerFloppy() {
-        if (!Recipes.cannerBottle.addRecipe(Recipes.inputFactory.forStack(new ItemStack(ModItems.polishedPlatter), 1),
-                Recipes.inputFactory.forStack(new ItemStack(ModItems.pvcSheet), 6), new ItemStack(ModItems.floppyDisk), false)) {
-            YouranMod.LOG.error("IC2 固体装罐配方（抛光盘片 + 6 聚氯乙烯片 → 软盘）没加上：已有输入相同的配方");
+        if (!Recipes.cannerBottle.addRecipe(Recipes.inputFactory.forStack(new ItemStack(ModItems.floppyJacket, 1,
+                        moe.qingu.youran.item.ItemFloppyJacket.PUNCHED), 1),
+                Recipes.inputFactory.forStack(new ItemStack(ModItems.polishedPlatter), 1), new ItemStack(ModItems.floppyDisk), false)) {
+            YouranMod.LOG.error("IC2 固体装罐配方（已冲孔的软盘套 + 抛光盘片 → 软盘）没加上：已有输入相同的配方");
+        }
+        if (!Recipes.compressor.addRecipe(Recipes.inputFactory.forStack(new ItemStack(ModItems.pvcLump),
+                        moe.qingu.youran.logic.pcb.PcbNumbers.JACKET_LUMPS), null, false,
+                new ItemStack(ModItems.floppyJacket, 1, moe.qingu.youran.item.ItemFloppyJacket.UNPUNCHED))) {
+            YouranMod.LOG.error("IC2 压缩机配方（6 聚氯乙烯团 → 软盘套）没加上：已有输入相同的配方");
         }
     }
 }

@@ -44,6 +44,14 @@ public final class ClientModels {
                 fluid(block, item);
                 continue;
             }
+            if (item instanceof moe.qingu.youran.item.MetaModelled) {
+                moe.qingu.youran.item.MetaModelled m = (moe.qingu.youran.item.MetaModelled) item;
+                for (int meta : m.modelMetas()) {
+                    ModelLoader.setCustomModelResourceLocation(item, meta,
+                            new ModelResourceLocation(new net.minecraft.util.ResourceLocation(YouranMod.MODID, m.modelName(meta)), "inventory"));
+                }
+                continue;
+            }
             ModelLoader.setCustomModelResourceLocation(item, 0, new ModelResourceLocation(item.getRegistryName(), "inventory"));
         }
     }
@@ -51,6 +59,12 @@ public final class ClientModels {
     @SubscribeEvent
     public static void stitchFluids(TextureStitchEvent.Pre event) {
         for (Fluid fluid : new Fluid[]{ModFluids.aceticAcid, ModFluids.trichlorosilane, ModFluids.trichlorosilaneHydrogen}) {
+            if (fluid != null) {
+                event.getMap().registerSprite(fluid.getStill());
+                event.getMap().registerSprite(fluid.getFlowing());
+            }
+        }
+        for (Fluid fluid : ModFluids.pcbFluids()) {
             if (fluid != null) {
                 event.getMap().registerSprite(fluid.getStill());
                 event.getMap().registerSprite(fluid.getFlowing());

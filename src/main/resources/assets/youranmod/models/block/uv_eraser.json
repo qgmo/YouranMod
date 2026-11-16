@@ -1,0 +1,8 @@
+{
+  "parent": "block/orientable",
+  "textures": {
+    "top": "youranmod:blocks/uv_eraser_top",
+    "front": "youranmod:blocks/uv_eraser_front",
+    "side": "youranmod:blocks/uv_eraser_side"
+  }
+}

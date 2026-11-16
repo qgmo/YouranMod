@@ -28,7 +28,8 @@ import java.util.Map;
  *     <li>601 乙酸 {@code acetic_acid}：碳 2、氢 4、氧 2；</li>
  *     <li>602 醋酸纤维素 {@code cellulose_acetate}：碳 12、氢 16、氧 8（三醋酸纤维素的重复单元）；</li>
  *     <li>603 硼酸根 {@code borate}：硼 1、氧 3（电气石里的 BO₃ 单元，芯片线的硼来源）；</li>
- *     <li>604 四氯化锡 {@code tin_tetrachloride}：锡 1、氯 4（光刻胶线，环化橡胶的催化剂）。</li>
+ *     <li>604 四氯化锡 {@code tin_tetrachloride}：锡 1、氯 4（光刻胶线，环化橡胶的催化剂）；</li>
+ *     <li>605 三氯化铁 {@code ferric_chloride}：铁 1、氯 3（服主 11-16，主板蚀刻液；1 三氯化铁粉 ⇄ 16 个）。</li>
  * </ul>
  * 名字在本模组 jar 里的 {@code assets/alchemistry/lang/*.lang}（键 {@code item.alchemistry:compound_<名字>.name}），
  * 客户端加载语言文件时与炼金化学自己的合并。
@@ -42,6 +43,8 @@ public final class AlchemistryCompat {
     public static final String BORATE = moe.qingu.youran.logic.boron.Tourmaline.BORATE;
     /** 四氯化锡（服主 11-15，光刻胶线） */
     public static final String TIN_TETRACHLORIDE = "tin_tetrachloride";
+    /** 三氯化铁（服主 11-16，主板蚀刻） */
+    public static final String FERRIC_CHLORIDE = "ferric_chloride";
     /** 炼金化学自带的铵（叠氮化钠的辅料） */
     public static final String AMMONIUM = "ammonium";
     /** 钠、钨的原子序数（钠锭、钨锭） */
@@ -63,7 +66,8 @@ public final class AlchemistryCompat {
             new CompoundSpec(ACETIC_ACID, 601, new Color(236, 234, 214), "carbon", 2, "hydrogen", 4, "oxygen", 2),
             new CompoundSpec(CELLULOSE_ACETATE, 602, new Color(226, 222, 204), "carbon", 12, "hydrogen", 16, "oxygen", 8),
             new CompoundSpec(BORATE, 603, new Color(214, 222, 236), "boron", 1, "oxygen", 3),
-            new CompoundSpec(TIN_TETRACHLORIDE, 604, new Color(232, 230, 210), "tin", 1, "chlorine", 4));
+            new CompoundSpec(TIN_TETRACHLORIDE, 604, new Color(232, 230, 210), "tin", 1, "chlorine", 4),
+            new CompoundSpec(FERRIC_CHLORIDE, 605, new Color(120, 70, 25), "iron", 1, "chlorine", 3));
 
     /** 化合物名 → 元数据（注册成的，或炼金化学里已有的） */
     private static final Map<String, Integer> METAS = new HashMap<>();
@@ -181,7 +185,12 @@ public final class AlchemistryCompat {
 
     /** 化合机配方：16 四氧化三铁（第一格）→ 1 磁粉。后初始化时调用（炼金化学在载入完成时才应用 CraftTweaker 的删改，脚本删得掉） */
     public static void registerCombinerRecipe(ItemStack output) {
-        ItemStack input = stack(TRIIRON_TETROXIDE, 16);
+        registerCombinerRecipe(output, TRIIRON_TETROXIDE, 16);
+    }
+
+    /** 化合机配方：{@code count} 个化合物 {@code compound}（第一格）→ {@code output}。后初始化时调用 */
+    public static void registerCombinerRecipe(ItemStack output, String compound, int count) {
+        ItemStack input = stack(compound, count);
         if (input.isEmpty() || output.isEmpty()) {
             
             return;
@@ -194,7 +203,7 @@ public final class AlchemistryCompat {
             @SuppressWarnings("unchecked")
             List<Object> combiner = (List<Object>) modRecipes.getMethod("getCombinerRecipes").invoke(modRecipes.getField("INSTANCE").get(null));
             combiner.add(recipe);
-            YouranMod.LOG.info("已加炼金化学化合机配方：16 {} → {}", TRIIRON_TETROXIDE, output.getItem().getRegistryName());
+            YouranMod.LOG.info("已加炼金化学化合机配方：{} {} → {}", count, compound, output.getItem().getRegistryName());
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
             YouranMod.LOG.error("加炼金化学的化合机配方失败", e);
         }

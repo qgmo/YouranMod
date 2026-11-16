@@ -290,6 +290,8 @@ public final class LithoRecipes {
             }
             // 汞灯：工程师装配台蓝图“汞灯”（两种玻璃管 × 两种气体 × 两种接线；数据由 Mixin 带过去）
             moe.qingu.youran.compat.immersiveengineering.LampAssembly.register();
+            // 主板、扩展卡（汉卡）：装芯片（服主 11-16）
+            moe.qingu.youran.compat.immersiveengineering.BoardAssembly.register();
         }
     }
 
