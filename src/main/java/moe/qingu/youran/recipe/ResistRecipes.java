@@ -20,7 +20,7 @@ import net.minecraftforge.fluids.FluidStack;
  * 粘性树脂 / 橡胶 + 四氯化锡 → 环化橡胶（装罐机、灌装机、匠魂浇铸台；SCP-914 那几条在整合包配置里）
  * 硝石粉 + 辅料 10 铵 + 1 钠锭 → 叠氮化钠粉（电弧炉）
  * （通用材料一律按矿物词典：树脂 itemResin、橡胶 itemRubber、小撮锡粉 dustTinyTin、硝石粉 dustSaltpeter、钠锭 ingotSodium；服主 11-16）
- * 杂酚油 → 芳烃 + 甲酚（沉浸原油精馏塔）
+ * 杂酚油 → 芳烃 + 甲酚（沉浸原油精馏塔；11-16 起另有 10% 掉出一个萘，见 {@link PositiveResistRecipes}）
  * 叠氮化钠粉 + 芳烃 → 带叠氮基的芳烃（装罐机、搅拌机）
  * 带叠氮基的芳烃 + 盐酸 → 双叠氮感光剂（炼油厂、冶炼炉）
  * 环化橡胶 + 双叠氮感光剂 → 光刻胶（负胶）（装罐机、搅拌机）
@@ -219,12 +219,14 @@ public final class ResistRecipes {
                 if (creosote == null) {
                     continue;
                 }
+                // 服主 11-16：每 100 mB 杂酚油另有 10% 掉出一个萘
                 flaxbeard.immersivepetroleum.api.crafting.DistillationRecipe.addRecipe(new FluidStack[]{
                                 new FluidStack(ModFluids.arene, CREOSOTE_ARENE), new FluidStack(ModFluids.cresol, CREOSOTE_CRESOL)},
-                        new ItemStack[0], creosote, CREOSOTE_ENERGY, 1, new float[0]);
+                        new ItemStack[]{new ItemStack(ModItems.naphthalene)}, creosote, CREOSOTE_ENERGY, 1,
+                        new float[]{moe.qingu.youran.logic.resist.ResistNumbers.DISTILL_CHANCE});
                 added++;
             }
-            YouranMod.LOG.info("已加沉浸原油精馏塔配方：{} 种杂酚油 → 芳烃 + 甲酚", added);
+            YouranMod.LOG.info("已加沉浸原油精馏塔配方：{} 种杂酚油 → 芳烃 + 甲酚 + 10% 萘", added);
         }
     }
 }

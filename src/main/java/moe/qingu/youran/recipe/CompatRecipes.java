@@ -79,6 +79,7 @@ public final class CompatRecipes {
         // 光刻（服主 11-15 / 11-16）：负胶链、汞灯的玻璃管等
         ResistRecipes.postInit(ic2, ie, tic, ie && Loader.isModLoaded("immersivepetroleum"), alchemistry);
         LithoRecipes.postInit(ic2, ie, tic, alchemistry);
+        PositiveResistRecipes.postInit(ie, alchemistry);
         MolybdenumRecipes.postInit();
         // 主板线（服主 11-16）
         PcbRecipes.postInit(ic2, ie, tic, alchemistry);
