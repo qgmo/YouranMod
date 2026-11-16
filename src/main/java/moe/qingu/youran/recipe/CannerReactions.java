@@ -86,6 +86,36 @@ public final class CannerReactions {
 
     public static final ReactionTable<ItemStack, ReactionItem> TABLE = new ReactionTable<>(STACKS);
 
+    /**
+     * 内置的“流体 + 物品 → 只出流体”的反应：不放进 {@link #TABLE}，改登记进 IC2 自己的富集配方表
+     * （{@code compat.ic2.CannerEnrichRecipes}，后初始化时），这样它们和 IC2 原生配方一样处理、显示在 IC2 自己的装罐机 JEI 页里。
+     */
+    private static final List<FluidItemReaction<ItemStack, ReactionItem>> NATIVE = new java.util.ArrayList<>();
+
+    /** 内置的、登记进 IC2 原生富集配方表的反应（登记后不再改） */
+    public static synchronized List<FluidItemReaction<ItemStack, ReactionItem>> nativeEnrichments() {
+        return java.util.Collections.unmodifiableList(new java.util.ArrayList<>(NATIVE));
+    }
+
+    /**
+     * 这条反应能不能交给 IC2 原生的富集配方：只出流体（产物固定；带 NBT 的变种如光刻胶 {@code Resist:"positive"}、带叠氮基的芳烃
+     * 也行，IC2 把配方里的产物流体连 NBT 原样灌进输出罐），输入流体不靠 NBT 区分（IC2 用 {@code isFluidEqual} 连 NBT 一起比，
+     * 键里带“#”的变种输入我们的表是按变种认的，原生表没有这个键，留在我们的表里），输入物品是矿物词典或具体物品。
+     * 出物品的、产物按输入数据现算的（硅晶圆）留在我们的表。
+     */
+    public static boolean isNativeEnrichment(FluidItemReaction<?, ?> r) {
+        return r.outputItem() == null && r.outputFluid() != null && r.inputFluid().indexOf('#') < 0
+                && (r.inputItem().oreName() != null || r.inputItem().itemId() != null);
+    }
+
+    private static void addBuiltin(FluidItemReaction<ItemStack, ReactionItem> r) {
+        if (isNativeEnrichment(r)) {
+            NATIVE.add(r);
+        } else {
+            TABLE.add(r);
+        }
+    }
+
     private static boolean builtinsRegistered;
 
     private CannerReactions() {
@@ -100,44 +130,44 @@ public final class CannerReactions {
             return;
         }
         builtinsRegistered = true;
-        TABLE.add(smallMagnetite());
-        TABLE.add(pvcFromPolyethylene());
+        addBuiltin(smallMagnetite());
+        addBuiltin(pvcFromPolyethylene());
         int meta = AlchemistryCompat.meta(AlchemistryCompat.TRIIRON_TETROXIDE);
         if (meta >= 0) {
             for (FluidItemReaction<ItemStack, ReactionItem> r : alchemistry(meta)) {
-                TABLE.add(r);
+                addBuiltin(r);
             }
         }
         int cellulose = AlchemistryCompat.meta(AlchemistryCompat.CELLULOSE);
         int acetate = AlchemistryCompat.meta(AlchemistryCompat.CELLULOSE_ACETATE);
         if (cellulose >= 0 && acetate >= 0) {
-            TABLE.add(celluloseAcetate(cellulose, acetate));
+            addBuiltin(celluloseAcetate(cellulose, acetate));
         }
         if (Loader.isModLoaded("tconstruct")) {
-            TABLE.add(cobaltMagnetic());
+            addBuiltin(cobaltMagnetic());
         }
         for (WaferMold mold : WaferMold.values()) {
-            TABLE.add(wafer(mold));
+            addBuiltin(wafer(mold));
         }
         if (FluidRegistry.isFluidRegistered(HYDROCHLORIC_ACID)) {
-            TABLE.add(CannerReactions.<ItemStack>trichlorosilane());
-            TABLE.add(CannerReactions.<ItemStack>silicaFromSlag());
+            addBuiltin(CannerReactions.<ItemStack>trichlorosilane());
+            addBuiltin(CannerReactions.<ItemStack>silicaFromSlag());
         } else {
             YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加装罐机的三氯氢硅、硼硅酸盐渣配方", HYDROCHLORIC_ACID);
         }
         // 光刻胶线（负胶）
         for (FluidItemReaction<ItemStack, ReactionItem> r : ResistRecipes.cannerReactions()) {
-            TABLE.add(r);
+            addBuiltin(r);
         }
         // 主板线（服主 11-16）
         for (FluidItemReaction<ItemStack, ReactionItem> r : PcbRecipes.cannerReactions()) {
-            TABLE.add(r);
+            addBuiltin(r);
         }
         // 正胶线（服主 11-16）
         for (FluidItemReaction<ItemStack, ReactionItem> r : PositiveResistRecipes.cannerReactions()) {
-            TABLE.add(r);
+            addBuiltin(r);
         }
-        YouranMod.LOG.info("装罐机反应配方：内置 {} 条", TABLE.reactions().size());
+        YouranMod.LOG.info("装罐机反应配方：内置 {} 条，另有 {} 条只出流体的交给 IC2 原生的富集配方表", TABLE.reactions().size(), NATIVE.size());
     }
 
     /** 小撮磁粉：3 小撮铁粉（dustTinyIron）+ 5000 mB 过热蒸汽 → 1 小撮磁粉 + 20 mB 氢气 */
