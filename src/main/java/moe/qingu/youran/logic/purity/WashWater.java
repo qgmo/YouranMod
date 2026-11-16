@@ -44,6 +44,27 @@ public final class WashWater {
         return fluidName != null && RATES.containsKey(fluidName);
     }
 
+    /**
+     * 水质档次（服主 11-16：JEI 里不写报废率，用“谁比谁好”的定性说法）：0 很脏、1 偏脏、2 一般、3 干净、4 很干净。
+     * 按纯净率分：&lt;40、40–59、60–79、80–94、≥95。
+     */
+    public static int grade(String fluidName) {
+        int r = rate(fluidName);
+        if (r >= 95) {
+            return 4;
+        }
+        if (r >= 80) {
+            return 3;
+        }
+        if (r >= 60) {
+            return 2;
+        }
+        if (r >= 40) {
+            return 1;
+        }
+        return 0;
+    }
+
     /** 纯净率（百分数）；不是洗矿机认的水（或罐空，null）时为 0 */
     public static int rate(String fluidName) {
         Integer r = fluidName == null ? null : RATES.get(fluidName);

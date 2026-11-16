@@ -64,4 +64,20 @@ class WashWaterTest {
             last = p;
         }
     }
+
+    /** 水质档次（JEI 里的定性说法）：按纯净率从低到高不降；沼泽水最脏、蒸馏水和不老泉最干净；不是水算最脏 */
+    @Test
+    void gradesFollowPurity() {
+        int last = -1;
+        for (String name : WashWater.rates().keySet()) {
+            int g = WashWater.grade(name);
+            assertTrue(g >= last, name);
+            last = g;
+        }
+        assertEquals(0, WashWater.grade("swamp_water"));
+        assertEquals(2, WashWater.grade("water"));
+        assertEquals(4, WashWater.grade("ic2distilled_water"));
+        assertEquals(4, WashWater.grade("fountain_of_youth_liquid"));
+        assertEquals(0, WashWater.grade("lava"));
+    }
 }

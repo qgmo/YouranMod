@@ -105,8 +105,8 @@ final class JeiRecipes {
     }
 
     /**
-     * 洗矿机洗硅晶圆：整合包里有的每种水一条（1000 mB 水 + 9 个 9 的硅晶圆 → 高精硅晶圆），说明里写纯净率与 9 个 9 时
-     * 金、粘土铸模的报废率。
+     * 洗矿机洗硅晶圆：整合包里有的每种水一条（1000 mB 水 + 9 个 9 的硅晶圆 → 高精硅晶圆），说明里写水质档次
+     * 与“水越干净、金铸模比粘土铸模越不容易洗坏”（定性，不写报废率）。
      */
     static List<FluidItemRecipe> waferWashing(List<String> waters) {
         List<FluidItemRecipe> list = new ArrayList<>();
@@ -115,15 +115,14 @@ final class JeiRecipes {
             if (water == null) {
                 continue;
             }
-            int rate = WashWater.rate(name);
             List<ItemStack> wafers = new ArrayList<>();
             for (WaferMold mold : WaferMold.values()) {
                 wafers.add(ItemSiliconWafer.make(ModItems.siliconWafer, Purity.WAFER_GRADE_NINES, mold));
             }
-            List<String> notes = java.util.Arrays.asList(I18n.format("youranmod.jei.ore_washing_wafer.note", rate),
-                    I18n.format("youranmod.jei.ore_washing_wafer.scrap",
-                            percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.GOLD)),
-                            percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.CLAY))));
+            // 服主 11-16：不写报废率与纯净率的数字，只说水质档次和“谁比谁好”
+            List<String> notes = java.util.Arrays.asList(
+                    I18n.format("youranmod.jei.ore_washing_wafer.note", I18n.format("youranmod.jei.water_grade." + WashWater.grade(name))),
+                    I18n.format("youranmod.jei.ore_washing_wafer.scrap"));
             // 洗出来的是高精硅晶圆，也可能是报废的（IC2 洗矿机页的输出有三格，这里用前两格）
             List<ItemStack> outputs = java.util.Arrays.asList(
                     ItemSiliconWafer.make(ModItems.precisionSiliconWafer, Purity.WAFER_GRADE_NINES, WaferMold.GOLD),
@@ -131,15 +130,6 @@ final class JeiRecipes {
             list.add(new FluidItemRecipe(water, wafers, null, outputs, notes));
         }
         return list;
-    }
-
-    /** 概率写成百分数，最多一位小数：0.075 →“7.5%”，0.4 →“40%” */
-    static String percent(double p) {
-        String s = String.format(java.util.Locale.ROOT, "%.1f", p * 100);
-        if (s.endsWith(".0")) {
-            s = s.substring(0, s.length() - 2);
-        }
-        return s + "%";
     }
 
     /** 按注册名与元数据取物品；没有时为空物品 */
