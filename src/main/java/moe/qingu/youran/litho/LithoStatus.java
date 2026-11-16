@@ -23,7 +23,11 @@ public enum LithoStatus {
     NEED_ALUMINUM,
     NEED_CASING,
     OUTPUT_FULL,
-    WAFER_REMOVED;
+    WAFER_REMOVED,
+    /** 正胶显影缺水（服主 11-16；加在最后，不改已有状态的编号） */
+    NEED_WATER,
+    /** 正胶显影缺碱 */
+    NEED_ALKALI;
 
     public String key() {
         return "youranmod.litho.status." + name().toLowerCase(java.util.Locale.ROOT);

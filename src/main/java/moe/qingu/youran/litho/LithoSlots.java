@@ -19,7 +19,10 @@ public final class LithoSlots {
     /** 芯片输出 */
     public static final int OUTPUT_FIRST = 14;
     public static final int OUTPUTS = 4;
-    public static final int COUNT = 18;
+    /** 正胶显影吃的碱（服主 11-16）：炼金化学氢氧根、碳酸钾各一格；加在最后，不改已有格子的编号 */
+    public static final int HYDROXIDE = 18;
+    public static final int CARBONATE = 19;
+    public static final int COUNT = 20;
 
     private LithoSlots() {
     }
