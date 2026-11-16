@@ -104,7 +104,7 @@ class ChipQualityTest {
             ChipQuality.Result res = ChipQuality.evaluate(good(), r);
             if (!res.scrapped()) {
                 ok++;
-                assertTrue(res.maxKHz > ChipModel.Z80.standardKHz * 0.6 && res.maxKHz < ChipModel.Z80.standardKHz * 1.8);
+                assertTrue(res.maxKHz > ChipModel.Z80.ratedKHz * 0.6 && res.maxKHz < ChipModel.Z80.ratedKHz * 1.8);
                 assertTrue(res.heatToleranceKs > 18000 && res.heatToleranceKs < 25000);
                 assertTrue(res.lifetimeSeconds > 50 * 3600L);
             }

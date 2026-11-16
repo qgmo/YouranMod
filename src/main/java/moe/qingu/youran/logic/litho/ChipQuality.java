@@ -125,7 +125,7 @@ public final class ChipQuality {
         double p = purityQuality(in.waferNines);
         double a = alignQuality(in.alignPermille);
         double pk = in.pack == null ? 0 : in.pack.quality();
-        double freq = in.model.standardKHz * (0.75 + 0.25 * q + 0.2 * p + 0.3 * a) * noise(random);
+        double freq = in.model.ratedKHz * (0.75 + 0.25 * q + 0.2 * p + 0.3 * a) * noise(random);
         double hours = LithoNumbers.LIFETIME_BASE_HOURS * (0.4 + 0.3 * q + 0.3 * p + 0.2 * a) * noise(random);
         double heat = 60 * (LithoNumbers.HEAT_BASE_K + LithoNumbers.HEAT_PACKAGE_K * pk + LithoNumbers.HEAT_ALIGN_K * a) * noise(random);
         return new Result(Reason.NONE, (int) Math.round(heat), (int) Math.round(freq), Math.round(hours * 3600));

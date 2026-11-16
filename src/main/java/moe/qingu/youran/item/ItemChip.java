@@ -48,12 +48,23 @@ public class ItemChip extends ItemModelled {
         if (tag.getBoolean(ChipNbt.SCRAPPED)) {
             lines.add(I18n.format("youranmod.chip.scrap." + tag.getString(ChipNbt.SCRAP_REASON)));
         } else {
-            lines.add(I18n.format("youranmod.chip.max_freq", mhz(tag.getInteger(ChipNbt.MAX_FREQ))));
+            ChipModel model = ChipModel.byId(tag.getString(ChipModel.TAG));
+            if (model != null && !model.isCpu()) {
+                lines.add(I18n.format("youranmod.chip.max_freq_ram", mhz(tag.getInteger(ChipNbt.MAX_FREQ)),
+                        ChipModel.accessNs(tag.getInteger(ChipNbt.MAX_FREQ))));
+            } else {
+                lines.add(I18n.format("youranmod.chip.max_freq", mhz(tag.getInteger(ChipNbt.MAX_FREQ))));
+            }
             lines.add(I18n.format("youranmod.chip.heat", tag.getInteger(ChipNbt.HEAT), Math.round(tag.getInteger(ChipNbt.HEAT) / 60.0)));
             lines.add(I18n.format("youranmod.chip.lifetime", tag.getLong(ChipNbt.LIFETIME) / 3600));
         }
-        lines.add(I18n.format("youranmod.chip.freq", mhz(tag.getInteger(ChipNbt.STD_FREQ)), mhz(tag.getInteger(ChipNbt.MIN_FREQ)),
-                mhz(tag.getInteger(ChipNbt.MAX_ADJ_FREQ))));
+        ChipModel kindOf = ChipModel.byId(tag.getString(ChipModel.TAG));
+        if (kindOf != null && !kindOf.isCpu()) {
+            lines.add(I18n.format("youranmod.chip.rated_access", ChipModel.accessNs(kindOf.ratedKHz), mhz(kindOf.ratedKHz)));
+        } else {
+            lines.add(I18n.format("youranmod.chip.freq", mhz(tag.getInteger(ChipNbt.STD_FREQ)), mhz(tag.getInteger(ChipNbt.MIN_FREQ)),
+                    mhz(tag.getInteger(ChipNbt.MAX_ADJ_FREQ))));
+        }
         if (flag.isAdvanced() || net.minecraft.client.gui.GuiScreen.isShiftKeyDown()) {
             NBTTagCompound made = tag.getCompoundTag(ChipNbt.MADE);
             ChipPackage pack = ChipPackage.byId(made.getString("Package"));

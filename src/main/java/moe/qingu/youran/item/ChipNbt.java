@@ -14,6 +14,7 @@ import net.minecraft.nbt.NBTTagCompound;
  *  StdFreq:4000, MinFreq:2500, MaxAdjFreq:6000,  // 这型 CPU 自带的标准频率与可调范围 kHz
  *  Made:{Nines:9, Mold:"gold", Resist:"negative", Solvent:900, Align:930, Lamp:780, Package:"gold", MaskWear:12}}
  * </pre>
+ * 内存（{@code Model:"4164"}）没有 {@code StdFreq}、{@code MinFreq}、{@code MaxAdjFreq}；{@code MaxFreq} 照样有（存取时间是它的倒数）。
  * 报废的芯片 {@code Scrapped:1b}、{@code ScrapReason}（resolution / alignment / defect / exposed_resist），没有三项指标。
  * 涂过变质（已曝光）光刻胶的，{@code Made} 里另记 {@code ExposedResist:1b}。
  */
@@ -44,9 +45,11 @@ public final class ChipNbt {
             tag.setInteger(MAX_FREQ, result.maxKHz);
             tag.setLong(LIFETIME, result.lifetimeSeconds);
         }
-        tag.setInteger(STD_FREQ, model.standardKHz);
-        tag.setInteger(MIN_FREQ, model.minKHz);
-        tag.setInteger(MAX_ADJ_FREQ, model.maxAdjustKHz);
+        if (model.isCpu()) {
+            tag.setInteger(STD_FREQ, model.ratedKHz);
+            tag.setInteger(MIN_FREQ, model.minKHz);
+            tag.setInteger(MAX_ADJ_FREQ, model.maxAdjustKHz);
+        }
         tag.setTag(MADE, made);
         return tag;
     }
