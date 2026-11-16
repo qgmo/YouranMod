@@ -80,7 +80,12 @@ public class ItemMotherboard extends Item implements MetaModelled {
 
     @Override
     public void getSubItems(CreativeTabs tab, NonNullList<ItemStack> items) {
-        // 没装芯片的主板就是打好孔的光板；装了的每块都不同，创造物品栏不列
+        // 没装芯片的主板就是打好孔的光板（工序里的打孔板），不列；创造物品栏列装齐了标准芯片的（见 CreativeStandards）
+        if (isInCreativeTab(tab)) {
+            for (BoardType t : new BoardType[]{BoardType.COMPUTER, BoardType.PC}) {
+                items.add(make(this, t, CreativeStandards.board(t)));
+            }
+        }
     }
 
     @Override

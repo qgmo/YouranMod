@@ -55,6 +55,16 @@ public class ItemSiliconWafer extends ItemLangTooltip {
         return stack;
     }
 
+    /** 创造物品栏：没有标记的按 1 个 9、没有铸模算（洗矿、光刻都会报废），所以列一片标准的（{@link CreativeStandards#wafer}）取代它 */
+    @Override
+    public void getSubItems(net.minecraft.creativetab.CreativeTabs tab, net.minecraft.util.NonNullList<ItemStack> items) {
+        if (isInCreativeTab(tab)) {
+            ItemStack s = new ItemStack(this);
+            s.setTagCompound(CreativeStandards.wafer());
+            items.add(s);
+        }
+    }
+
     @SideOnly(Side.CLIENT)
     @Override
     public void addInformation(ItemStack stack, @Nullable World world, List<String> lines, ITooltipFlag flag) {

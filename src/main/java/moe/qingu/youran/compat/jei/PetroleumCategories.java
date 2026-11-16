@@ -94,8 +94,26 @@ final class PetroleumCategories {
                 fluids.set(0, recipe.inputFluid);
             }
             if (recipe.outputFluid != null) {
-                fluids.init(1, false, OUT_X + dx, TANK_Y - CROP_Y, TANK_W, TANK_H, capacity, false, tankOverlay);
-                fluids.set(1, recipe.outputFluid);
+                // 一次出几种流体：同一个罐里自下而上叠着（精馏塔的输出罐是多流体罐），一种一个格子，按量分高度
+                java.util.List<net.minecraftforge.fluids.FluidStack> outs = new java.util.ArrayList<>();
+                outs.add(recipe.outputFluid);
+                outs.addAll(recipe.extraOutputFluids);
+                int total = 0;
+                for (net.minecraftforge.fluids.FluidStack f : outs) {
+                    total += f.amount;
+                }
+                int y = TANK_Y - CROP_Y + TANK_H;
+                for (int i = 0; i < outs.size(); i++) {
+                    int h = outs.size() == 1 ? TANK_H : Math.max(4, TANK_H * outs.get(i).amount / total);
+                    y -= h;
+                    fluids.init(1 + i, false, OUT_X + dx, y, TANK_W, h, outs.get(i).amount, false, i == 0 ? tankOverlay : null);
+                    fluids.set(1 + i, outs.get(i));
+                }
+            }
+            // 按概率掉出的物品放在罐子右边
+            if (!recipe.outputItems.isEmpty()) {
+                layout.getItemStacks().init(0, false, OUT_X + dx + TANK_W + 6, TANK_Y - CROP_Y + 10);
+                layout.getItemStacks().set(0, recipe.outputItems);
             }
         }
     }

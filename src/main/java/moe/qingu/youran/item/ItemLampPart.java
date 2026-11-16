@@ -34,6 +34,18 @@ public class ItemLampPart extends ItemLangTooltip {
         return lamp ? new LampMercuryHandler(stack) : null;
     }
 
+    /** 创造物品栏：没有 NBT 的汞灯是“没装好的灯”（收不了汞），所以列一盏标准的（{@link CreativeStandards#lamp}）取代它 */
+    @Override
+    public void getSubItems(net.minecraft.creativetab.CreativeTabs tab, net.minecraft.util.NonNullList<ItemStack> items) {
+        if (!lamp) {
+            super.getSubItems(tab, items);
+        } else if (isInCreativeTab(tab)) {
+            ItemStack s = new ItemStack(this);
+            s.setTagCompound(CreativeStandards.lamp());
+            items.add(s);
+        }
+    }
+
     @SideOnly(Side.CLIENT)
     @Override
     public void addInformation(ItemStack stack, @Nullable World world, List<String> lines, ITooltipFlag flag) {
