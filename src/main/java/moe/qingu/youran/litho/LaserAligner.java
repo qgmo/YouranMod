@@ -220,6 +220,7 @@ public class LaserAligner {
             logic.step(master.alignment);
             if (logic.state() == LaserAlign.State.LOCKED) {
                 master.aligned = master.alignRate() >= LithoNumbers.ALIGN_MIN_PERMILLE;
+                master.laserLocked();
             }
             master.markDirty();
         }
