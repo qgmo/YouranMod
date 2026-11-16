@@ -21,7 +21,8 @@ import java.util.List;
  *     <li>堆叠数 1；生产出来时就分配盘号（盘号决定初始坏道）。“生产出来”取物品第一次在服务端的物品栏里（每 tick 的 {@code onUpdate}）、
  *     地上（{@code onEntityItemUpdate}）、合成出来（{@code onCreated}）或插进软驱（电脑那边调 {@link #ensureId}）的时候——
  *     还没分配盘号的盘只是一张没人见过的盘，在机器的输出槽里也一样，堆叠数 1 所以不会叠成一摞，分配时机早晚不影响什么；</li>
- *     <li>工具盘（{@link ToolDisk}）由 {@link #toolDisk} 生成（以后 MineBay 上架调它）。</li>
+ *     <li>工具盘、正版 ROM 镜像盘（{@link ToolDisk}）由 {@link #toolDisk} 生成；MineBay 发货用 {@link #unnumberedToolDisk}（还没有盘号，
+ *     到了玩家手里再分配，同别的软盘）。</li>
  * </ul>
  */
 public class ItemFloppyDisk extends ItemWithTooltip {
@@ -60,10 +61,20 @@ public class ItemFloppyDisk extends ItemWithTooltip {
         return id;
     }
 
-    /** 生成一张工具盘（服务端；带新盘号）。以后 MineBay 上架时调用 */
+    /** 生成一张工具盘（服务端；带新盘号） */
     public static ItemStack toolDisk(ToolDisk tool, World world) {
         ItemStack stack = new ItemStack(ModItems.floppyDisk);
         stack.setTagCompound(FloppyNbt.toolDisk(FloppyIds.issue(world), tool.image, tool.label));
+        return stack;
+    }
+
+    /**
+     * 一张还没有盘号的工具盘（镜像、标签已写好）：MineBay 发货前准备物品时用，准备时不能改游戏状态（不发盘号）；
+     * 第一次进物品栏、掉在地上时由 {@link #ensureId} 分配盘号
+     */
+    public static ItemStack unnumberedToolDisk(ToolDisk tool) {
+        ItemStack stack = new ItemStack(ModItems.floppyDisk);
+        stack.setTagCompound(FloppyNbt.toolDisk(0, tool.image, tool.label));
         return stack;
     }
 

@@ -19,9 +19,9 @@ import java.util.List;
 /**
  * 掩模（服主 11-15）：一套掩模（一种芯片的全部层）做成一个物品，放进光刻机的掩模槽（只能手动放取）。固定型号，型号是物品元数据（服主 11-16），NBT 只记磨损
  * （{@code Wear}：用它做过几片，不随每片消耗、慢慢磨损，到 {@link LithoNumbers#MASK_LIFE} 不能再用）。右键可以欣赏版图。
- * 来源（MineBay 每月一两个、失落的城市战利品）这一阶段不接，只有物品本身。
+ * 来源（服主 11-16）：MineBay 每种每月一套（{@code compat.minebay.MineBayListings}）、失落的城市建筑箱子（{@code server.loot.LostCityLoot}）。
  */
-public class ItemPhotomask extends ItemModelled {
+public class ItemPhotomask extends ItemModelled implements moe.qingu.youran.api.lang.FormattedItemName {
     public static final String TAG_WEAR = "Wear";
 
     public ItemPhotomask() {

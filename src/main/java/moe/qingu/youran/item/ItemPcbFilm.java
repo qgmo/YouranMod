@@ -17,9 +17,9 @@ import java.util.List;
 
 /**
  * 线路底片（服主 11-16）：每种板子一张（固定型号，元数据 = {@link BoardType#id}），在紫外擦除器里和涂胶主板一起曝光，底片不消耗。
- * 来源：MineBay 常年有卖（服主随整合包上架）；以后可在紫外擦除器里复制（空白胶片以后再定）。
+ * 来源：MineBay 常年有卖、不限量（{@code compat.minebay.MineBayListings}）；以后可在紫外擦除器里复制（空白胶片以后再定）。
  */
-public class ItemPcbFilm extends Item implements MetaModelled {
+public class ItemPcbFilm extends Item implements MetaModelled, moe.qingu.youran.api.lang.FormattedItemName {
     public ItemPcbFilm() {
         setRegistryName("pcb_film");
         setTranslationKey("pcb_film");
@@ -40,6 +40,17 @@ public class ItemPcbFilm extends Item implements MetaModelled {
         BoardType t = type(stack);
         return net.minecraft.util.text.translation.I18n.translateToLocalFormatted("item.pcb_film.name",
                 net.minecraft.util.text.translation.I18n.translateToLocal("youranmod.board." + (t == null ? "computer" : t.name)));
+    }
+
+    @Override
+    public String nameKey(ItemStack stack) {
+        return "item.pcb_film.name";
+    }
+
+    @Override
+    public String[] nameArgKeys(ItemStack stack) {
+        BoardType t = type(stack);
+        return new String[]{"youranmod.board." + (t == null ? "computer" : t.name)};
     }
 
     @SideOnly(Side.CLIENT)

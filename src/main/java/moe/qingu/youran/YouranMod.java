@@ -86,10 +86,14 @@ public final class YouranMod {
         }
     }
 
-    /** 后初始化：加进别的模组机器的配方（软依赖，见 {@code recipe.CompatRecipes}） */
+    /** 后初始化：加进别的模组机器的配方（软依赖，见 {@code recipe.CompatRecipes}）；在 MineBay 上架 */
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
         CompatRecipes.postInit();
+        // 家具模组的 MineBay：上架掩模、设计图、底片、软盘（只在装了家具时加载 compat.minebay）
+        if (net.minecraftforge.fml.common.Loader.isModLoaded(moe.qingu.youran.compat.minebay.MineBayListings.CFM)) {
+            moe.qingu.youran.compat.minebay.MineBayListings.register();
+        }
     }
 
     /** 全部模组载入完成：沉浸工程铜矿石粉碎配方加副产物（它的矿石配方要到后初始化才全）；工程师手册（沉浸工程在它的后初始化里才建手册）里加光刻机一页（只在客户端） */

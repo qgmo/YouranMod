@@ -14,7 +14,8 @@ import java.io.InputStream;
  *     <li>EPROM：烧进去的字节与 YouranMod 自带的这份镜像（{@value #RESOURCE}，8 KB 的 8088 伺服程序，源码在仓库
  *     {@code src/main/rom/laser_align.asm}）完全一样才认——字节数、SHA-256 都比（同电脑开机检查 ROM 的规则，见 {@link RomContent#genuine}）。</li>
  * </ul>
- * 镜像怎么到玩家的磁盘上（MineBay 卖正版）这一轮没做；也可以从已有对准台的主板拷出来（以后）。
+ * 镜像到玩家磁盘上：MineBay 卖装着它的软盘（{@code item.ToolDisk#ALIGN_ROM}，079 服务里 {@code align} 镜像的 {@code ALIGN.ROM}，
+ * 与这份逐字节相同）；也可以从已有对准台的主板拷出来（以后）。
  */
 public final class LaserAlignProgram {
     /** 掩模 ROM 的内容 id（同芯片型号 id） */

@@ -72,6 +72,19 @@ if (!ipJar.isFile()) {
     throw new GradleException("缺少沉浸原油：把整合包里的 ${property('ip_jar')} 放到 libs/（只编译，不进仓库，见 README）")
 }
 
+// 家具 fork 的 MineBay 上架接口的编译用替身（src/minebayApi，见里面的 package-info）：家具依赖 YouranMod，YouranMod 不能反过来依赖家具的 jar。
+// 只给 compat.minebay 编译用，不打包、不上运行时；运行时用家具里的真类（没装家具时不加载 compat.minebay）
+sourceSets {
+    minebayApi {
+        java.srcDir 'src/minebayApi/java'
+        // 照 main 的编译类路径（RFG 往 main 上加的 Minecraft 也在里面）；按需取，RFG 改过以后的也算
+        compileClasspath += files({ sourceSets.main.compileClasspath })
+    }
+}
+tasks.named('compileJava') {
+    classpath += sourceSets.minebayApi.output
+}
+
 dependencies {
     // Mixin 注解与注解处理器（生成 refmap）用 MixinBooter 带的 Mixin 0.8；运行时服务端用 SpongeForge 自带的、客户端用 MixinBooter（见 core 包）
     String mixin = modUtils.enableMixins("zone.rong:mixinbooter:${property('mixin_booter_version')}", 'mixins.youranmod.refmap.json')
