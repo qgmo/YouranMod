@@ -349,3 +349,5 @@ youranmod.board.part.rom=✔ ROM（%s）：%s
 youranmod.board.rom=ROM
 youranmod.board.rom.mask=程式做在光罩裡
 youranmod.board.shift=按住 Shift 看每片晶片
+item.eprom_programmer.name=EPROM 燒錄器
+item.eprom_programmer.tooltip=裝上以後電腦介面裡多一個燒錄視窗：放進 EPROM，選磁碟上的檔案燒進去

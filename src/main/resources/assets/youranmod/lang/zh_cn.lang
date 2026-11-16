@@ -349,3 +349,5 @@ youranmod.board.part.rom=✔ ROM（%s）：%s
 youranmod.board.rom=ROM
 youranmod.board.rom.mask=程序做在掩模里
 youranmod.board.shift=按住 Shift 看每片芯片
+item.eprom_programmer.name=EPROM 烧录器
+item.eprom_programmer.tooltip=装上以后电脑界面里多一个烧录窗口：放进 EPROM，选磁盘上的文件烧进去

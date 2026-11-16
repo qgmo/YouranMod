@@ -104,6 +104,8 @@ public final class ModItems {
     public static Item uvEraser;
     /** 主板（服主 11-16）：装了芯片的普通电脑 / 个人电脑主板（元数据 = 种类） */
     public static moe.qingu.youran.item.ItemMotherboard motherboard;
+    /** EPROM 烧录器（外设，服主 11-16） */
+    public static Item epromProgrammer;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -170,8 +172,8 @@ public final class ModItems {
         scrapSiliconWafer = add(registry, new ItemWithTooltip("scrap_silicon_wafer", 64, "洗坏了的硅晶圆，放进熔炉或电弧炉烧回硅锭，从头再来"));
         // 定位模块也是外设（服主 11-15）：没有 I/O 端口，装上就有“位置”能力
         locatorModule = add(registry, new ItemPeripheral(moe.qingu.youran.api.network.location.LocatorModule.NAME,
-                Peripherals.KIND_LOCATOR, Peripherals.CAP_LOCATION));
-        floppyDrive = add(registry, new ItemPeripheral("floppy_drive", Peripherals.KIND_FLOPPY));
+                Peripherals.KIND_LOCATOR, Peripherals.CAP_LOCATION).withCasings());
+        floppyDrive = add(registry, new ItemPeripheral("floppy_drive", Peripherals.KIND_FLOPPY).withCasings());
         hanziCard = add(registry, new moe.qingu.youran.item.ItemHanziCard("hanzi_card", Peripherals.KIND_HANZI));
         Peripherals.register(floppyDrive);
         Peripherals.register(hanziCard);
@@ -204,6 +206,8 @@ public final class ModItems {
         eprom = (moe.qingu.youran.item.ItemEprom) add(registry, new moe.qingu.youran.item.ItemEprom());
         uvEraser = add(registry, itemBlock(ModBlocks.uvEraser));
         motherboard = (moe.qingu.youran.item.ItemMotherboard) add(registry, new moe.qingu.youran.item.ItemMotherboard());
+        epromProgrammer = add(registry, new ItemPeripheral("eprom_programmer", Peripherals.KIND_PROGRAMMER).withCasings());
+        Peripherals.register(epromProgrammer);
     }
 
     private static Item itemBlock(Block block) {

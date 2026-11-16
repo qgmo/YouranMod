@@ -25,6 +25,11 @@ public final class Peripherals {
     public static final String KIND_FLOPPY = "floppy";
     /** 定位模块（位置外设：给网站、id.yr 签电脑的位置用；没有 I/O 端口，能力 {@link #CAP_LOCATION}）。物品是 YouranMod 的 {@code locator_module} */
     public static final String KIND_LOCATOR = "locator";
+    /**
+     * EPROM 烧录器（服主 11-16）：装上以后电脑界面里多一个烧录窗口，放进 EPROM，选电脑磁盘上一个不超过 8 KB 的文件烧进去。
+     * 物品是 YouranMod 的 {@code eprom_programmer}；模拟器里不占资源（烧录由游戏服务器读磁盘文件、写 EPROM 的数据）
+     */
+    public static final String KIND_PROGRAMMER = "eprom_programmer";
     /** 能力：这台电脑能报出自己的位置（定位模块） */
     public static final String CAP_LOCATION = "location";
 

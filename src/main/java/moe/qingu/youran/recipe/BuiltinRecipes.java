@@ -33,5 +33,6 @@ public final class BuiltinRecipes {
         FloppyRecipes.register(event.getRegistry());
         LithoRecipes.registerCrafting(event.getRegistry());
         PcbRecipes.registerCrafting(event.getRegistry());
+        PeripheralRecipes.register(event.getRegistry());
     }
 }
