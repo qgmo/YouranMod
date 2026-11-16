@@ -235,6 +235,31 @@ public final class AlchemistryCompat {
     }
 
     /**
+     * 雾化器与液化器互逆（同炼金化学自己的水：500 mB ⇄ 8 个，{@code AtomizerRecipe(reversible = true)}）：雾化器 {@code fluid} → {@code element}，
+     * 液化器反过来。炼金化学只在它自己的初始化里按“可逆”的雾化器配方生成液化器配方，后加的这里两边都加。后初始化时调用。
+     */
+    public static void registerAtomizerPair(net.minecraftforge.fluids.FluidStack fluid, ItemStack element) {
+        if (fluid == null || element.isEmpty()) {
+            return;
+        }
+        try {
+            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
+            Object modRecipes = modRecipesClass.getField("INSTANCE").get(null);
+            Object atomizer = Class.forName("al132.alchemistry.recipes.AtomizerRecipe")
+                    .getConstructor(boolean.class, net.minecraftforge.fluids.FluidStack.class, ItemStack.class)
+                    .newInstance(true, fluid.copy(), element.copy());
+            Object liquifier = Class.forName("al132.alchemistry.recipes.LiquifierRecipe")
+                    .getConstructor(ItemStack.class, net.minecraftforge.fluids.FluidStack.class)
+                    .newInstance(element.copy(), fluid.copy());
+            listOf(modRecipesClass, modRecipes, "getAtomizerRecipes").add(atomizer);
+            listOf(modRecipesClass, modRecipes, "getLiquifierRecipes").add(liquifier);
+            YouranMod.LOG.info("已加炼金化学雾化器、液化器配方：{} mB {} ⇄ {} 个", fluid.amount, fluid.getFluid().getName(), element.getCount());
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("加炼金化学的雾化器、液化器配方失败", e);
+        }
+    }
+
+    /**
      * 溶解机配方：{@code input}（数量是每次消耗的个数）→ 若干组产物。每组按概率（百分数，100 = 必出）独立地出，
      * 同炼金化学自己的“绝对概率”配方（{@code relativeProbability = false}，掷一次）。后初始化时调用。
      * 组里有元素 / 化合物找不到时整条不加，返回 false。

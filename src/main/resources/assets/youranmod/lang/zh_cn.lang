@@ -166,6 +166,7 @@ fluid.arene=芳烃
 fluid.arene_azide=带叠氮基的芳烃
 fluid.cresol=甲酚
 fluid.bisazide_sensitizer=双叠氮感光剂
+fluid.argon=液氩
 fluid.photoresist=光刻胶
 fluid.photoresist_negative=光刻胶（负胶）
 fluid.photoresist_positive=光刻胶（正胶）

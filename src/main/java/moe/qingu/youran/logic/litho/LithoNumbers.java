@@ -158,6 +158,17 @@ public final class LithoNumbers {
     public static final float CRUSHER_COPPER_TIN = 0.10F;
     public static final float CRUSHER_COPPER_MO = 0.05F;
 
+    // ---- 空气分离（服主 11-16：沉浸原油精馏塔，空气 → 主要是氧气，另出液氩，不出氮）----
+    /** 每份进多少 IC2 空气（mB），出多少 IC2 氧气、多少液氩 */
+    public static final int AIR_IN = 100;
+    public static final int AIR_OXYGEN = 20;
+    public static final int AIR_ARGON = 1;
+    /** 一份的电耗（倍率前，按原油 75 mB / 2048 Flux 折算）、时间 */
+    public static final int AIR_ENERGY = 2731;
+    /** 炼金化学雾化器 / 液化器：液氩 500 mB ⇄ 8 个氩元素（服主 11-16，同炼金化学自己的水） */
+    public static final int ARGON_ATOMIZER_MB = 500;
+    public static final int ARGON_ATOMIZER_ELEMENTS = 8;
+
     /** 往输出口外推芯片、往输出口外推流体的间隔（tick） */
     public static final int PUSH_INTERVAL = 10;
     /** 每 tick 往输出口外推多少流体（mB） */

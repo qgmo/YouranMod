@@ -38,6 +38,7 @@ import net.minecraftforge.registries.IForgeRegistry;
  *     <li>光源方块：汞灯 + 1 沉浸工程探照灯（无序）→ 光源方块，汞灯的数据全带过去；光源方块单放一格 → 汞灯 + 探照灯，数据带回来；</li>
  *     <li>对准台：设计稿 2.6 的有序配方，正中换成沉浸工程工程师装配台或 IC2 工业工作台，正下方 IC2 电路板或沉浸工程电路板（都是两种都认）。</li>
  * </ul>
+ * <p>另外（服主 11-16）：沉浸原油精馏塔分离 IC2 空气出液氩（{@link Ip}）；炼金化学雾化器 500 mB 液氩 → 8 氩元素，液化器反过来。
  * <p>汞灯蓝图本身的合成服主没有指定，照沉浸工程自己的蓝图配方的样子定了一版（交付文档里列着）。
  */
 public final class LithoRecipes {
@@ -208,6 +209,14 @@ public final class LithoRecipes {
     // ================= 后初始化 =================
 
     public static void postInit(boolean ic2, boolean ie, boolean tic, boolean alchemistry) {
+        if (ie && net.minecraftforge.fml.common.Loader.isModLoaded("immersivepetroleum")) {
+            Ip.register();
+        }
+        // 液氩 ⇄ 炼金化学氩元素（服主 11-16）：雾化器 500 mB → 8 个，液化器反过来（同炼金化学自己的水）
+        if (alchemistry && moe.qingu.youran.registry.ModFluids.argon != null) {
+            AlchemistryCompat.registerAtomizerPair(new FluidStack(moe.qingu.youran.registry.ModFluids.argon, LithoNumbers.ARGON_ATOMIZER_MB),
+                    AlchemistryCompat.chemical("argon", LithoNumbers.ARGON_ATOMIZER_ELEMENTS));
+        }
         if (tic) {
             Tic.register();
         }
@@ -272,6 +281,23 @@ public final class LithoRecipes {
             }
             // 汞灯：工程师装配台蓝图“汞灯”（两种玻璃管 × 两种气体 × 两种接线；数据由 Mixin 带过去）
             moe.qingu.youran.compat.immersiveengineering.LampAssembly.register();
+        }
+    }
+
+    /** 沉浸原油精馏塔：IC2 空气 → IC2 氧气 + 液氩（服主 11-16，不出氮） */
+    static final class Ip {
+        static void register() {
+            FluidStack air = FluidRegistry.getFluidStack("ic2air", LithoNumbers.AIR_IN);
+            FluidStack oxygen = FluidRegistry.getFluidStack("ic2oxygen", LithoNumbers.AIR_OXYGEN);
+            if (air == null || oxygen == null || moe.qingu.youran.registry.ModFluids.argon == null) {
+                YouranMod.LOG.info("没有 IC2 的空气或氧气，不加精馏塔的空气分离配方");
+                return;
+            }
+            flaxbeard.immersivepetroleum.api.crafting.DistillationRecipe.addRecipe(new FluidStack[]{oxygen,
+                            new FluidStack(moe.qingu.youran.registry.ModFluids.argon, LithoNumbers.AIR_ARGON)},
+                    new ItemStack[0], air, LithoNumbers.AIR_ENERGY, 1, new float[0]);
+            YouranMod.LOG.info("已加沉浸原油精馏塔配方：{} mB 空气 → {} mB 氧气 + {} mB 液氩", LithoNumbers.AIR_IN, LithoNumbers.AIR_OXYGEN,
+                    LithoNumbers.AIR_ARGON);
         }
     }
 

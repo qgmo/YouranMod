@@ -29,6 +29,8 @@ public final class ModFluids {
     public static Fluid cresol;
     public static Fluid bisazideSensitizer;
     public static Fluid photoresist;
+    /** 液氩（服主 11-16）：沉浸原油精馏塔分离 IC2 空气得到，87 K，没有流体方块 */
+    public static Fluid argon;
 
     private ModFluids() {
     }
@@ -65,11 +67,21 @@ public final class ModFluids {
         bisazideSensitizer = noBlock(fluid("bisazide_sensitizer", "bisazide_sensitizer").setDensity(1000).setViscosity(2000));
         photoresist = noBlock(new FluidPhotoresist("photoresist", texture("photoresist_still"), texture("photoresist_flow"))
                 .setDensity(950).setViscosity(8000));
+        argon = registerArgon();
+    }
+
+    /** 液氩：别的模组已经注册了 argon 时用它的 */
+    private static Fluid registerArgon() {
+        if (FluidRegistry.isFluidRegistered("argon")) {
+            return FluidRegistry.getFluid("argon");
+        }
+        // 液氩密度 1.395 g/cm³、黏度约 0.25 mPa·s，沸点 87 K
+        return noBlock(fluid("argon", "argon").setDensity(1395).setViscosity(250).setTemperature(87));
     }
 
     /** 光刻胶线的流体：都是液体，没有流体方块，只有通用桶 */
     public static Fluid[] lithoFluids() {
-        return new Fluid[]{tinTetrachloride, arene, cresol, bisazideSensitizer, photoresist};
+        return new Fluid[]{tinTetrachloride, arene, cresol, bisazideSensitizer, photoresist, argon};
     }
 
     private static Fluid noBlock(Fluid f) {
