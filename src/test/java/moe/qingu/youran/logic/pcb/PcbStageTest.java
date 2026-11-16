@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PcbStageTest {
     @Test
     void line() {
-        for (BoardType t : BoardType.values()) {
+        for (BoardType t : BoardType.circuits()) {
             int exposed = PcbStage.afterExposure(PcbStage.COATED, t);
             assertSame(t, PcbStage.type(exposed));
             assertEquals("exposed", PcbStage.stageName(exposed));
@@ -56,6 +56,18 @@ class PcbStageTest {
             assertTrue(seen.add(m));
             assertTrue(PcbStage.stageName(m) != null, "没有名字：" + m);
         }
-        assertEquals(4 + 4 * BoardType.values().length, seen.size());
+        assertEquals(4 + 4 * BoardType.circuits().length, seen.size());
+    }
+
+    /** 家具电脑主板没有自己的线路（服主 11-16：不为它加底片）：用个人电脑的光板，光板、底片的元数据里没有它 */
+    @Test
+    void furnitureHasNoCircuitOfItsOwn() {
+        assertSame(BoardType.PC, BoardType.FURNITURE.blank());
+        assertFalse(java.util.Arrays.asList(BoardType.circuits()).contains(BoardType.FURNITURE));
+        assertEquals(java.util.Arrays.asList(BoardType.PC, BoardType.FURNITURE), BoardType.builtOn(BoardType.PC));
+        assertEquals(java.util.Collections.singletonList(BoardType.COMPUTER), BoardType.builtOn(BoardType.COMPUTER));
+        assertNull(BoardType.circuitById(BoardType.FURNITURE.id));
+        assertNull(PcbStage.type(PcbStage.PUNCHED + BoardType.FURNITURE.id));
+        assertNull(PcbStage.stageName(PcbStage.ETCHED + BoardType.FURNITURE.id));
     }
 }

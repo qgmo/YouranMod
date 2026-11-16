@@ -24,7 +24,8 @@ import java.util.List;
  * <ul>
  *     <li>“主板”（{@value #MOTHERBOARD}）：打好孔的普通电脑 / 个人电脑光板（或装了一半的主板）+ 芯片 → 主板。装配台只有 6 个输入格、
  *     芯片一片占一格，所以分几次装，每条配方装一种：CPU（Z80 / 8088）、ROM（掩模 ROM 或 EPROM，烧错的、空白的也能装）、
- *     内存（4164，一次 1–5 颗）。装齐 = 普通电脑 Z80 + 6 颗 4164 + 监控程序 ROM，个人电脑 8088 + 20 颗 4164 + BIOS ROM；</li>
+ *     内存（4164，一次 1–5 颗）。装齐 = 普通电脑 Z80 + 6 颗 4164 + 监控程序 ROM，个人电脑 8088 + 20 颗 4164 + BIOS ROM；
+ *     家具电脑主板（服主 11-16）= 打好孔的个人电脑光板 + 1 片 YR-2000，不插 ROM、内存，一次装齐；</li>
  *     <li>“扩展卡”（{@value #EXPANSION}）：打好孔的汉卡光板 + 字库 ROM 1–4 → 汉卡（一次装齐）。以后别的扩展卡也加在这张蓝图上：
  *     打好孔的那种光板 + 它的 ROM 等芯片 → 那种卡。</li>
  * </ul>
@@ -70,6 +71,10 @@ public final class BoardAssembly {
                 n++;
             }
         }
+        // 家具电脑主板（服主 11-16）：打好孔的个人电脑光板 + 1 片 YR-2000
+        BlueprintCraftingRecipe.addRecipe(MOTHERBOARD, ItemMotherboard.make(ModItems.motherboard, BoardType.FURNITURE, BoardNbt.empty(BoardType.FURNITURE)),
+                new ItemStack(ModItems.pcb, 1, PcbStage.punched(BoardType.FURNITURE.blank())), ModItems.chip.make(BoardNbt.cpu(BoardType.FURNITURE)));
+        n++;
         List<Object> hanzi = new ArrayList<>();
         hanzi.add(new ItemStack(ModItems.pcb, 1, PcbStage.punched(BoardType.HANZI)));
         for (ChipModel m : BoardNbt.fonts(BoardType.HANZI)) {
@@ -85,6 +90,8 @@ public final class BoardAssembly {
     static ItemStack output(BlueprintCraftingRecipe recipe, List<ItemStack> consumed) {
         NBTTagCompound board = null;
         BoardType type = null;
+        // 从打好孔的光板装起时：这块光板能装成的几种（个人电脑的光板：个人电脑主板或家具电脑主板，看装的是什么芯片）
+        List<BoardType> candidates = new ArrayList<>();
         List<BoardNbt.Part> parts = new ArrayList<>();
         for (ItemStack s : consumed) {
             if (s.isEmpty()) {
@@ -93,6 +100,9 @@ public final class BoardAssembly {
             if (s.getItem() == ModItems.pcb) {
                 type = PcbStage.type(s.getMetadata());
                 board = type == null ? null : BoardNbt.empty(type);
+                if (type != null) {
+                    candidates.addAll(BoardType.builtOn(type));
+                }
             } else if (s.getItem() == ModItems.motherboard) {
                 type = ItemMotherboard.type(s);
                 board = ItemMotherboard.board(s);
@@ -113,6 +123,10 @@ public final class BoardAssembly {
             return ItemStack.EMPTY;
         }
         NBTTagCompound done = BoardNbt.install(board, parts);
+        for (int i = 0; done == null && i < candidates.size(); i++) {
+            type = candidates.get(i);
+            done = BoardNbt.install(BoardNbt.empty(type), parts);
+        }
         if (done == null) {
             return ItemStack.EMPTY;
         }

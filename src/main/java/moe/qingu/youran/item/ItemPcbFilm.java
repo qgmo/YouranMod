@@ -31,7 +31,7 @@ public class ItemPcbFilm extends Item implements MetaModelled {
 
     @Nullable
     public static BoardType type(ItemStack stack) {
-        return stack.isEmpty() || !(stack.getItem() instanceof ItemPcbFilm) ? null : BoardType.byId(stack.getMetadata());
+        return stack.isEmpty() || !(stack.getItem() instanceof ItemPcbFilm) ? null : BoardType.circuitById(stack.getMetadata());
     }
 
     @SuppressWarnings("deprecation")
@@ -51,7 +51,7 @@ public class ItemPcbFilm extends Item implements MetaModelled {
     @Override
     public void getSubItems(CreativeTabs tab, NonNullList<ItemStack> items) {
         if (isInCreativeTab(tab)) {
-            for (BoardType t : BoardType.values()) {
+            for (BoardType t : BoardType.circuits()) {
                 items.add(new ItemStack(this, 1, t.id));
             }
         }
@@ -59,16 +59,17 @@ public class ItemPcbFilm extends Item implements MetaModelled {
 
     @Override
     public int[] modelMetas() {
-        int[] m = new int[BoardType.values().length];
+        BoardType[] types = BoardType.circuits();
+        int[] m = new int[types.length];
         for (int i = 0; i < m.length; i++) {
-            m[i] = BoardType.values()[i].id;
+            m[i] = types[i].id;
         }
         return m;
     }
 
     @Override
     public String modelName(int meta) {
-        BoardType t = BoardType.byId(meta);
+        BoardType t = BoardType.circuitById(meta);
         return "pcb_film_" + (t == null ? "computer" : t.name);
     }
 }
