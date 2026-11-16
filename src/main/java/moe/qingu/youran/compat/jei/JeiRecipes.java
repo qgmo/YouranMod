@@ -124,8 +124,11 @@ final class JeiRecipes {
                     I18n.format("youranmod.jei.ore_washing_wafer.scrap",
                             percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.GOLD)),
                             percent(WaferRules.scrapChance(rate, Purity.WAFER_GRADE_NINES, WaferMold.CLAY))));
-            list.add(new FluidItemRecipe(water, wafers, null,
-                    ItemSiliconWafer.make(ModItems.precisionSiliconWafer, Purity.WAFER_GRADE_NINES, WaferMold.GOLD), notes));
+            // 洗出来的是高精硅晶圆，也可能是报废的（IC2 洗矿机页的输出有三格，这里用前两格）
+            List<ItemStack> outputs = java.util.Arrays.asList(
+                    ItemSiliconWafer.make(ModItems.precisionSiliconWafer, Purity.WAFER_GRADE_NINES, WaferMold.GOLD),
+                    new ItemStack(ModItems.scrapSiliconWafer));
+            list.add(new FluidItemRecipe(water, wafers, null, outputs, notes));
         }
         return list;
     }

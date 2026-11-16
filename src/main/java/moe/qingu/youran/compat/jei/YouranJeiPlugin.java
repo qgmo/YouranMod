@@ -60,12 +60,12 @@ public final class YouranJeiPlugin implements IModPlugin {
         IGuiHelper gui = registry.getJeiHelpers().getGuiHelper();
         if (ic2()) {
             registry.addRecipeCategories(
-                    new FluidItemCategory(gui, CANNER, "youranmod.jei.canner_reaction", Ic2Machines.canner()),
-                    new FluidItemCategory(gui, SOLAR_DISTILLER, "youranmod.jei.solar_distiller", Ic2Machines.solarDistiller()),
-                    new FluidItemCategory(gui, ORE_WASHING_WAFER, "youranmod.jei.ore_washing_wafer", Ic2Machines.oreWashingPlant()));
+                    Ic2Categories.canner(gui, CANNER, Ic2Machines.canner()),
+                    new SolarDistillerCategory(gui, SOLAR_DISTILLER, Ic2Machines.solarDistiller()),
+                    Ic2Categories.waferWashing(gui, ORE_WASHING_WAFER, Ic2Machines.oreWashingPlant()));
         }
         if (petroleum()) {
-            registry.addRecipeCategories(new FluidItemCategory(gui, DISTILLATION_TOWER, "youranmod.jei.distillation_tower",
+            registry.addRecipeCategories(PetroleumCategories.distillationTower(gui, DISTILLATION_TOWER,
                     JeiRecipes.item(IP_MULTIBLOCK, IP_TOWER_META)));
         }
     }
