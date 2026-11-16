@@ -63,6 +63,8 @@ public final class YouranMod {
         // 1.3.4 把矿石与矿泉水湖放在同一个生成器里；拆开以后用重生成模组只补矿时不会连湖一起补
         GameRegistry.registerWorldGenerator(new OreGenerator(), 5);
         GameRegistry.registerWorldGenerator(new MineralWaterLakeGenerator(), 5);
+        // 失落的城市建筑箱子里刷掩模、芯片设计图（往战利品表里加池；只有服务端读战利品表）
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(moe.qingu.youran.server.loot.LostCityLoot.class);
     }
 
     @Mod.EventHandler
