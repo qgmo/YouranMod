@@ -63,6 +63,8 @@ public final class YouranMod {
         // 1.3.4 把矿石与矿泉水湖放在同一个生成器里；拆开以后用重生成模组只补矿时不会连湖一起补
         GameRegistry.registerWorldGenerator(new OreGenerator(), 5);
         GameRegistry.registerWorldGenerator(new MineralWaterLakeGenerator(), 5);
+        // 失落的城市建筑箱子里刷掩模、芯片设计图（往战利品表里加池；只有服务端读战利品表）
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(moe.qingu.youran.server.loot.LostCityLoot.class);
     }
 
     @Mod.EventHandler
@@ -84,10 +86,14 @@ public final class YouranMod {
         }
     }
 
-    /** 后初始化：加进别的模组机器的配方（软依赖，见 {@code recipe.CompatRecipes}） */
+    /** 后初始化：加进别的模组机器的配方（软依赖，见 {@code recipe.CompatRecipes}）；在 MineBay 上架 */
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
         CompatRecipes.postInit();
+        // 家具模组的 MineBay：上架掩模、设计图、底片、软盘（只在装了家具时加载 compat.minebay）
+        if (net.minecraftforge.fml.common.Loader.isModLoaded(moe.qingu.youran.compat.minebay.MineBayListings.CFM)) {
+            moe.qingu.youran.compat.minebay.MineBayListings.register();
+        }
     }
 
     /** 全部模组载入完成：沉浸工程铜矿石粉碎配方加副产物（它的矿石配方要到后初始化才全）；工程师手册（沉浸工程在它的后初始化里才建手册）里加光刻机一页（只在客户端） */

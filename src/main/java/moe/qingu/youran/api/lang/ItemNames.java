@@ -90,6 +90,20 @@ final class ItemNames {
                 return title;
             }
         }
+        if (i instanceof FormattedItemName) {
+            FormattedItemName f = (FormattedItemName) i;
+            String pattern = ServerLang.find(locale, f.nameKey(s));
+            if (pattern == null) {
+                return null;
+            }
+            String[] keys = f.nameArgKeys(s);
+            Object[] args = new Object[keys.length];
+            for (int k = 0; k < keys.length; k++) {
+                String v = ServerLang.find(locale, keys[k]);
+                args[k] = v != null ? v : ServerLang.get(ServerLang.EN_US, keys[k]);
+            }
+            return ServerLang.fill(pattern, args);
+        }
         if (i instanceof ItemBanner) {
             return ServerLang.find(locale, "item.banner." + ItemBanner.getBaseColor(s).getTranslationKey() + ".name");
         }

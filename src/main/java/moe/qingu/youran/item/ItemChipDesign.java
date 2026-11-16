@@ -10,9 +10,9 @@ import net.minecraft.world.World;
 
 /**
  * 芯片设计图（服主 11-15）：每种型号一张，右键打开一个画面看版图（风格化的像素版图，自己画的），没有实际作用。
- * 来源之后再讨论，这一阶段只有物品本身。
+ * 也是“扩展卡”蓝图的合成材料。来源（服主 11-16）：MineBay 不限量（{@code compat.minebay.MineBayListings}）、失落的城市建筑箱子（{@code server.loot.LostCityLoot}）。
  */
-public class ItemChipDesign extends ItemModelled {
+public class ItemChipDesign extends ItemModelled implements moe.qingu.youran.api.lang.FormattedItemName {
     public ItemChipDesign() {
         super("chip_design");
     }

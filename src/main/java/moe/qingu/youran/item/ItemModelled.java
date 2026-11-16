@@ -36,6 +36,17 @@ public class ItemModelled extends ItemLangTooltip implements MetaModelled {
         return net.minecraft.util.text.translation.I18n.translateToLocalFormatted(getTranslationKey() + ".name", name);
     }
 
+    /** 名字的翻译键（掩模、设计图实现 {@link moe.qingu.youran.api.lang.FormattedItemName}，服务端按各语言拼名字用） */
+    public String nameKey(ItemStack stack) {
+        return getTranslationKey() + ".name";
+    }
+
+    /** 名字里填的型号名的翻译键 */
+    public String[] nameArgKeys(ItemStack stack) {
+        ChipModel m = model(stack);
+        return new String[]{m == null ? "?" : "youranmod.chip.model." + m.id};
+    }
+
     @Override
     public int[] modelMetas() {
         int[] metas = new int[ChipModel.values().length];
