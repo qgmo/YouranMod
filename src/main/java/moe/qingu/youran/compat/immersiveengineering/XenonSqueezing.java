@@ -19,7 +19,7 @@ import java.util.Random;
 
 /**
  * 氙（服主 11-16）：沉浸工程挤压机挤 IC2 枯竭燃料棒（铀、MOX 的单联、双联、四联，{@code ic2:nuclear} 元数据 11–16），
- * 每根随机出 {@value LithoNumbers#XENON_PER_ROD_MIN}–{@value LithoNumbers#XENON_PER_ROD_MAX} mB 液氙，
+ * 每根随机出 {@value LithoNumbers#XENON_PER_ROD_MIN}–{@value LithoNumbers#XENON_PER_ROD_MAX} mB 液氙（双联、四联按棒数乘：服主 11-16，每根各自随机再相加），
  * 棒子原样出来、NBT 里记“已脱气”（{@value #TAG}），不能再挤。IC2 热能离心机按元数据认枯竭燃料棒、不看多出来的 NBT，照样能分。
  * 挤压机的配方产物是写死的，所以随机量在 {@link Recipe#getActualFluidOutputs} 里给；JEI 显示的是最多的量。
  */
@@ -43,14 +43,15 @@ public final class XenonSqueezing {
             return;
         }
         for (int meta : DEPLETED) {
+            int rods = moe.qingu.youran.logic.litho.XenonYield.rodsIn(meta);
             ItemStack rod = new ItemStack(nuclear, 1, meta);
             ItemStack out = rod.copy();
             NBTTagCompound tag = new NBTTagCompound();
             tag.setBoolean(TAG, true);
             out.setTagCompound(tag);
             // 按 NBT 比：没有标记的才认（已脱气的带着标记，对不上）
-            SqueezerRecipe.recipeList.add(new Recipe(new FluidStack(ModFluids.xenon, LithoNumbers.XENON_PER_ROD_MAX), out,
-                    new IngredientStack(rod).setUseNBT(true), LithoNumbers.XENON_SQUEEZER_ENERGY));
+            SqueezerRecipe.recipeList.add(new Recipe(new FluidStack(ModFluids.xenon, LithoNumbers.XENON_PER_ROD_MAX * rods), out,
+                    new IngredientStack(rod).setUseNBT(true), LithoNumbers.XENON_SQUEEZER_ENERGY, rods));
         }
         SqueezerRecipe again = SqueezerRecipe.findRecipe(degassedSample(nuclear));
         if (again != null) {
@@ -68,21 +69,24 @@ public final class XenonSqueezing {
         return s;
     }
 
-    /** 一次挤多少：{@code min}–{@code max} 随机（含两端） */
+    /** 一次挤多少（一根）：见 {@link moe.qingu.youran.logic.litho.XenonYield} */
     public static int amount(Random r) {
-        return LithoNumbers.XENON_PER_ROD_MIN + r.nextInt(LithoNumbers.XENON_PER_ROD_MAX - LithoNumbers.XENON_PER_ROD_MIN + 1);
+        return moe.qingu.youran.logic.litho.XenonYield.perRod(r);
     }
 
     /** 液氙的量随机的挤压机配方 */
     static final class Recipe extends SqueezerRecipe {
-        Recipe(FluidStack fluidOutput, ItemStack itemOutput, Object itemInput, int energy) {
+        private final int rods;
+
+        Recipe(FluidStack fluidOutput, ItemStack itemOutput, Object itemInput, int energy, int rods) {
             super(fluidOutput, itemOutput, itemInput, energy);
+            this.rods = rods;
         }
 
         @Override
         public List<FluidStack> getActualFluidOutputs(TileEntity tile) {
             Random r = tile != null && tile.getWorld() != null ? tile.getWorld().rand : new Random();
-            return Collections.singletonList(new FluidStack(ModFluids.xenon, amount(r)));
+            return Collections.singletonList(new FluidStack(ModFluids.xenon, moe.qingu.youran.logic.litho.XenonYield.of(r, rods)));
         }
     }
 }
