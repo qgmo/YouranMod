@@ -174,7 +174,7 @@ class LithoShapeTest {
             for (Piece p : LithoShape.pieces(LithoStructure.index(port.h, port.l, port.w))) {
                 String s = p.tex().sprite;
                 marked |= s.endsWith("port_in") || s.endsWith("port_out") || s.endsWith("hatch_in") || s.endsWith("hatch_out")
-                        || s.endsWith("metal_multiblock_refinery") || s.endsWith("redstone_engineering");
+                        || s.endsWith("metal_multiblock_refinery");
                 if (port.isFluid() && (s.endsWith("port_in") || s.endsWith("port_out"))) {
                     assertEquals(port.input, s.endsWith("port_in"), "流体口的颜色（蓝入橙出）不对：" + port);
                     assertEquals(Side.BACK, p.side);

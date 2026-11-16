@@ -192,7 +192,11 @@ public final class LithoShape {
     static final Tex SCAFFOLD = tile(IE + "metal_decoration1_steel_scaffolding_noctm");
     /** 沉浸工程多方块的电口：炼油厂贴图（128 × 128）右下角那一格 16 × 16（同铁板配一圈圈凹进去的方框、正中橙色接线点） */
     static final Tex IE_POWER = fit(IE + "metal_multiblock_refinery", 10, 14, 12, 16);
-    static final Tex IE_REDSTONE = fit(IE + "metal_decoration0_redstone_engineering");
+    /**
+     * 沉浸工程多方块的红石口：炼油厂贴图右下角 x 64–80、y 112–128 那一格（亮灰板、正中暗红接线点）。
+     * 红石口那一块长方体是 x 1–16、y 3–16（外框占了格子左边 1 像素和下面 3 像素），按这个范围取图块里对应的部分。
+     */
+    static final Tex IE_REDSTONE = fit(IE + "metal_multiblock_refinery", 8.125f, 14, 10, 15.625f);
     // 自己画的
     static final Tex FRAME = tile(OWN + "frame");
     static final Tex PANEL = tile(OWN + "panel");
