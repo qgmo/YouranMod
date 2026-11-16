@@ -337,6 +337,7 @@ youranmod.uv_eraser.status.no_mercury=Lamp out of mercury
 youranmod.uv_eraser.status.no_power=No power
 youranmod.uv_eraser.status.working=Irradiating
 youranmod.uv_eraser.status.done=Done
+youranmod.uv_eraser.tooltip.carry=Breaks if mined or blown up (only what is inside drops). Move it whole with Carry On.
 desc.immersiveengineering.info.blueprint.motherboard=Motherboard
 desc.immersiveengineering.info.blueprint.expansion_card=Expansion Card
 item.motherboard.name=%s Motherboard

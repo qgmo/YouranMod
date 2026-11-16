@@ -337,6 +337,7 @@ youranmod.uv_eraser.status.no_mercury=汞灯没汞了
 youranmod.uv_eraser.status.no_power=电不够
 youranmod.uv_eraser.status.working=照着紫外线
 youranmod.uv_eraser.status.done=照好了
+youranmod.uv_eraser.tooltip.carry=挖掉、炸掉就坏了（只掉出里面的东西），要挪地方请用搬运（Carry On）整个搬走
 desc.immersiveengineering.info.blueprint.motherboard=主板
 desc.immersiveengineering.info.blueprint.expansion_card=扩展卡
 item.motherboard.name=%s主板
