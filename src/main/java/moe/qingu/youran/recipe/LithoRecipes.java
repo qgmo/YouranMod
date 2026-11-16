@@ -38,7 +38,8 @@ import net.minecraftforge.registries.IForgeRegistry;
  *     <li>光源方块：汞灯 + 1 沉浸工程探照灯（无序）→ 光源方块，汞灯的数据全带过去；光源方块单放一格 → 汞灯 + 探照灯，数据带回来；</li>
  *     <li>对准台：设计稿 2.6 的有序配方，正中换成沉浸工程工程师装配台或 IC2 工业工作台，正下方 IC2 电路板或沉浸工程电路板（都是两种都认）。</li>
  * </ul>
- * <p>另外（服主 11-16）：沉浸原油精馏塔分离 IC2 空气出液氩（{@link Ip}）；炼金化学雾化器 500 mB 液氩 → 8 氩元素，液化器反过来。
+ * <p>另外（服主 11-16）：沉浸原油精馏塔分离 IC2 空气出液氩（{@link Ip}）；沉浸工程挤压机挤 IC2 枯竭燃料棒出液氙
+ * （{@code compat.immersiveengineering.XenonSqueezing}）；炼金化学雾化器 500 mB 液氩 / 液氙 → 8 氩 / 氙元素，液化器反过来。
  * <p>汞灯蓝图本身的合成服主没有指定，照沉浸工程自己的蓝图配方的样子定了一版（交付文档里列着）。
  */
 public final class LithoRecipes {
@@ -211,6 +212,14 @@ public final class LithoRecipes {
     public static void postInit(boolean ic2, boolean ie, boolean tic, boolean alchemistry) {
         if (ie && net.minecraftforge.fml.common.Loader.isModLoaded("immersivepetroleum")) {
             Ip.register();
+        }
+        // 液氙 ⇄ 炼金化学氙元素（服主 11-16）：同液氩
+        if (alchemistry && moe.qingu.youran.registry.ModFluids.xenon != null) {
+            AlchemistryCompat.registerAtomizerPair(new FluidStack(moe.qingu.youran.registry.ModFluids.xenon, LithoNumbers.XENON_ATOMIZER_MB),
+                    AlchemistryCompat.chemical("xenon", LithoNumbers.XENON_ATOMIZER_ELEMENTS));
+        }
+        if (ie && ic2) {
+            moe.qingu.youran.compat.immersiveengineering.XenonSqueezing.register();
         }
         // 液氩 ⇄ 炼金化学氩元素（服主 11-16）：雾化器 500 mB → 8 个，液化器反过来（同炼金化学自己的水）
         if (alchemistry && moe.qingu.youran.registry.ModFluids.argon != null) {

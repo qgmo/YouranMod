@@ -169,6 +169,16 @@ public final class LithoNumbers {
     public static final int ARGON_ATOMIZER_MB = 500;
     public static final int ARGON_ATOMIZER_ELEMENTS = 8;
 
+    // ---- 氙（服主 11-16：沉浸工程挤压机挤 IC2 枯竭燃料棒，不用热能离心机）----
+    /** 每根枯竭燃料棒挤出多少液氙（mB，在这之间随机，含两端） */
+    public static final int XENON_PER_ROD_MIN = 1;
+    public static final int XENON_PER_ROD_MAX = 10;
+    /** 挤一根的电耗（Flux，同沉浸工程挤压机常见的配方） */
+    public static final int XENON_SQUEEZER_ENERGY = 6400;
+    /** 炼金化学雾化器 / 液化器：液氙 500 mB ⇄ 8 个氙元素 */
+    public static final int XENON_ATOMIZER_MB = 500;
+    public static final int XENON_ATOMIZER_ELEMENTS = 8;
+
     /** 往输出口外推芯片、往输出口外推流体的间隔（tick） */
     public static final int PUSH_INTERVAL = 10;
     /** 每 tick 往输出口外推多少流体（mB） */

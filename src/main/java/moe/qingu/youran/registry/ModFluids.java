@@ -31,6 +31,8 @@ public final class ModFluids {
     public static Fluid photoresist;
     /** 液氩（服主 11-16）：沉浸原油精馏塔分离 IC2 空气得到，87 K，没有流体方块 */
     public static Fluid argon;
+    /** 液氙（服主 11-16）：沉浸工程挤压机挤 IC2 枯竭燃料棒得到，165 K，没有流体方块 */
+    public static Fluid xenon;
 
     private ModFluids() {
     }
@@ -68,6 +70,7 @@ public final class ModFluids {
         photoresist = noBlock(new FluidPhotoresist("photoresist", texture("photoresist_still"), texture("photoresist_flow"))
                 .setDensity(950).setViscosity(8000));
         argon = registerArgon();
+        xenon = registerXenon();
     }
 
     /** 液氩：别的模组已经注册了 argon 时用它的 */
@@ -79,9 +82,18 @@ public final class ModFluids {
         return noBlock(fluid("argon", "argon").setDensity(1395).setViscosity(250).setTemperature(87));
     }
 
+    /** 液氙：别的模组已经注册了 xenon 时用它的 */
+    private static Fluid registerXenon() {
+        if (FluidRegistry.isFluidRegistered("xenon")) {
+            return FluidRegistry.getFluid("xenon");
+        }
+        // 液氙密度 2.94 g/cm³、黏度约 0.5 mPa·s，沸点 165 K
+        return noBlock(fluid("xenon", "xenon").setDensity(2940).setViscosity(500).setTemperature(165));
+    }
+
     /** 光刻胶线的流体：都是液体，没有流体方块，只有通用桶 */
     public static Fluid[] lithoFluids() {
-        return new Fluid[]{tinTetrachloride, arene, cresol, bisazideSensitizer, photoresist, argon};
+        return new Fluid[]{tinTetrachloride, arene, cresol, bisazideSensitizer, photoresist, argon, xenon};
     }
 
     private static Fluid noBlock(Fluid f) {
