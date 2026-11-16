@@ -97,6 +97,11 @@ public class BlockUvEraser extends Block implements ITileEntityProvider {
     @SideOnly(Side.CLIENT)
     @Override
     public void addInformation(ItemStack stack, @Nullable World world, List<String> lines, ITooltipFlag flag) {
+        // 固定说明（键 tile.uv_eraser.tooltip）：缺键时不显示，不冒键名
+        String key = getTranslationKey() + ".tooltip";
+        if (I18n.hasKey(key)) {
+            lines.add(I18n.format(key));
+        }
         lines.add(TextFormatting.GRAY + I18n.format("youranmod.uv_eraser.tooltip.carry"));
     }
 

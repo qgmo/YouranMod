@@ -40,6 +40,11 @@ public class ItemChip extends ItemModelled {
     @SideOnly(Side.CLIENT)
     @Override
     public void addInformation(ItemStack stack, @Nullable World world, List<String> lines, ITooltipFlag flag) {
+        // 固定说明（键 item.chip.tooltip）：缺键时不显示，不冒键名
+        String key = "item.chip.tooltip";
+        if (I18n.hasKey(key)) {
+            lines.add(I18n.format(key));
+        }
         chipLines(model(stack), stack.getTagCompound(), lines, flag);
     }
 

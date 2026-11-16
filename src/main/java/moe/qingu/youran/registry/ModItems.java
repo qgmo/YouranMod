@@ -164,23 +164,23 @@ public final class ModItems {
         add(registry, itemBlock(ModBlocks.gallium));
         add(registry, itemBlock(ModBlocks.chlorine));
         // 2.1.0 新加的放在最后，不改已有物品在新世界里的数字 ID
-        magnetiteDust = add(registry, new ItemWithTooltip("magnetite_dust", 64, "四氧化三铁（Fe3O4），有磁性"));
-        smallMagnetiteDust = add(registry, new ItemWithTooltip("small_magnetite_dust", 64, "四氧化三铁（Fe3O4），有磁性"));
-        cobaltMagneticDust = add(registry, new ItemWithTooltip("cobalt_magnetic_dust", 64, "掺了钴的磁粉，矫顽力更高，用来做软盘的磁性涂层"));
-        roughPlatter = add(registry, new ItemWithTooltip("rough_platter", 64, "涂了磁性涂层的片基，还要烘干、压光"));
-        refinedPlatter = add(registry, new ItemWithTooltip("refined_platter", 64, "烘过的盘片，还要压光"));
-        polishedPlatter = add(registry, new ItemWithTooltip("polished_platter", 64, "压光的盘片，装进软套就是软盘"));
-        pvcLump = add(registry, new ItemWithTooltip("pvc_lump", 64, "聚氯乙烯（PVC）"));
-        pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做外设的塑料外壳"));
-        polyethyleneLump = add(registry, new ItemWithTooltip("polyethylene_lump", 64, "聚乙烯（PE）"));
+        magnetiteDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("magnetite_dust", 64));
+        smallMagnetiteDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("small_magnetite_dust", 64));
+        cobaltMagneticDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("cobalt_magnetic_dust", 64));
+        roughPlatter = add(registry, new moe.qingu.youran.item.ItemLangTooltip("rough_platter", 64));
+        refinedPlatter = add(registry, new moe.qingu.youran.item.ItemLangTooltip("refined_platter", 64));
+        polishedPlatter = add(registry, new moe.qingu.youran.item.ItemLangTooltip("polished_platter", 64));
+        pvcLump = add(registry, new moe.qingu.youran.item.ItemLangTooltip("pvc_lump", 64));
+        pvcSheet = add(registry, new moe.qingu.youran.item.ItemLangTooltip("pvc_sheet", 64));
+        polyethyleneLump = add(registry, new moe.qingu.youran.item.ItemLangTooltip("polyethylene_lump", 64));
         floppyDisk = add(registry, new ItemFloppyDisk());
-        siliconDust = add(registry, new ItemWithTooltip("silicon_dust", 64, "粗硅（Si）打成的粉，加盐酸做成三氯氢硅"));
-        borosilicateSlag = add(registry, new ItemWithTooltip("borosilicate_slag", 64, "电气石分出金属后剩下的渣，含硼和硅"));
+        siliconDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("silicon_dust", 64));
+        borosilicateSlag = add(registry, new moe.qingu.youran.item.ItemLangTooltip("borosilicate_slag", 64));
         dopedWaferMoldGold = add(registry, new ItemDopedWaferMold(WaferMold.GOLD));
         dopedWaferMoldClay = add(registry, new ItemDopedWaferMold(WaferMold.CLAY));
-        siliconWafer = add(registry, new ItemSiliconWafer("silicon_wafer", "浇注出来的硅晶圆，要在洗矿机里洗过才能用"));
-        precisionSiliconWafer = add(registry, new ItemSiliconWafer("precision_silicon_wafer", "洗干净的硅晶圆，可以拿去做芯片"));
-        scrapSiliconWafer = add(registry, new ItemWithTooltip("scrap_silicon_wafer", 64, "洗坏了的硅晶圆，放进熔炉或电弧炉烧回硅锭，从头再来"));
+        siliconWafer = add(registry, new ItemSiliconWafer("silicon_wafer"));
+        precisionSiliconWafer = add(registry, new ItemSiliconWafer("precision_silicon_wafer"));
+        scrapSiliconWafer = add(registry, new moe.qingu.youran.item.ItemLangTooltip("scrap_silicon_wafer", 64));
         // 定位模块也是外设（服主 11-15）：没有 I/O 端口，装上就有“位置”能力
         locatorModule = add(registry, new ItemPeripheral(moe.qingu.youran.api.network.location.LocatorModule.NAME,
                 Peripherals.KIND_LOCATOR, Peripherals.CAP_LOCATION).withCasings());

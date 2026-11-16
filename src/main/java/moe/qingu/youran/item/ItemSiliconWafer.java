@@ -20,9 +20,9 @@ import java.util.List;
  *
  * <p>没有纯度标记的按 1 个 9 算（同流体）；没有铸模标记的不显示铸模，清洗时按粘土算（报废率高的那种）。
  */
-public class ItemSiliconWafer extends ItemWithTooltip {
-    public ItemSiliconWafer(String name, String tooltip) {
-        super(name, 1, tooltip);
+public class ItemSiliconWafer extends ItemLangTooltip {
+    public ItemSiliconWafer(String name) {
+        super(name, 1);
     }
 
     /** 这种晶圆，纯度 {@code nines} 个 9，铸模 {@code mold} */
