@@ -9,7 +9,8 @@ import moe.qingu.youran.logic.litho.Alignment;
 import moe.qingu.youran.logic.litho.ChipModel;
 import moe.qingu.youran.logic.litho.ChipPackage;
 import moe.qingu.youran.logic.litho.ChipQuality;
-import moe.qingu.youran.logic.litho.LampSpec;
+import moe.qingu.youran.logic.litho.ExcimerSpec;
+import moe.qingu.youran.logic.litho.LightSpec;
 import moe.qingu.youran.logic.litho.LithoNumbers;
 import moe.qingu.youran.logic.litho.LithoStep;
 import moe.qingu.youran.logic.litho.LithoStructure;
@@ -125,6 +126,8 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
     ResistType layerResist;
     /** 这片晶圆有哪一层涂了变质（已曝光）的光刻胶：做出来一定报废 */
     boolean exposedResist;
+    /** 这片晶圆有哪一层涂好胶以后被对准用的 DUV 激光照了（激光源格放了 ArF 激光腔等）：做出来一定报废 */
+    boolean alignExposed;
     @Nullable
     ChipPackage pack;
     int boronQuarters;
@@ -134,6 +137,8 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
     // ---- 对准 ----
     final Alignment alignment = new Alignment();
     boolean aligned;
+    /** 激光对准（服主 11-16）：对准台界面的主板、激光源两格与收敛 / 锁定状态 */
+    final LaserAligner laser = new LaserAligner(this);
     boolean rsInverted;
     /** 开着显微镜的玩家，先开的是操作者（不存档） */
     final List<UUID> microscopeViewers = new ArrayList<>();
@@ -166,6 +171,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
     void onFormed() {
         alignment.randomize(world.rand);
         aligned = false;
+        laser.release();
         TileLightSource light = light();
         if (light != null) {
             light.link(pos);
@@ -364,8 +370,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         return aligned;
     }
 
-    /** 操作者拧一格旋钮：拧过以后要重新按“完成对准” */
+    /** 操作者拧一格旋钮：拧过以后要重新按“完成对准”（激光对准也松开，人接手） */
     public void turnKnob(Alignment.Axis axis, int dir, boolean fine) {
+        laser.release();
         alignment.turn(axis, dir, fine);
         aligned = false;
         markDirty();
@@ -376,6 +383,21 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         aligned = alignRate() >= LithoNumbers.ALIGN_MIN_PERMILLE;
         markDirty();
         return aligned;
+    }
+
+    /** 操作者按“激光对准”：主板、程序、激光都对且偏差在捕获范围里才开始 */
+    public boolean pressLaserAlign() {
+        return laser.press(world.rand);
+    }
+
+    public LaserAligner laserAligner() {
+        return laser;
+    }
+
+    /** 晶圆上现在有没曝完 / 没显影的胶（涂胶开始后到显影开始前）：对准用的 DUV 激光照到就报废 */
+    boolean resistOnWafer() {
+        return activeWafer >= 0 && ((step == LithoStep.COAT && stepStarted) || step == LithoStep.EXPOSE
+                || (step == LithoStep.DEVELOP && !stepStarted));
     }
 
     @Nullable
@@ -401,6 +423,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
             return;
         }
         tickCount++;
+        laser.tick();
         drainContainers();
         pushFluid();
         if (tickCount % LithoNumbers.PUSH_INTERVAL == 0) {
@@ -440,7 +463,8 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
             markDirty();
         }
         if (progress < required) {
-            if (!energy.consume(step.fePerTick)) {
+            int fe = step == LithoStep.EXPOSE && light != null ? light.spec().exposeFePerTick() : step.fePerTick;
+            if (!energy.consume(fe)) {
                 status = LithoStatus.NO_POWER;
                 return false;
             }
@@ -498,11 +522,16 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         if (light == null) {
             return LithoStatus.NO_LIGHT;
         }
-        if (light.spec().burntOut()) {
-            return LithoStatus.LAMP_OUT;
+        LightSpec spec = light.spec();
+        boolean excimer = spec instanceof ExcimerSpec;
+        if (spec.burntOut()) {
+            return excimer ? LithoStatus.LASER_OUT : LithoStatus.LAMP_OUT;
         }
-        if (light.spec().mercury <= 0) {
-            return LithoStatus.NO_MERCURY;
+        if (spec.noFuel()) {
+            return excimer ? LithoStatus.NO_LASER_GAS : LithoStatus.NO_MERCURY;
+        }
+        if (laser.converging()) {
+            return LithoStatus.LASER_ALIGNING;
         }
         if (!aligned || alignRate() < LithoNumbers.ALIGN_MIN_PERMILLE) {
             return LithoStatus.NOT_ALIGNED;
@@ -525,6 +554,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         resist = null;
         layerResist = null;
         exposedResist = false;
+        alignExposed = false;
         pack = null;
     }
 
@@ -567,7 +597,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
                 if (blocked != null) {
                     return blocked;
                 }
-                LampSpec spec = light.spec();
+                LightSpec spec = light.spec();
                 required = spec.exposeTicks();
                 worstLamp = Math.min(worstLamp, (int) Math.round(spec.brightness() * 1000));
                 lampResolution = Math.max(lampResolution, spec.resolutionUm());
@@ -707,6 +737,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         in.mold = WaferNbt.mold(wafer.getTagCompound());
         in.resist = resist == null ? ResistType.NEGATIVE : resist;
         in.exposedResist = exposedResist;
+        in.alignExposed = alignExposed;
         in.solvent = worstSolvent / 1000.0;
         in.alignPermille = worstAlign;
         in.lampBrightness = worstLamp / 1000.0;
@@ -724,6 +755,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         if (exposedResist) {
             made.setBoolean("ExposedResist", true);
         }
+        if (alignExposed) {
+            made.setBoolean("AlignExposed", true);
+        }
         made.setInteger("Solvent", worstSolvent);
         made.setInteger("Align", worstAlign);
         made.setInteger("Lamp", worstLamp);
@@ -740,6 +774,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         if (alignRate() < LithoNumbers.ALIGN_MIN_PERMILLE) {
             aligned = false;
         }
+        laser.afterDrift(world.rand);
     }
 
     // ---- 容器格、外推 ----
@@ -857,13 +892,16 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
                 light.link(null);
             }
             BlockPos dropAt = broken == null ? pos : broken;
-            for (int i = 0; i < inv.getSlots(); i++) {
-                ItemStack s = inv.getStackInSlot(i);
-                if (!s.isEmpty()) {
-                    InventoryHelper.spawnItemStack(world, dropAt.getX() + .5, dropAt.getY() + .5, dropAt.getZ() + .5, s.copy());
-                    inv.setStackInSlot(i, ItemStack.EMPTY);
+            for (ItemStackHandler h : new ItemStackHandler[]{inv, laser.inv}) {
+                for (int i = 0; i < h.getSlots(); i++) {
+                    ItemStack s = h.getStackInSlot(i);
+                    if (!s.isEmpty()) {
+                        InventoryHelper.spawnItemStack(world, dropAt.getX() + .5, dropAt.getY() + .5, dropAt.getZ() + .5, s.copy());
+                        h.setStackInSlot(i, ItemStack.EMPTY);
+                    }
                 }
             }
+            laser.release();
             for (int i = 0; i < parts.size(); i++) {
                 BlockPos p = parts.get(i);
                 IBlockState s = originals.get(i);
@@ -906,7 +944,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         TileLightSource light = light();
         if (light != null) {
             tag.setTag("Lamp", light.lampData());
+            tag.setBoolean("Excimer", light.excimer());
         }
+        tag.setTag("Laser", laser.guiData());
         tag.setInteger("BoronQ", boronQuarters);
         tag.setInteger("AlQ", aluminumQuarters);
         return tag;
@@ -928,6 +968,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         tag.setBoolean("Operator", viewer.getUniqueID().equals(op));
         EntityPlayer opPlayer = op == null ? null : world.getPlayerEntityByUUID(op);
         tag.setString("OperatorName", opPlayer == null ? "" : opPlayer.getName());
+        tag.setTag("Laser", laser.guiData());
         return tag;
     }
 
@@ -967,6 +1008,8 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         resist = ResistType.byId(nbt.getString("Resist"));
         layerResist = ResistType.byId(nbt.getString("LayerResist"));
         exposedResist = nbt.getBoolean("ExposedResist");
+        alignExposed = nbt.getBoolean("AlignExposed");
+        laser.readFromNBT(nbt);
         pack = ChipPackage.byId(nbt.getString("Package"));
         boronQuarters = nbt.getInteger("BoronQ");
         aluminumQuarters = nbt.getInteger("AlQ");
@@ -1010,6 +1053,10 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         if (exposedResist) {
             nbt.setBoolean("ExposedResist", true);
         }
+        if (alignExposed) {
+            nbt.setBoolean("AlignExposed", true);
+        }
+        laser.writeToNBT(nbt);
         if (pack != null) {
             nbt.setString("Package", pack.id);
         }

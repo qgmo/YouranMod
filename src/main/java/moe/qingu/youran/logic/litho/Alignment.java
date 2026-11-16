@@ -116,6 +116,13 @@ public final class Alignment {
         return (int) Math.max(0, Math.min(1000, Math.round(r * 1000)));
     }
 
+    /** 机器（激光对准）直接把台子移到这里（压电微动台，不经过旋钮）：旋钮的回差状态不变 */
+    public void moveTo(double x, double y, double theta) {
+        this.x = x;
+        this.y = y;
+        this.theta = theta;
+    }
+
     /** 产出一片后的随机漂移 */
     public void drift(Random random) {
         x += random.nextGaussian() * LithoNumbers.DRIFT_SHIFT_UM;

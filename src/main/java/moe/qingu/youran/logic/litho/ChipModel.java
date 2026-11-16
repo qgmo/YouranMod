@@ -38,7 +38,17 @@ public enum ChipModel {
     FONT_ROM_1("font_rom_1", 6, Kind.ROM, 3.0, 6, 5000, 0, 0),
     FONT_ROM_2("font_rom_2", 7, Kind.ROM, 3.0, 6, 5000, 0, 0),
     FONT_ROM_3("font_rom_3", 8, Kind.ROM, 3.0, 6, 5000, 0, 0),
-    FONT_ROM_4("font_rom_4", 9, Kind.ROM, 3.0, 6, 5000, 0, 0);
+    FONT_ROM_4("font_rom_4", 9, Kind.ROM, 3.0, 6, 5000, 0, 0),
+    /**
+     * YR-2000（服主 11-16，家具电脑的 CPU，型号虚构）：0.13 μm，10 层，标准频率 2.0 GHz，可调 1.6–2.6 GHz。
+     * 只有 ArF 光源（0.05 μm）+ 改良正胶（0.05 μm）做得了；对准公差 0.065 μm，要激光对准
+     */
+    YR2000("yr2000", 10, Kind.CPU, 0.13, 10, 2_000_000, 1_600_000, 2_600_000),
+    /**
+     * 激光对准控制程序 ROM（服主 11-16）：插在个人电脑主板 ROM 槽上，对准台认它才开“激光对准”。同 BIOS ROM 那一类
+     * （8 KB 掩模 ROM，HMOS 3 μm，6 层，额定存取时间 250 ns）；程序做在掩模里，出厂就是正版
+     */
+    ROM_LASER_ALIGN("laser_align_rom", 11, Kind.ROM, 3.0, 6, 4000, 0, 0);
 
     /** 芯片种类：CPU 有标准频率与可调范围；内存只有存取速度 */
     public enum Kind {
@@ -106,6 +116,12 @@ public enum ChipModel {
 
     public boolean isCpu() {
         return kind == Kind.CPU;
+    }
+
+    /** 频率（kHz）给人看：1 GHz 以上写 GHz，否则写 MHz，两位小数 */
+    public static String formatFreq(int kHz) {
+        return kHz >= 1_000_000 ? String.format(java.util.Locale.ROOT, "%.2f GHz", kHz / 1_000_000.0)
+                : String.format(java.util.Locale.ROOT, "%.2f MHz", kHz / 1000.0);
     }
 
     /** 频率换成存取时间（ns）：1 / f */

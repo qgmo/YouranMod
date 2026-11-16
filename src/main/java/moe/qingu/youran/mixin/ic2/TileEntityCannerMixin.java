@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.Collection;
 
 /**
- * 装罐机富集模式加上反应配方（流体 + 物品 → 流体 + 物品）。三处都在方法开头，不是反应配方时什么也不做、照 IC2 原来的走：
+ * 装罐机富集模式加上反应配方（流体 + 物品 → 流体 + 物品）；固体装罐模式下给激光管放气体元素（{@code compat.ic2.GasFillHooks}）。三处都在方法开头，不是反应配方时什么也不做、照 IC2 原来的走：
  * <ul>
  *     <li>{@code getOutput()}：每 tick 由 {@code TileEntityStandardMachine#updateEntityServer} 调用，决定能不能做。富集模式下先查反应配方表，
  *     对得上就由我们回答（能做时给出结果，输入不够、输出放不下时返回 null：不开始，做到一半时进度清零，同 IC2）；</li>
@@ -27,6 +27,14 @@ public abstract class TileEntityCannerMixin {
     @Inject(method = "getOutput()Lic2/api/recipe/MachineRecipeResult;", at = @At("HEAD"), cancellable = true)
     private void youran$reactionOutput(CallbackInfoReturnable<MachineRecipeResult<Object, Object, Object>> cir) {
         TileEntityCanner canner = (TileEntityCanner) (Object) this;
+        if (canner.getMode() == TileEntityCanner.Mode.BottleSolid) {
+            // 固体装罐：给 ArF 激光腔、氦氖激光管放气体元素（产物按罐子格里那一件的数据现算）
+            CannerReactionHooks.Outcome gas = moe.qingu.youran.compat.ic2.GasFillHooks.getOutput(canner);
+            if (gas.handled) {
+                cir.setReturnValue(gas.result);
+            }
+            return;
+        }
         if (canner.getMode() != TileEntityCanner.Mode.EnrichLiquid) {
             return;
         }

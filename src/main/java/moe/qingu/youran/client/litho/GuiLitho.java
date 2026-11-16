@@ -68,6 +68,14 @@ public class GuiLitho extends GuiContainer {
                 drawHoveringText(lines, mouseX, mouseY);
             }
         }
+        // 激光对准的两格空着时提示放什么
+        for (Slot slot : container.inventorySlots) {
+            if (slot instanceof net.minecraftforge.items.SlotItemHandler && ((net.minecraftforge.items.SlotItemHandler) slot).getItemHandler() == container.master.laserAligner().inventory()
+                    && !slot.getHasStack() && isPointInRegion(slot.xPos, slot.yPos, 16, 16, mouseX, mouseY)) {
+                drawHoveringText(I18n.format(slot.getSlotIndex() == moe.qingu.youran.litho.LaserAligner.SLOT_BOARD ? "youranmod.litho.slot.board"
+                        : "youranmod.litho.slot.laser"), mouseX, mouseY);
+            }
+        }
         int ex = guiLeft + 8;
         int ey = guiTop + 94;
         if (mouseX >= ex && mouseX < ex + 110 && mouseY >= ey && mouseY < ey + 6) {
@@ -134,7 +142,17 @@ public class GuiLitho extends GuiContainer {
         y += 9;
         if (d.hasKey("Lamp")) {
             List<String> lamp = new ArrayList<>();
-            ItemLampPart.describe(LampNbt.read(d.getCompoundTag("Lamp")), true, lamp);
+            if (d.getBoolean("Excimer")) {
+                // 准分子激光光源：一行输出刻度，一行三样气体（窗口、已用次数看光源物品的悬停说明）
+                moe.qingu.youran.logic.litho.ExcimerSpec ex = moe.qingu.youran.item.LaserNbt.excimer(d.getCompoundTag("Lamp"));
+                List<String> l = new ArrayList<>();
+                moe.qingu.youran.item.ItemLaserCavity.describe(ex, l);
+                lamp.add(I18n.format("youranmod.litho.lamp.excimer", moe.qingu.youran.item.ItemLaserCavity.gauge(ex.strength())));
+                lamp.add(l.get(1));
+                lamp.add("");
+            } else {
+                ItemLampPart.describe(LampNbt.read(d.getCompoundTag("Lamp")), true, lamp);
+            }
             fontRenderer.drawString(I18n.format("youranmod.litho.lamp", lamp.get(0)), 8, y, LithoDraw.TEXT);
             y += 9;
             fontRenderer.drawString(lamp.get(1) + "  " + lamp.get(2), 8, y, LithoDraw.TEXT);

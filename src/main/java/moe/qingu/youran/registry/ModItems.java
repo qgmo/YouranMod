@@ -94,6 +94,10 @@ public final class ModItems {
     public static Item smallMolybdenumDust;
     public static Item molybdenumDust;
     public static Item mercuryLightSource;
+    /** DUV 一档（服主 11-16）：ArF 激光腔、准分子激光光源（方块的物品）、氦氖激光管 */
+    public static moe.qingu.youran.item.ItemLaserCavity arfLaserCavity;
+    public static Item excimerLightSource;
+    public static moe.qingu.youran.item.ItemHeNeTube heneLaserTube;
     /** 主板线（服主 11-16）：酚醛基板、三氯化铁粉、线路板（各道工序按元数据）、线路底片、冲孔模具、EPROM、紫外擦除器 */
     public static Item phenolicSubstrate;
     public static Item ferricChlorideDust;
@@ -204,6 +208,9 @@ public final class ModItems {
         net.minecraftforge.oredict.OreDictionary.registerOre("dustMolybdenum", molybdenumDust);
         alignmentTable = add(registry, itemBlock(ModBlocks.alignmentTable));
         mercuryLightSource = add(registry, new moe.qingu.youran.litho.ItemBlockLightSource(ModBlocks.mercuryLightSource));
+        arfLaserCavity = (moe.qingu.youran.item.ItemLaserCavity) add(registry, new moe.qingu.youran.item.ItemLaserCavity("arf_laser_cavity"));
+        excimerLightSource = add(registry, new moe.qingu.youran.litho.ItemBlockLightSource(ModBlocks.excimerLightSource));
+        heneLaserTube = (moe.qingu.youran.item.ItemHeNeTube) add(registry, new moe.qingu.youran.item.ItemHeNeTube("hene_laser_tube"));
         phenolicSubstrate = add(registry, new moe.qingu.youran.item.ItemLangTooltip("phenolic_substrate", 64));
         ferricChlorideDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("ferric_chloride_dust", 64));
         net.minecraftforge.oredict.OreDictionary.registerOre("dustFerricChloride", ferricChlorideDust);

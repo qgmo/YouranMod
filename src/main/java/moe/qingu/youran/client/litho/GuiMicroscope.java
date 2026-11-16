@@ -22,6 +22,9 @@ import java.io.IOException;
  * 旋钮有回差。只有操作者（先打开显微镜的人）能拧，旁人看同样的画面。
  *
  * <p>键盘：方向键 X / Y，Q / E 旋转，按住 Shift 细调，Tab 换倍率，回车完成对准。
+ *
+ * <p>激光对准（服主 11-16）：主界面插了个人电脑主板（激光对准控制程序）与激光源后，“激光对准”按钮在偏差进了捕获范围时可按；
+ * 按不了时下面写原因（“偏差超出激光捕获范围”“控制程序不对”等）。收敛中、锁定后也在这里显示。
  */
 @SideOnly(Side.CLIENT)
 public class GuiMicroscope extends GuiContainer {
@@ -42,7 +45,7 @@ public class GuiMicroscope extends GuiContainer {
         super(container);
         this.container = container;
         xSize = 256;
-        ySize = 224;
+        ySize = 240;
     }
 
     @Override
@@ -61,6 +64,7 @@ public class GuiMicroscope extends GuiContainer {
         buttonList.add(new GuiButton(7, x + 82, y + 22, 78, 18, ""));
         buttonList.add(new GuiButton(8, x + 164, y + 22, 78, 18, I18n.format("youranmod.microscope.confirm")));
         buttonList.add(new GuiButton(9, x + 164, y + 44, 78, 18, I18n.format("youranmod.microscope.back")));
+        buttonList.add(new GuiButton(10, x, y + 44, 160, 18, I18n.format("youranmod.microscope.laser")));
         updateLabels();
     }
 
@@ -78,6 +82,9 @@ public class GuiMicroscope extends GuiContainer {
             buttonList.get(i).enabled = op;
         }
         buttonList.get(8).enabled = op;
+        NBTTagCompound laser = container.data.getCompoundTag("Laser");
+        buttonList.get(10).enabled = op && laser.hasKey("Problem") && laser.getInteger("Problem") < 0
+                && laser.getInteger("State") != moe.qingu.youran.logic.litho.LaserAlign.State.CONVERGING.ordinal();
     }
 
     private void knob(Alignment.Axis axis, int dir, boolean fineStep) {
@@ -103,6 +110,9 @@ public class GuiMicroscope extends GuiContainer {
                 break;
             case 9:
                 YouranNetwork.CHANNEL.sendToServer(new LithoMessages.Action(container.windowId, LithoMessages.OPEN_MAIN, 0));
+                break;
+            case 10:
+                YouranNetwork.CHANNEL.sendToServer(new LithoMessages.Action(container.windowId, LithoMessages.LASER_ALIGN, 0));
                 break;
             default:
                 break;
@@ -176,6 +186,25 @@ public class GuiMicroscope extends GuiContainer {
         LithoDraw.rectInCircle(cx + win, cy - armM, cx + win + t, cy + armM, cx, cy, R, chrome);
     }
 
+    /** 公差：0.1 μm 以下多写几位（YR-2000 是 ±0.065 μm） */
+    static String tol(double um) {
+        return um < 0.1 ? String.format(java.util.Locale.ROOT, "%.3f", um) : String.format(java.util.Locale.ROOT, "%.1f", um);
+    }
+
+    /** 激光对准一行：收敛中 / 已锁定 / 按不了的原因 */
+    static String laserLine(NBTTagCompound l) {
+        int state = l.getInteger("State");
+        if (state == moe.qingu.youran.logic.litho.LaserAlign.State.CONVERGING.ordinal()) {
+            return I18n.format("youranmod.laser_align.converging", l.getInteger("Progress") / 10);
+        }
+        if (state == moe.qingu.youran.logic.litho.LaserAlign.State.LOCKED.ordinal()) {
+            return I18n.format("youranmod.laser_align.locked", moe.qingu.youran.item.ItemLaserCavity.gauge(l.getInteger("Strength") / 1000.0));
+        }
+        moe.qingu.youran.litho.LaserAligner.Problem p = moe.qingu.youran.litho.LaserAligner.Problem.byOrdinal(l.getInteger("Problem"));
+        return p == null ? I18n.format("youranmod.laser_align.ready", moe.qingu.youran.item.ItemLaserCavity.gauge(l.getInteger("Strength") / 1000.0))
+                : I18n.format(p.key());
+    }
+
     @Override
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         NBTTagCompound d = container.data;
@@ -184,10 +213,11 @@ public class GuiMicroscope extends GuiContainer {
         fontRenderer.drawString(I18n.format("youranmod.microscope.right"), RIGHT_CX - 12, CY + R + 4, LithoDraw.TEXT);
         String who = d.getBoolean("Operator") ? I18n.format("youranmod.microscope.operator.you")
                 : I18n.format("youranmod.microscope.operator.other", d.getString("OperatorName"));
-        fontRenderer.drawString(who, 8, 192, d.getBoolean("Operator") ? 0x206020 : 0xA04020);
+        fontRenderer.drawString(who, xSize - 8 - fontRenderer.getStringWidth(who), 6, d.getBoolean("Operator") ? 0x206020 : 0xA04020);
         String rate = I18n.format(d.getBoolean("Aligned") ? "youranmod.microscope.rate.ok" : "youranmod.microscope.rate",
-                d.getInteger("Rate") / 10.0, String.format(java.util.Locale.ROOT, "%.1f", d.getDouble("Tol")));
-        fontRenderer.drawString(rate, 8, 201, LithoDraw.TEXT);
-        fontRenderer.drawString(I18n.format("youranmod.microscope.keys"), 8, 211, 0x707070);
+                d.getInteger("Rate") / 10.0, tol(d.getDouble("Tol")));
+        fontRenderer.drawString(laserLine(d.getCompoundTag("Laser")), 8, 211, 0x2050A0);
+        fontRenderer.drawString(rate, 8, 220, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.keys"), 8, 229, 0x707070);
     }
 }

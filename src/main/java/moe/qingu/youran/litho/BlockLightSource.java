@@ -21,7 +21,7 @@ import net.minecraft.world.World;
 import javax.annotation.Nullable;
 
 /**
- * 光源方块（服主 11-15）：第一档汞灯光源。光刻机结构里的一格，成形时**不被替换**、原样留在结构里（设计稿 3.3），
+ * 光源方块（服主 11-15）：第一档汞灯光源、DUV 一档准分子激光光源（服主 11-16，{@link #excimer}；换档 = 换方块）。光刻机结构里的一格，成形时**不被替换**、原样留在结构里（设计稿 3.3），
  * 数据在自己的方块实体（{@link TileLightSource}）里。
  *
  * <p>掉落只走一条路：方块被移除时（{@link #breakBlock}，方块实体还在）生成带数据的物品，{@link #getDrops} 不给东西；
@@ -30,8 +30,16 @@ import javax.annotation.Nullable;
  * <p>外形是灯罩（不是整格），曝光时灯口发光、光往下照由 {@code LightSourceRenderer} 画。
  */
 public class BlockLightSource extends Block {
+    /** 准分子激光光源（数据是 ArF 激光腔的）；否则汞灯光源 */
+    public final boolean excimer;
+
     public BlockLightSource(String name) {
+        this(name, false);
+    }
+
+    public BlockLightSource(String name, boolean excimer) {
         super(Material.IRON);
+        this.excimer = excimer;
         setRegistryName(name);
         setTranslationKey(name);
         setHardness(3.0F);
@@ -68,7 +76,7 @@ public class BlockLightSource extends Block {
 
     @Override
     public TileEntity createTileEntity(World world, IBlockState state) {
-        return new TileLightSource();
+        return excimer ? new TileExcimerSource() : new TileLightSource();
     }
 
     @Override

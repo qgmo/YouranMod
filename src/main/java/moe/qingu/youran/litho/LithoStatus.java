@@ -27,7 +27,13 @@ public enum LithoStatus {
     /** 正胶显影缺水（服主 11-16；加在最后，不改已有状态的编号） */
     NEED_WATER,
     /** 正胶显影缺碱 */
-    NEED_ALKALI;
+    NEED_ALKALI,
+    /** 激光对准正在收敛（服主 11-16） */
+    LASER_ALIGNING,
+    /** 准分子激光光源：激光腔窗口到寿命了 */
+    LASER_OUT,
+    /** 准分子激光光源：没氟或配比不出光（拆下来补气） */
+    NO_LASER_GAS;
 
     public String key() {
         return "youranmod.litho.status." + name().toLowerCase(java.util.Locale.ROOT);

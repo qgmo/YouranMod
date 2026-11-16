@@ -17,13 +17,15 @@ import net.minecraftforge.fml.common.network.simpleimpl.MessageContext;
 
 /**
  * 光刻机界面的网络包：服务端 → 客户端的界面数据（{@link Sync}），客户端 → 服务端的操作（{@link Action}：开显微镜、回主界面、
- * 拧旋钮、完成对准）。服务端在主线程核对：玩家开着的正是这个窗口、离机器够近、机器还成形；拧旋钮、完成对准只认操作者。
+ * 拧旋钮、完成对准、激光对准）。服务端在主线程核对：玩家开着的正是这个窗口、离机器够近、机器还成形；拧旋钮、完成对准只认操作者。
  */
 public final class LithoMessages {
     public static final int OPEN_MICROSCOPE = 0;
     public static final int OPEN_MAIN = 1;
     public static final int KNOB = 2;
     public static final int CONFIRM = 3;
+    /** 按“激光对准”（服主 11-16），只认操作者 */
+    public static final int LASER_ALIGN = 4;
 
     private LithoMessages() {
     }
@@ -141,6 +143,11 @@ public final class LithoMessages {
                 case CONFIRM:
                     if (c instanceof ContainerMicroscope && player.getUniqueID().equals(m.operator())) {
                         m.confirmAlignment();
+                    }
+                    break;
+                case LASER_ALIGN:
+                    if (c instanceof ContainerMicroscope && player.getUniqueID().equals(m.operator())) {
+                        m.pressLaserAlign();
                     }
                     break;
                 default:

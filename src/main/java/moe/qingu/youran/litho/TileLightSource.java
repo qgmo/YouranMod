@@ -1,7 +1,10 @@
 package moe.qingu.youran.litho;
 
 import moe.qingu.youran.item.LampNbt;
+import moe.qingu.youran.item.LaserNbt;
+import moe.qingu.youran.logic.litho.ExcimerSpec;
 import moe.qingu.youran.logic.litho.LampSpec;
+import moe.qingu.youran.logic.litho.LightSpec;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.NetworkManager;
@@ -16,11 +19,12 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 import javax.annotation.Nullable;
 
 /**
- * 汞灯光源的方块实体（设计稿 3.3）：数据一直待在这里，成形、拆开都不搬家，所以不丢不刷。
- * 存原始量（玻璃管、铸模 / 纯度、已用量，见 {@link LampNbt}），亮度、寿命现算；另记接入的主方块位置（成形时设，拆开时清）。
+ * 光源的方块实体（设计稿 3.3）：数据一直待在这里，成形、拆开都不搬家，所以不丢不刷。
+ * 存原始量（汞灯：玻璃管、铸模 / 纯度、已用量、汞，见 {@link LampNbt}；准分子激光光源（{@link TileExcimerSource}）：激光腔的窗口、
+ * 三样气体、已用量，见 {@link LaserNbt}），亮度、寿命现算；另记接入的主方块位置（成形时设，拆开时清）。
  */
 public class TileLightSource extends TileEntity {
-    private NBTTagCompound lamp = LampNbt.tag(LampNbt.read(null));
+    private NBTTagCompound lamp = new NBTTagCompound();
     @Nullable
     private BlockPos master;
     /** 正在曝光（客户端用来发光） */
@@ -28,13 +32,26 @@ public class TileLightSource extends TileEntity {
     /** 被创造模式玩家敲掉时不掉物品（和原版一致） */
     boolean noDrop;
 
-    public LampSpec spec() {
-        return LampNbt.read(lamp);
+    /** 是不是准分子激光光源（DUV 一档） */
+    public boolean excimer() {
+        return false;
+    }
+
+    public LightSpec spec() {
+        return excimer() ? LaserNbt.excimer(lamp) : LampNbt.read(lamp);
+    }
+
+    private NBTTagCompound write(LightSpec s) {
+        return s instanceof ExcimerSpec ? LaserNbt.tag((ExcimerSpec) s) : LampNbt.tag((LampSpec) s);
+    }
+
+    private NBTTagCompound normalized(@Nullable NBTTagCompound data) {
+        return excimer() ? LaserNbt.tag(LaserNbt.excimer(data)) : LampNbt.tag(LampNbt.read(data));
     }
 
     /** 物品放下时把数据写回来（{@code onBlockPlacedBy}） */
     public void setLampData(@Nullable NBTTagCompound data) {
-        lamp = LampNbt.tag(LampNbt.read(data));
+        lamp = normalized(data);
         markDirty();
     }
 
@@ -43,9 +60,9 @@ public class TileLightSource extends TileEntity {
         return lamp.copy();
     }
 
-    /** 曝光一层：已用量加 1，汞照用量扣 */
+    /** 曝光一层：已用量加 1，汞照用量扣（激光腔扣氟） */
     public void addUse() {
-        lamp = LampNbt.tag(spec().afterExposure());
+        lamp = write(spec().afterExposure());
         markDirty();
     }
 
@@ -98,7 +115,7 @@ public class TileLightSource extends TileEntity {
     }
 
     private void readCustom(NBTTagCompound nbt) {
-        lamp = LampNbt.tag(LampNbt.read(nbt.getCompoundTag("Lamp")));
+        lamp = normalized(nbt.getCompoundTag("Lamp"));
         master = nbt.hasKey("Master") ? BlockPos.fromLong(nbt.getLong("Master")) : null;
         lit = nbt.getBoolean("Lit");
     }

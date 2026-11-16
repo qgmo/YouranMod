@@ -115,6 +115,14 @@ public final class YouranJeiPlugin implements IModPlugin {
         registry.addIngredientInfo(new ItemStack(ModItems.scrapSiliconWafer), VanillaTypes.ITEM, "youranmod.jei.scrap_wafer.info");
         registry.addIngredientInfo(new ItemStack(ModItems.naphthalene), VanillaTypes.ITEM, "youranmod.jei.naphthalene.info");
         registry.addIngredientInfo(new ItemStack(ModItems.locatorModule), VanillaTypes.ITEM, "youranmod.jei.locator_module.info");
+        // DUV 一档（服主 11-16）：怎么充气、怎么用；配比只给“预计输出”，不写最佳配比（要玩家自己调）
+        registry.addIngredientInfo(new ItemStack(ModItems.arfLaserCavity), VanillaTypes.ITEM, "youranmod.jei.arf_laser_cavity.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.heneLaserTube), VanillaTypes.ITEM, "youranmod.jei.hene_laser_tube.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.excimerLightSource), VanillaTypes.ITEM, "youranmod.jei.excimer_light_source.info");
+        if (ModFluids.photoresist != null) {
+            registry.addIngredientInfo(moe.qingu.youran.fluid.FluidVariants.photoresist(moe.qingu.youran.logic.litho.ResistType.IMPROVED_POSITIVE, 1000),
+                    VanillaTypes.FLUID, "youranmod.jei.improved_resist.info");
+        }
     }
 
     @Override

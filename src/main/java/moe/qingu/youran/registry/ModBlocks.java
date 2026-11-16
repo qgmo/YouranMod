@@ -29,6 +29,8 @@ public final class ModBlocks {
     /** 光刻机（服主 11-16）：对准台（锤子触发格、成形后的主方块）、汞灯光源、成形后的光刻机方块（没有物品形式） */
     public static Block alignmentTable;
     public static Block mercuryLightSource;
+    /** DUV 一档的光源（服主 11-16）：准分子激光光源（ArF 激光腔 + 泛光灯），结构那一格认任一光源方块 */
+    public static Block excimerLightSource;
     public static Block lithoPart;
     /** 紫外擦除器（服主 11-16）：擦 EPROM、给涂胶主板曝光 */
     public static Block uvEraser;
@@ -55,6 +57,10 @@ public final class ModBlocks {
         mercuryLightSource = new moe.qingu.youran.litho.BlockLightSource("mercury_light_source");
         lithoPart = new moe.qingu.youran.litho.BlockLithoPart("lithography_machine");
         registry.registerAll(alignmentTable, mercuryLightSource, lithoPart);
+        excimerLightSource = new moe.qingu.youran.litho.BlockLightSource("excimer_light_source", true);
+        registry.register(excimerLightSource);
+        net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.litho.TileExcimerSource.class,
+                new net.minecraft.util.ResourceLocation("youranmod", "excimer_light_source"));
         uvEraser = new moe.qingu.youran.pcb.BlockUvEraser("uv_eraser");
         registry.register(uvEraser);
         net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.pcb.TileUvEraser.class,

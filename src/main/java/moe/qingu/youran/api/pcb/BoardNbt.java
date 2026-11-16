@@ -51,6 +51,17 @@ public final class BoardNbt {
         return t == BoardType.COMPUTER ? ChipModel.ROM_MONITOR : t == BoardType.PC ? ChipModel.ROM_BIOS : null;
     }
 
+    /**
+     * ROM 槽装得上这种掩模 ROM 吗：普通电脑认监控程序；个人电脑认 BIOS，也认激光对准控制程序（服主 11-16：光刻机对准台用的
+     * 就是个人电脑主板，只是 ROM 里的程序换成激光对准控制程序；这样的主板装进电脑开不了机）。EPROM 另算（都认）
+     */
+    public static boolean acceptsRomMask(BoardType t, @Nullable ChipModel m) {
+        if (m == null || romMask(t) == null) {
+            return false;
+        }
+        return m == romMask(t) || (t == BoardType.PC && m == ChipModel.ROM_LASER_ALIGN);
+    }
+
     /** 汉卡要的四片字库 ROM（别的板子不要） */
     public static ChipModel[] fonts(BoardType t) {
         return t == BoardType.HANZI ? new ChipModel[]{ChipModel.FONT_ROM_1, ChipModel.FONT_ROM_2, ChipModel.FONT_ROM_3, ChipModel.FONT_ROM_4}
@@ -167,7 +178,7 @@ public final class BoardNbt {
                 NBTTagList l = b.getTagList(RAM, 10);
                 l.appendTag(p.chip.copy());
                 b.setTag(RAM, l);
-            } else if (romMask(t) != null && (p.model == romMask(t) || p.eprom)) {
+            } else if (romMask(t) != null && (acceptsRomMask(t, p.model) || p.eprom)) {
                 if (hasRom(b)) {
                     return null;
                 }
