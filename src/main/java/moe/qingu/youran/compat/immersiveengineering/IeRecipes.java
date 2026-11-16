@@ -149,10 +149,10 @@ public final class IeRecipes {
         }
     }
 
-    /** 灌装机：1 聚乙烯团 + 125 mB 氯气 → 1 聚氯乙烯团（同装罐机富集模式的那条） */
+    /** 灌装机：1 聚乙烯团 + 250 mB 氯气 → 1 聚氯乙烯团（同装罐机富集模式的那条） */
     public static void registerPvc() {
         ItemStack input = new ItemStack(ModItems.polyethyleneLump);
-        FluidStack chlorine = new FluidStack(ModFluids.chlorine, 125);
+        FluidStack chlorine = new FluidStack(ModFluids.chlorine, 250);
         BottlingMachineRecipe.addRecipe(new ItemStack(ModItems.pvcLump), input, chlorine);
         BottlingMachineRecipe found = BottlingMachineRecipe.findRecipe(input, chlorine);
         if (found == null || found.output.getItem() != ModItems.pvcLump) {

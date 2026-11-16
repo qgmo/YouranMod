@@ -138,9 +138,9 @@ public final class CannerReactions {
                 HYDROGEN, 20, new ReactionItem(YouranMod.MODID + ":small_magnetite_dust", 0, 1, null));
     }
 
-    /** 聚氯乙烯：1 聚乙烯团 + 125 mB 氯气 → 1 聚氯乙烯团，不出流体 */
+    /** 聚氯乙烯：1 聚乙烯团 + 250 mB 氯气 → 1 聚氯乙烯团，不出流体（11-16 按 500 mB = 8 个氯核对后翻倍） */
     static FluidItemReaction<ItemStack, ReactionItem> pvcFromPolyethylene() {
-        return new FluidItemReaction<>(CHLORINE, 125, ItemIngredient.item(YouranMod.MODID + ":polyethylene_lump", 0, 1),
+        return new FluidItemReaction<>(CHLORINE, 250, ItemIngredient.item(YouranMod.MODID + ":polyethylene_lump", 0, 1),
                 null, 0, new ReactionItem(YouranMod.MODID + ":pvc_lump", 0, 1, null));
     }
 

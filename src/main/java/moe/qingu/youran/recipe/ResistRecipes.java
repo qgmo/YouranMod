@@ -34,12 +34,12 @@ public final class ResistRecipes {
     /** 杂酚油：沉浸工程的、IC2 的 */
     static final String[] CREOSOTES = {"creosote", "ic2creosote"};
 
-    // ---- 服主 11-15 定的量 ----
+    // ---- 服主 11-15 定的量；氯气 11-16 按 500 mB = 8 个氯核对后翻倍 ----
     public static final int ALLOY_TIN = 9;
-    public static final int ALLOY_CHLORINE = 125;
+    public static final int ALLOY_CHLORINE = 250;
     public static final int ALLOY_SNCL4 = 9;
     public static final int REFINERY_TIN = 72;
-    public static final int REFINERY_CHLORINE = 1000;
+    public static final int REFINERY_CHLORINE = 2000;
     public static final int REFINERY_SNCL4 = 72;
     public static final int TINY_TIN = 4;
     public static final int TINY_TIN_CHLORINE = 2000;
