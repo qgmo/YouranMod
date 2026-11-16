@@ -26,6 +26,9 @@ import stanhebben.zenscript.annotations.ZenMethod;
  * mods.youranmod.CannerReaction.remove(&lt;youranmod:magnetite_dust&gt;);   // 按输出物品删；给流体时按输出流体删
  * mods.youranmod.CannerReaction.removeAll();
  * </pre>
+ *
+ * 内置的“流体 + 物品 → 只出流体”的反应（三氯氢硅、四氯化锡、带叠氮基的芳烃、光刻胶、三氯化铁溶液）已经改登记进 IC2 原生的富集配方表，
+ * 这里的 remove / removeAll 删不到它们，要改请用 IC2 自己的配方接口（如 ic2-tweaker 的装罐机）。
  */
 @ZenRegister
 @ZenClass("mods.youranmod.CannerReaction")
