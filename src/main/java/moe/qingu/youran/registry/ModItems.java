@@ -78,9 +78,23 @@ public final class ModItems {
     /** 外设（服主 11-15；接口见 api.peripheral）：5.25 英寸软驱（个人电脑出厂带一个）、汉卡（普通电脑出厂带一块） */
     public static Item floppyDrive;
     public static Item hanziCard;
-    /** 光刻（服主 11-15）：负胶链的环化橡胶、叠氮化钠粉 */
+    /** 光刻（服主 11-15 / 11-16）：负胶链的环化橡胶、叠氮化钠粉；汞灯的玻璃管两档、钨棒、掺钍阴极棒、汞灯（配方见 recipe.LithoRecipes）；掩模、芯片设计图、芯片 */
     public static Item cyclizedRubber;
     public static Item sodiumAzideDust;
+    public static moe.qingu.youran.item.ItemTube glassTube;
+    public static moe.qingu.youran.item.ItemTube quartzTube;
+    public static Item tungstenRod;
+    public static Item thoriatedCathodeRod;
+    public static Item mercuryLamp;
+    public static moe.qingu.youran.item.ItemPhotomask photomask;
+    public static moe.qingu.youran.item.ItemChipDesign chipDesign;
+    public static moe.qingu.youran.item.ItemChip chip;
+    public static Item alignmentTable;
+    /** 钼（服主 11-16）：铜矿的副产物，小撮钼粉做汞灯，9 小撮 = 1 钼粉，钼粉烧成炼金化学的钼锭 */
+    public static Item smallMolybdenumDust;
+    public static Item molybdenumDust;
+    public static Item mercuryLightSource;
+
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
 
@@ -154,6 +168,23 @@ public final class ModItems {
         Peripherals.register(locatorModule);
         cyclizedRubber = add(registry, new moe.qingu.youran.item.ItemLangTooltip("cyclized_rubber", 64));
         sodiumAzideDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("sodium_azide_dust", 64));
+        glassTube = (moe.qingu.youran.item.ItemTube) add(registry, new moe.qingu.youran.item.ItemTube("glass_tube",
+                moe.qingu.youran.logic.litho.LampGlass.GLASS));
+        quartzTube = (moe.qingu.youran.item.ItemTube) add(registry, new moe.qingu.youran.item.ItemTube("quartz_tube",
+                moe.qingu.youran.logic.litho.LampGlass.QUARTZ));
+        tungstenRod = add(registry, new moe.qingu.youran.item.ItemLangTooltip("tungsten_rod", 64));
+        thoriatedCathodeRod = add(registry, new moe.qingu.youran.item.ItemLangTooltip("thoriated_cathode_rod", 64));
+        mercuryLamp = add(registry, new moe.qingu.youran.item.ItemLampPart("mercury_lamp", 1, true));
+        photomask = (moe.qingu.youran.item.ItemPhotomask) add(registry, new moe.qingu.youran.item.ItemPhotomask());
+        chipDesign = (moe.qingu.youran.item.ItemChipDesign) add(registry, new moe.qingu.youran.item.ItemChipDesign());
+        chip = (moe.qingu.youran.item.ItemChip) add(registry, new moe.qingu.youran.item.ItemChip());
+        smallMolybdenumDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("small_molybdenum_dust", 64));
+        molybdenumDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("molybdenum_dust", 64));
+        // 物品注册时就登记矿物词典：炼金化学在它的后初始化里按 dustMolybdenum 自动生成溶解机配方（1 钼粉 → 16 钼）
+        net.minecraftforge.oredict.OreDictionary.registerOre("dustTinyMolybdenum", smallMolybdenumDust);
+        net.minecraftforge.oredict.OreDictionary.registerOre("dustMolybdenum", molybdenumDust);
+        alignmentTable = add(registry, itemBlock(ModBlocks.alignmentTable));
+        mercuryLightSource = add(registry, new moe.qingu.youran.litho.ItemBlockLightSource(ModBlocks.mercuryLightSource));
     }
 
     private static Item itemBlock(Block block) {

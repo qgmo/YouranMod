@@ -1,0 +1,194 @@
+package moe.qingu.youran.client.litho;
+
+import moe.qingu.youran.litho.ContainerMicroscope;
+import moe.qingu.youran.logic.litho.Alignment;
+import moe.qingu.youran.logic.litho.LithoNumbers;
+import moe.qingu.youran.net.LithoMessages;
+import moe.qingu.youran.net.YouranNetwork;
+import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.gui.inventory.GuiContainer;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraftforge.fml.relauncher.Side;
+import net.minecraftforge.fml.relauncher.SideOnly;
+import org.lwjgl.input.Keyboard;
+
+import java.io.IOException;
+
+/**
+ * 对准显微镜（分视场）：左右两个圆形视野，各有晶圆上的十字（上一层留下的，深色实心）和掩模的十字（半透明的框）。
+ * X、Y 平移两边一起动；θ 旋转让两边的十字往相反方向动。低倍看得全但不精，高倍精但视野小、十字容易跑出视野；
+ * 旋钮有回差。只有操作者（先打开显微镜的人）能拧，旁人看同样的画面。
+ *
+ * <p>键盘：方向键 X / Y，Q / E 旋转，按住 Shift 细调，Tab 换倍率，回车完成对准。
+ */
+@SideOnly(Side.CLIENT)
+public class GuiMicroscope extends GuiContainer {
+    static final int R = 54;
+    static final int LEFT_CX = 70;
+    static final int RIGHT_CX = 186;
+    static final int CY = 76;
+    /** 晶圆十字：臂半长、粗细（μm）；掩模的框比它宽一点 */
+    static final double MARK_ARM = 30;
+    static final double MARK_WIDTH = 2;
+    static final double WINDOW_WIDTH = 4;
+
+    private final ContainerMicroscope container;
+    private boolean high;
+    private boolean fine;
+
+    public GuiMicroscope(ContainerMicroscope container) {
+        super(container);
+        this.container = container;
+        xSize = 256;
+        ySize = 222;
+    }
+
+    @Override
+    public void initGui() {
+        super.initGui();
+        Keyboard.enableRepeatEvents(true);
+        int y = guiTop + 140;
+        int x = guiLeft + 8;
+        buttonList.add(new GuiButton(0, x, y, 38, 18, "X-"));
+        buttonList.add(new GuiButton(1, x + 40, y, 38, 18, "X+"));
+        buttonList.add(new GuiButton(2, x + 82, y, 38, 18, "Y-"));
+        buttonList.add(new GuiButton(3, x + 122, y, 38, 18, "Y+"));
+        buttonList.add(new GuiButton(4, x + 164, y, 38, 18, "θ-"));
+        buttonList.add(new GuiButton(5, x + 204, y, 38, 18, "θ+"));
+        buttonList.add(new GuiButton(6, x, y + 22, 78, 18, ""));
+        buttonList.add(new GuiButton(7, x + 82, y + 22, 78, 18, ""));
+        buttonList.add(new GuiButton(8, x + 164, y + 22, 78, 18, I18n.format("youranmod.microscope.confirm")));
+        buttonList.add(new GuiButton(9, x + 164, y + 44, 78, 18, I18n.format("youranmod.microscope.back")));
+        updateLabels();
+    }
+
+    @Override
+    public void onGuiClosed() {
+        super.onGuiClosed();
+        Keyboard.enableRepeatEvents(false);
+    }
+
+    private void updateLabels() {
+        buttonList.get(6).displayString = I18n.format(fine ? "youranmod.microscope.fine" : "youranmod.microscope.coarse");
+        buttonList.get(7).displayString = I18n.format(high ? "youranmod.microscope.high" : "youranmod.microscope.low");
+        boolean op = container.data.getBoolean("Operator");
+        for (int i = 0; i < 6; i++) {
+            buttonList.get(i).enabled = op;
+        }
+        buttonList.get(8).enabled = op;
+    }
+
+    private void knob(Alignment.Axis axis, int dir, boolean fineStep) {
+        if (container.data.getBoolean("Operator")) {
+            YouranNetwork.CHANNEL.sendToServer(new LithoMessages.Action(container.windowId, LithoMessages.KNOB,
+                    LithoMessages.knobArg(axis, dir, fineStep)));
+        }
+    }
+
+    @Override
+    protected void actionPerformed(GuiButton b) {
+        switch (b.id) {
+            case 0: knob(Alignment.Axis.X, -1, fine); break;
+            case 1: knob(Alignment.Axis.X, 1, fine); break;
+            case 2: knob(Alignment.Axis.Y, -1, fine); break;
+            case 3: knob(Alignment.Axis.Y, 1, fine); break;
+            case 4: knob(Alignment.Axis.THETA, -1, fine); break;
+            case 5: knob(Alignment.Axis.THETA, 1, fine); break;
+            case 6: fine = !fine; break;
+            case 7: high = !high; break;
+            case 8:
+                YouranNetwork.CHANNEL.sendToServer(new LithoMessages.Action(container.windowId, LithoMessages.CONFIRM, 0));
+                break;
+            case 9:
+                YouranNetwork.CHANNEL.sendToServer(new LithoMessages.Action(container.windowId, LithoMessages.OPEN_MAIN, 0));
+                break;
+            default:
+                break;
+        }
+        updateLabels();
+    }
+
+    @Override
+    protected void keyTyped(char c, int key) throws IOException {
+        boolean f = GuiScreen.isShiftKeyDown() || fine;
+        switch (key) {
+            case Keyboard.KEY_LEFT: knob(Alignment.Axis.X, -1, f); return;
+            case Keyboard.KEY_RIGHT: knob(Alignment.Axis.X, 1, f); return;
+            case Keyboard.KEY_UP: knob(Alignment.Axis.Y, -1, f); return;
+            case Keyboard.KEY_DOWN: knob(Alignment.Axis.Y, 1, f); return;
+            case Keyboard.KEY_Q: knob(Alignment.Axis.THETA, -1, f); return;
+            case Keyboard.KEY_E: knob(Alignment.Axis.THETA, 1, f); return;
+            case Keyboard.KEY_TAB:
+                high = !high;
+                updateLabels();
+                return;
+            case Keyboard.KEY_RETURN:
+                actionPerformed(buttonList.get(8));
+                return;
+            default:
+                super.keyTyped(c, key);
+        }
+    }
+
+    @Override
+    public void updateScreen() {
+        super.updateScreen();
+        updateLabels();
+    }
+
+    @Override
+    public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        drawDefaultBackground();
+        super.drawScreen(mouseX, mouseY, partialTicks);
+    }
+
+    @Override
+    protected void drawGuiContainerBackgroundLayer(float partialTicks, int mouseX, int mouseY) {
+        LithoDraw.panel(guiLeft, guiTop, xSize, ySize);
+        NBTTagCompound d = container.data;
+        field(guiLeft + LEFT_CX, guiTop + CY, d.getDouble("LX"), d.getDouble("LY"));
+        field(guiLeft + RIGHT_CX, guiTop + CY, d.getDouble("RX"), d.getDouble("RY"));
+    }
+
+    /** 一个视野：晶圆十字偏 (ex, ey) μm，掩模十字在正中 */
+    private void field(int cx, int cy, double ex, double ey) {
+        LithoDraw.circle(cx, cy, R + 3, 0xFF202020);
+        // 黄光下的晶圆表面
+        LithoDraw.circle(cx, cy, R, 0xFFB89A3C);
+        double scale = R / (high ? LithoNumbers.FIELD_HIGH_UM : LithoNumbers.FIELD_LOW_UM);
+        double wx = cx + ex * scale;
+        double wy = cy + ey * scale;
+        double arm = MARK_ARM * scale;
+        double half = Math.max(0.5, MARK_WIDTH * scale / 2);
+        int dark = 0xFF3A2A10;
+        LithoDraw.rectInCircle(wx - arm, wy - half, wx + arm, wy + half, cx, cy, R, dark);
+        LithoDraw.rectInCircle(wx - half, wy - arm, wx + half, wy + arm, cx, cy, R, dark);
+        // 掩模十字：半透明的铬框，晶圆十字落在框正中就是对上了
+        double win = Math.max(1, WINDOW_WIDTH * scale / 2);
+        double armM = (MARK_ARM + 4) * scale;
+        int chrome = 0x9030485A;
+        double t = Math.max(1, 1.0 * scale);
+        LithoDraw.rectInCircle(cx - armM, cy - win - t, cx + armM, cy - win, cx, cy, R, chrome);
+        LithoDraw.rectInCircle(cx - armM, cy + win, cx + armM, cy + win + t, cx, cy, R, chrome);
+        LithoDraw.rectInCircle(cx - win - t, cy - armM, cx - win, cy + armM, cx, cy, R, chrome);
+        LithoDraw.rectInCircle(cx + win, cy - armM, cx + win + t, cy + armM, cx, cy, R, chrome);
+    }
+
+    @Override
+    protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
+        NBTTagCompound d = container.data;
+        fontRenderer.drawString(I18n.format("youranmod.microscope.title"), 8, 6, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.left"), LEFT_CX - 10, CY + R + 6, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.right"), RIGHT_CX - 10, CY + R + 6, LithoDraw.TEXT);
+        String rate = I18n.format("youranmod.microscope.rate", d.getInteger("Rate") / 10.0, String.format(java.util.Locale.ROOT, "%.1f", d.getDouble("Tol")));
+        fontRenderer.drawString(rate, 8, 206, LithoDraw.TEXT);
+        String who = d.getBoolean("Operator") ? I18n.format("youranmod.microscope.operator.you")
+                : I18n.format("youranmod.microscope.operator.other", d.getString("OperatorName"));
+        fontRenderer.drawString(who, 8, 186, d.getBoolean("Operator") ? 0x206020 : 0xA04020);
+        fontRenderer.drawString(I18n.format(d.getBoolean("Aligned") ? "youranmod.litho.align.ok" : "youranmod.litho.align.no",
+                d.getInteger("Rate") / 10.0), 8, 196, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.keys"), 92, 6, 0x707070);
+    }
+}

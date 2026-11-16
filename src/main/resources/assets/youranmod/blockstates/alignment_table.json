@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "normal": {
+      "model": "youranmod:alignment_table"
+    },
+    "inventory": {
+      "model": "youranmod:alignment_table"
+    }
+  }
+}

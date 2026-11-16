@@ -26,6 +26,10 @@ public final class ModBlocks {
     public static BlockFluidClassic hydrargyrum;
     public static BlockFluidClassic gallium;
     public static BlockFluidClassic chlorine;
+    /** 光刻机（服主 11-16）：对准台（锤子触发格、成形后的主方块）、汞灯光源、成形后的光刻机方块（没有物品形式） */
+    public static Block alignmentTable;
+    public static Block mercuryLightSource;
+    public static Block lithoPart;
 
     private ModBlocks() {
     }
@@ -45,5 +49,15 @@ public final class ModBlocks {
         chlorine = new BlockToxicFluid(ModFluids.chlorine, MaterialGas.GAS, "chlorine_youran", FluidContact::chlorine);
         registry.registerAll(youranLogo, mainCityPortal, hardIce, primogemOre, sphaleriteOre,
                 mineralWater, hydrargyrum, gallium, chlorine);
+        alignmentTable = new moe.qingu.youran.litho.BlockAlignmentTable("alignment_table");
+        mercuryLightSource = new moe.qingu.youran.litho.BlockLightSource("mercury_light_source");
+        lithoPart = new moe.qingu.youran.litho.BlockLithoPart("lithography_machine");
+        registry.registerAll(alignmentTable, mercuryLightSource, lithoPart);
+        net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.litho.TileLightSource.class,
+                new net.minecraft.util.ResourceLocation("youranmod", "mercury_light_source"));
+        net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.litho.TileLithoPart.class,
+                new net.minecraft.util.ResourceLocation("youranmod", "lithography_part"));
+        net.minecraftforge.fml.common.registry.GameRegistry.registerTileEntity(moe.qingu.youran.litho.TileLithoMaster.class,
+                new net.minecraft.util.ResourceLocation("youranmod", "lithography_master"));
     }
 }

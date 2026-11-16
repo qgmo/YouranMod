@@ -10,7 +10,8 @@
 		"TileEntitySolarDestillerMixin",
 		"InvSlotConsumableLiquidByListAccessor",
 		"FluidsHandlerMixin",
-		"TileEntityOreWashingMixin"
+		"TileEntityOreWashingMixin",
+		"TileEntityStandardMachineMixin"
 	],
 	"client": [],
 	"server": [],

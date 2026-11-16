@@ -1,0 +1,46 @@
+{
+  "group": "youranmod",
+  "type": "forge:ore_shapeless",
+  "ingredients": [
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    },
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustTinyMolybdenum"
+    }
+  ],
+  "result": {
+    "item": "youranmod:molybdenum_dust",
+    "count": 1
+  }
+}

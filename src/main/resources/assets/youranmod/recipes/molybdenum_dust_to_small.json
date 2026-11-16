@@ -1,0 +1,14 @@
+{
+  "group": "youranmod",
+  "type": "forge:ore_shapeless",
+  "ingredients": [
+    {
+      "type": "forge:ore_dict",
+      "ore": "dustMolybdenum"
+    }
+  ],
+  "result": {
+    "item": "youranmod:small_molybdenum_dust",
+    "count": 9
+  }
+}
