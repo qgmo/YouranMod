@@ -9,10 +9,10 @@ package moe.qingu.youran.logic.litho;
  * 内存芯片的 NBT 不写标准频率、可调范围（{@code StdFreq} / {@code MinFreq} / {@code MaxAdjFreq}）。
  */
 public enum ChipModel {
-    /** Zilog Z80（NMOS，4 μm，6 层）：标准 4 MHz（Z80A），可调 2.5–6 MHz */
-    Z80("z80", Kind.CPU, 4.0, 6, 4000, 2500, 6000),
-    /** Intel 8088（HMOS，3 μm，7 层）：标准 4.77 MHz（IBM PC），可调到 8 MHz（Turbo XT） */
-    I8088("8088", Kind.CPU, 3.0, 7, 4770, 4770, 8000),
+    /** Zilog Z80（NMOS，4 μm，6 层）：标准频率跟着 SCP 普通电脑走（服主 11-16）：12.638 MHz ÷ 6 ≈ 2.106 MHz；可调范围同比例往下挪：1.3–3.2 MHz */
+    Z80("z80", Kind.CPU, 4.0, 6, 2106, 1300, 3200),
+    /** Intel 8088（HMOS，3 μm，7 层）：标准频率跟着 SCP 个人电脑走：14.31818 MHz ÷ 3 ≈ 4.773 MHz（IBM PC），可调到 8 MHz（Turbo XT） */
+    I8088("8088", Kind.CPU, 3.0, 7, 4773, 4773, 8000),
     /**
      * 4164 动态内存（64 Kbit × 1，NMOS，约 3 μm，6 层：有源区、一层多晶（存储电容极板）、二层多晶（字线 / 栅）、
      * 埋层接触、接触孔、金属）：额定存取时间 150 ns（4164-15），按 1 / 150 ns ≈ 6667 kHz 算额定频率
