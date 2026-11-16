@@ -35,8 +35,9 @@ final class BoardTooltip {
             if (BoardNbt.hasRom(b)) {
                 NBTTagCompound rom = b.getCompoundTag(BoardNbt.ROM);
                 NBTTagCompound content = BoardNbt.romContent(b);
+                ChipModel maskModel = ChipModel.byId(rom.getString(ChipModel.TAG));
                 String what = rom.getBoolean(BoardNbt.ROM_EPROM) ? I18n.format("youranmod.chip.model.2764")
-                        : I18n.format("youranmod.chip.model." + BoardNbt.romMask(t).id);
+                        : I18n.format("youranmod.chip.model." + (maskModel == null ? BoardNbt.romMask(t) : maskModel).id);
                 lines.add(I18n.format("youranmod.board.part.rom", what, content == null ? I18n.format("youranmod.eprom.blank")
                         : content.hasKey(RomContent.TAG_MASK) ? I18n.format("youranmod.board.rom.mask")
                         : I18n.format("youranmod.eprom.content", content.getInteger(RomContent.TAG_LEN),

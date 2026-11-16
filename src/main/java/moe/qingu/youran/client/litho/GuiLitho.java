@@ -68,6 +68,15 @@ public class GuiLitho extends GuiContainer {
                 drawHoveringText(lines, mouseX, mouseY);
             }
         }
+        // 激光对准的两格空着时提示放什么
+        for (int i = 0; i < 2; i++) {
+            int x = guiLeft + ContainerLitho.BOARD_X + i * 18;
+            int y = guiTop + 18;
+            Slot slot = container.getSlot(container.inventorySlots.size() - 36 - 2 + i);
+            if (!slot.getHasStack() && mouseX >= x - 1 && mouseX < x + 17 && mouseY >= y - 1 && mouseY < y + 17) {
+                drawHoveringText(I18n.format(i == 0 ? "youranmod.litho.slot.board" : "youranmod.litho.slot.laser"), mouseX, mouseY);
+            }
+        }
         int ex = guiLeft + 8;
         int ey = guiTop + 94;
         if (mouseX >= ex && mouseX < ex + 110 && mouseY >= ey && mouseY < ey + 6) {
@@ -111,6 +120,7 @@ public class GuiLitho extends GuiContainer {
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         fontRenderer.drawString(I18n.format("youranmod.litho.title"), 8, 6, LithoDraw.TEXT);
         fontRenderer.drawString(I18n.format("youranmod.litho.slot.mask"), 132, 9, LithoDraw.TEXT, false);
+        fontRenderer.drawString(I18n.format("youranmod.litho.slot.laser_align"), ContainerLitho.BOARD_X, 9, LithoDraw.TEXT, false);
         NBTTagCompound d = container.data;
         LithoStep step = LithoStep.byOrdinal(d.getInteger("Step"));
         int layers = d.getInteger("Layers");
@@ -133,7 +143,18 @@ public class GuiLitho extends GuiContainer {
         y += 9;
         if (d.hasKey("Lamp")) {
             List<String> lamp = new ArrayList<>();
-            ItemLampPart.describe(LampNbt.read(d.getCompoundTag("Lamp")), true, lamp);
+            if (d.getBoolean("Excimer")) {
+                // 准分子激光光源：窗口与输出一行，三样气体与已用一行
+                moe.qingu.youran.logic.litho.ExcimerSpec ex = moe.qingu.youran.item.LaserNbt.excimer(d.getCompoundTag("Lamp"));
+                List<String> l = new ArrayList<>();
+                moe.qingu.youran.item.ItemLaserCavity.describe(ex, l);
+                lamp.add(I18n.format("youranmod.litho.lamp.excimer", moe.qingu.youran.fluid.FluidPurity.describe(ex.nines),
+                        moe.qingu.youran.item.ItemLaserCavity.gauge(ex.strength())));
+                lamp.add(l.get(1));
+                lamp.add(l.get(3));
+            } else {
+                ItemLampPart.describe(LampNbt.read(d.getCompoundTag("Lamp")), true, lamp);
+            }
             fontRenderer.drawString(I18n.format("youranmod.litho.lamp", lamp.get(0)), 8, y, LithoDraw.TEXT);
             y += 9;
             fontRenderer.drawString(lamp.get(1) + "  " + lamp.get(2), 8, y, LithoDraw.TEXT);

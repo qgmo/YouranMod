@@ -83,8 +83,9 @@ public class ItemChip extends ItemModelled {
         }
     }
 
+    /** 频率给人看（带单位：1 GHz 以上写 GHz，见 {@link ChipModel#formatFreq}） */
     static String mhz(int khz) {
-        return String.format(java.util.Locale.ROOT, "%.2f", khz / 1000.0);
+        return ChipModel.formatFreq(khz);
     }
 
     /** 这片芯片的型号；没有时为 null */

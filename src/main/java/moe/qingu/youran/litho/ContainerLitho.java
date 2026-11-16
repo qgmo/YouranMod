@@ -13,7 +13,7 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraftforge.items.SlotItemHandler;
 
 /**
- * 光刻机主界面的容器：掩模槽（只在这里出现）、五个罐的容器格、晶圆、辅料、外壳、芯片输出，加玩家背包。
+ * 光刻机主界面的容器：掩模槽（只在这里出现）、五个罐的容器格、晶圆、辅料、外壳、芯片输出、激光对准的主板与激光源（也只在这里出现），加玩家背包。
  * 罐、电、工序、对准率、光源这些数据由服务端每隔几 tick 打包发过来（变了才发）。
  */
 public class ContainerLitho extends Container implements LithoSyncTarget {
@@ -26,6 +26,8 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
     public static final int CONTAINER_Y = 74;
     public static final int PLAYER_X = 40;
     public static final int PLAYER_Y = 158;
+    /** 激光对准两格（主板、激光源）的 x */
+    public static final int BOARD_X = 204;
 
     public final TileLithoMaster master;
     private NBTTagCompound lastSent;
@@ -49,6 +51,9 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
         for (int i = 0; i < LithoSlots.OUTPUTS; i++) {
             addSlotToContainer(new SlotItemHandler(inv, LithoSlots.OUTPUT_FIRST + i, 162 + i * 18, 66));
         }
+        // 激光对准（服主 11-16）：个人电脑主板（激光对准控制程序）、激光源，在晶圆格右边
+        addSlotToContainer(new SlotItemHandler(master.laserAligner().inv, LaserAligner.SLOT_BOARD, BOARD_X, 18));
+        addSlotToContainer(new SlotItemHandler(master.laserAligner().inv, LaserAligner.SLOT_LASER, BOARD_X + 18, 18));
         for (int r = 0; r < 3; r++) {
             for (int c = 0; c < 9; c++) {
                 addSlotToContainer(new Slot(playerInv, c + r * 9 + 9, PLAYER_X + c * 18, PLAYER_Y + r * 18));
@@ -60,7 +65,7 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
     }
 
     int machineSlots() {
-        return 1 + LithoSlots.CONTAINERS + LithoSlots.WAFERS + 6 + LithoSlots.OUTPUTS;
+        return 1 + LithoSlots.CONTAINERS + LithoSlots.WAFERS + 6 + LithoSlots.OUTPUTS + LaserAligner.SLOTS;
     }
 
     @Override

@@ -47,6 +47,7 @@ public final class CannerReactionHooks {
         @Nullable
         public final MachineRecipeResult<Object, Object, Object> result;
 
+
         Outcome(boolean handled, @Nullable MachineRecipeResult<Object, Object, Object> result) {
             this.handled = handled;
             this.result = result;
@@ -55,6 +56,10 @@ public final class CannerReactionHooks {
 
     /** 富集模式下这一 tick 要不要做反应配方（调用方已确认是富集模式） */
     public static Outcome getOutput(TileEntityCanner canner) {
+        Outcome uu = UuDosingHooks.getOutput(canner);
+        if (uu.handled) {
+            return uu;
+        }
         ItemStack additive = canner.inputSlot.get();
         FluidStack tank = canner.inputTank.getFluid();
         if (tank == null || tank.amount <= 0 || StackUtil.isEmpty(additive)) {
@@ -145,6 +150,9 @@ public final class CannerReactionHooks {
     public static boolean accepts(TileEntityCanner canner, ItemStack stack) {
         if (canner.getMode() != TileEntityCanner.Mode.EnrichLiquid || StackUtil.isEmpty(stack)) {
             return false;
+        }
+        if (UuDosingHooks.accepts(canner, stack)) {
+            return true;
         }
         FluidStack tank = canner.inputTank.getFluid();
         String fluid = tank == null || tank.amount <= 0 ? null : moe.qingu.youran.fluid.FluidVariants.key(tank);

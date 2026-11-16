@@ -13,7 +13,7 @@ import org.lwjgl.opengl.GL11;
 
 /**
  * 汞灯光源曝光时的样子：灯管口发出蓝紫色的光（不受环境明暗影响），一道光往下照到对准台的掩模上。浓淡跟着灯现在的亮度
- * （{@code LampSpec.brightness}，越用越暗）。方块本身的亮度（光照等级）不在这里，见 {@code BlockLightSource.getLightValue}。
+ * （{@code LampSpec.brightness}，越用越暗）。准分子激光光源（193 nm 本身看不见）画成更窄、偏品红的一束：照在掩模、晶圆上激发的荧光。方块本身的亮度（光照等级）不在这里，见 {@code BlockLightSource.getLightValue}。
  */
 @SideOnly(Side.CLIENT)
 public class LightSourceRenderer extends TileEntitySpecialRenderer<TileLightSource> {
@@ -30,6 +30,9 @@ public class LightSourceRenderer extends TileEntitySpecialRenderer<TileLightSour
             return;
         }
         float k = (float) Math.max(0.2, Math.min(1, te.spec().brightness()));
+        boolean laser = te.excimer();
+        float cr = laser ? 0.85F : 0.7F;
+        float cg = laser ? 0.35F : 0.62F;
         GlStateManager.pushMatrix();
         GlStateManager.translate(x, y, z);
         GlStateManager.disableTexture2D();
@@ -59,10 +62,10 @@ public class LightSourceRenderer extends TileEntitySpecialRenderer<TileLightSour
         float[][] side = {{LENS0, LENS0, LENS1, LENS0, SPOT0, SPOT0, SPOT1, SPOT0}, {LENS1, LENS0, LENS1, LENS1, SPOT1, SPOT0, SPOT1, SPOT1},
                 {LENS1, LENS1, LENS0, LENS1, SPOT1, SPOT1, SPOT0, SPOT1}, {LENS0, LENS1, LENS0, LENS0, SPOT0, SPOT1, SPOT0, SPOT0}};
         for (float[] s : side) {
-            color(b, s[0], y0, s[1], 0.7F, 0.62F, 1F, top);
-            color(b, s[2], y0, s[3], 0.7F, 0.62F, 1F, top);
-            color(b, s[6], DEPTH, s[7], 0.7F, 0.62F, 1F, bottom);
-            color(b, s[4], DEPTH, s[5], 0.7F, 0.62F, 1F, bottom);
+            color(b, s[0], y0, s[1], cr, cg, 1F, top);
+            color(b, s[2], y0, s[3], cr, cg, 1F, top);
+            color(b, s[6], DEPTH, s[7], cr, cg, 1F, bottom);
+            color(b, s[4], DEPTH, s[5], cr, cg, 1F, bottom);
         }
         // 照在掩模上的光斑
         float ys = DEPTH + 0.004F;

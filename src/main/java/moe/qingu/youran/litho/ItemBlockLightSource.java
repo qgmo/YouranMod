@@ -14,7 +14,7 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 import javax.annotation.Nullable;
 import java.util.List;
 
-/** 光源方块的物品：不能堆叠（两盏灯的数据不会合并），悬停说明显示玻璃管、亮度、已用 / 寿命 */
+/** 光源方块的物品：不能堆叠（两盏灯的数据不会合并），悬停说明显示玻璃管（激光腔的窗口、气体）、亮度、已用 / 寿命 */
 public class ItemBlockLightSource extends ItemBlock {
     public ItemBlockLightSource(Block block) {
         super(block);
@@ -25,7 +25,11 @@ public class ItemBlockLightSource extends ItemBlock {
     @SideOnly(Side.CLIENT)
     @Override
     public void addInformation(ItemStack stack, @Nullable World world, List<String> lines, ITooltipFlag flag) {
-        lines.add(I18n.format("tile.mercury_light_source.tooltip"));
-        ItemLampPart.describe(LampNbt.read(stack.getTagCompound()), true, lines);
+        lines.add(I18n.format(getBlock().getTranslationKey() + ".tooltip"));
+        if (getBlock() instanceof BlockLightSource && ((BlockLightSource) getBlock()).excimer) {
+            moe.qingu.youran.item.ItemLaserCavity.describe(moe.qingu.youran.item.LaserNbt.excimer(stack.getTagCompound()), lines);
+        } else {
+            ItemLampPart.describe(LampNbt.read(stack.getTagCompound()), true, lines);
+        }
     }
 }

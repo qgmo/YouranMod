@@ -58,6 +58,11 @@ public final class BoardAssembly {
             BlueprintCraftingRecipe.addRecipe(MOTHERBOARD, shown, base, ModItems.chip.make(BoardNbt.romMask(t)));
             BlueprintCraftingRecipe.addRecipe(MOTHERBOARD, shown, base, new ItemStack(ModItems.eprom));
             n += 3;
+            if (t == BoardType.PC) {
+                // 光刻机对准台的主板（服主 11-16）：个人电脑主板，ROM 换成激光对准控制程序（掩模 ROM；EPROM 烧的走上面那条）
+                BlueprintCraftingRecipe.addRecipe(MOTHERBOARD, shown, base, ModItems.chip.make(ChipModel.ROM_LASER_ALIGN));
+                n++;
+            }
             for (int k = 1; k <= Math.min(MAX_RAM_PER_STEP, BoardNbt.ramCount(t)); k++) {
                 ItemStack ram = ModItems.chip.make(ChipModel.DRAM_4164);
                 ram.setCount(k);

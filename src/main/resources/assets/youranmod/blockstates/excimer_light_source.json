@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "normal": {
+      "model": "youranmod:excimer_light_source"
+    },
+    "inventory": {
+      "model": "youranmod:excimer_light_source"
+    }
+  }
+}

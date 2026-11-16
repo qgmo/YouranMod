@@ -35,12 +35,15 @@ import net.minecraftforge.registries.IForgeRegistry;
  *     （或 2 根 IC2 二层绝缘金质导线）+ 1 小撮钼粉 →
  *     没有汞的汞灯；一次做一个，玻璃管的数据（种类、纯度、铸模）与气体带到灯上（Mixin，见 {@code compat.immersiveengineering.LampAssembly}）；</li>
  *     <li>补汞：IC2 装罐机、沉浸工程灌装机（按流体容器灌，{@code item.LampMercuryHandler}）或匠魂浇铸台（{@link MercuryCasting}），补到 10 mB；</li>
- *     <li>光源方块：汞灯 + 1 沉浸工程探照灯（无序）→ 光源方块，汞灯的数据全带过去；光源方块单放一格 → 汞灯 + 探照灯，数据带回来；</li>
+ *     <li>光源方块：汞灯 + 1 沉浸工程泛光灯（无序）→ 光源方块，汞灯的数据全带过去；光源方块单放一格 → 汞灯 + 泛光灯，数据带回来；</li>
+ *     <li>DUV 一档（服主 11-16）：ArF 激光腔、氦氖激光管也在“光源”蓝图上做（{@code compat.immersiveengineering.LampAssembly}）；
+ *     激光腔 + 泛光灯 → 准分子激光光源，单放一格拆回来；灌氩见 {@code item.ItemLaserCavity}，放氟、氖、氦见 {@code compat.ic2.GasFillHooks}；</li>
  *     <li>对准台：设计稿 2.6 的有序配方，正中换成沉浸工程工程师装配台或 IC2 工业工作台，正下方 IC2 电路板或沉浸工程电路板（都是两种都认）。</li>
  * </ul>
  * <p>另外（服主 11-16）：沉浸原油精馏塔分离 IC2 空气出液氩（{@link Ip}）；沉浸工程挤压机挤 IC2 枯竭燃料棒出液氙
  * （{@code compat.immersiveengineering.XenonSqueezing}）；炼金化学雾化器 500 mB 液氩 / 液氙 → 8 氩 / 氙元素，液化器反过来。
- * <p>汞灯蓝图本身的合成服主没有指定，照沉浸工程自己的蓝图配方的样子定了一版（交付文档里列着）。
+ * <p>“光源”蓝图本身的合成（服主 11-16，取代原来 Claude 定的那版）：上排 钨阴极棒 / 任意玻璃板 / 钨棒，中排 3 青金石粉，
+ * 下排三本书随便摆：工程师手册、RF 工具指南、悠然服务器手册（{@link LightSourceBlueprintRecipe}）。
  */
 public final class LithoRecipes {
     /** 匠魂“手柄”部件：铸模 NBT {PartType:"tconstruct:tool_rod"}（中文“手柄铸模”） */
@@ -55,8 +58,8 @@ public final class LithoRecipes {
         return net.minecraftforge.oredict.OreDictionary.doesOreNameExist(ore) && !net.minecraftforge.oredict.OreDictionary.getOres(ore, false).isEmpty();
     }
 
-    /** 沉浸工程蓝图的种类名：汞灯 */
-    public static final String LAMP_BLUEPRINT = "mercury_lamp";
+    /** 沉浸工程蓝图的种类名：光源（服主 11-16：原“汞灯”蓝图改名，汞灯、ArF 激光腔、氦氖激光管都在这张上做；未上线，不留兼容） */
+    public static final String LAMP_BLUEPRINT = "light_source";
 
     private LithoRecipes() {
     }
@@ -65,25 +68,22 @@ public final class LithoRecipes {
 
     /** 工作台配方（{@link BuiltinRecipes} 在配方注册事件里调用） */
     public static void registerCrafting(IForgeRegistry<IRecipe> registry) {
-        // 汞灯蓝图（Claude 定的一版）：钨棒 / 玻璃管 / 钨棒；蓝色染料 ×3；纸 ×3（照沉浸工程自己的蓝图配方的样子）
-        net.minecraft.item.Item blueprint = ForgeRegistries.ITEMS.getValue(new ResourceLocation("immersiveengineering", "blueprint"));
-        if (blueprint != null) {
-            ItemStack bp = new ItemStack(blueprint);
-            net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
-            tag.setString("blueprint", LAMP_BLUEPRINT);
-            bp.setTagCompound(tag);
-            ResourceLocation id = new ResourceLocation(YouranMod.MODID, "blueprint_mercury_lamp");
-            registry.register(new ShapedOreRecipe(id, bp, "RTR", "DDD", "PPP", 'R', new ItemStack(ModItems.tungstenRod),
-                    'T', new ItemStack(ModItems.glassTube, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE), 'D', "dyeBlue",
-                    'P', new ItemStack(net.minecraft.init.Items.PAPER)).setRegistryName(id));
-        }
-        // 光源方块（服主 11-16）：汞灯 + 1 沉浸工程探照灯 → 光源方块，汞灯的数据全部带过去；光源方块单放一格 → 汞灯 + 探照灯，数据带回来
+        // “光源”蓝图（服主 11-16）：钨阴极棒 / 玻璃板 / 钨棒；青金石粉 ×3；三本书随便摆
+        LightSourceBlueprintRecipe.register(registry);
+        // 光源方块（服主 11-16）：汞灯 + 1 沉浸工程泛光灯 → 光源方块，汞灯的数据全部带过去；光源方块单放一格 → 汞灯 + 泛光灯，数据带回来。
+        // 准分子激光光源同样：ArF 激光腔 + 泛光灯 → 准分子激光光源；单放一格 → 激光腔 + 泛光灯
         ItemStack floodlight = ieFloodlight();
         if (!floodlight.isEmpty()) {
             ResourceLocation light = new ResourceLocation(YouranMod.MODID, "mercury_light_source");
-            registry.register(new CopyLampShapeless(light, new ItemStack(ModBlocks.mercuryLightSource), new ItemStack(ModItems.mercuryLamp), floodlight)
-                    .setRegistryName(light));
-            registry.register(new SplitLightSource(floodlight).setRegistryName(new ResourceLocation(YouranMod.MODID, "mercury_light_source_split")));
+            registry.register(new CopyLampShapeless(light, new ItemStack(ModBlocks.mercuryLightSource), ModItems.mercuryLamp,
+                    new ItemStack(ModItems.mercuryLamp), floodlight).setRegistryName(light));
+            registry.register(new SplitLightSource(floodlight, ModItems.mercuryLightSource, ModItems.mercuryLamp)
+                    .setRegistryName(new ResourceLocation(YouranMod.MODID, "mercury_light_source_split")));
+            ResourceLocation excimer = new ResourceLocation(YouranMod.MODID, "excimer_light_source");
+            registry.register(new CopyLampShapeless(excimer, new ItemStack(ModBlocks.excimerLightSource), ModItems.arfLaserCavity,
+                    new ItemStack(ModItems.arfLaserCavity), floodlight).setRegistryName(excimer));
+            registry.register(new SplitLightSource(floodlight, ModItems.excimerLightSource, ModItems.arfLaserCavity)
+                    .setRegistryName(new ResourceLocation(YouranMod.MODID, "excimer_light_source_split")));
         }
         // 对准台（服主 11-16）：钢板 / 玻璃板 / 钢板；钢制机械零件 / 工作台 / 钢制机械零件；钢板 / 电路板 / 钢板。
         // 正中两种都认：沉浸工程工程师装配台（wooden_device0:2）或 IC2 工业工作台（ic2:te:88）
@@ -115,38 +115,45 @@ public final class LithoRecipes {
         }
     }
 
-    /** 沉浸工程探照灯（{@code immersiveengineering:metal_device1}，元数据 9）；没装时为空物品 */
+    /** 沉浸工程泛光灯（{@code immersiveengineering:metal_device1}，元数据 9）；没装时为空物品 */
     static ItemStack ieFloodlight() {
         Item i = ForgeRegistries.ITEMS.getValue(new ResourceLocation("immersiveengineering", "metal_device1"));
         return i == null ? ItemStack.EMPTY : new ItemStack(i, 1, 9);
     }
 
 
-    /** 无序合成，产物照抄格子里汞灯的全部数据 */
+    /** 无序合成，产物照抄格子里汞灯（激光腔）的全部数据 */
     static final class CopyLampShapeless extends net.minecraftforge.oredict.ShapelessOreRecipe {
-        CopyLampShapeless(ResourceLocation group, ItemStack result, Object... in) {
+        private final Item from;
+
+        CopyLampShapeless(ResourceLocation group, ItemStack result, Item from, Object... in) {
             super(group, result, in);
+            this.from = from;
         }
 
         @Override
         public ItemStack getCraftingResult(InventoryCrafting inv) {
-            return withLamp(super.getCraftingResult(inv), inv);
+            return withLamp(super.getCraftingResult(inv), inv, from);
         }
     }
 
-    /** 光源方块单放一格 → 汞灯（带着光源的数据），探照灯留在格子里 */
+    /** 光源方块单放一格 → 汞灯（激光腔），带着光源的数据，泛光灯留在格子里 */
     static final class SplitLightSource extends net.minecraftforge.registries.IForgeRegistryEntry.Impl<IRecipe> implements IRecipe {
         private final ItemStack floodlight;
+        private final Item source;
+        private final Item part;
 
-        SplitLightSource(ItemStack floodlight) {
+        SplitLightSource(ItemStack floodlight, Item source, Item part) {
             this.floodlight = floodlight;
+            this.source = source;
+            this.part = part;
         }
 
-        private static int only(InventoryCrafting inv) {
+        private int only(InventoryCrafting inv) {
             int found = -1;
             for (int i = 0; i < inv.getSizeInventory(); i++) {
                 if (!inv.getStackInSlot(i).isEmpty()) {
-                    if (found >= 0 || inv.getStackInSlot(i).getItem() != ModItems.mercuryLightSource) {
+                    if (found >= 0 || inv.getStackInSlot(i).getItem() != source) {
                         return -1;
                     }
                     found = i;
@@ -163,7 +170,7 @@ public final class LithoRecipes {
         @Override
         public ItemStack getCraftingResult(InventoryCrafting inv) {
             int i = only(inv);
-            ItemStack lamp = new ItemStack(ModItems.mercuryLamp);
+            ItemStack lamp = new ItemStack(part);
             if (i >= 0 && inv.getStackInSlot(i).hasTagCompound()) {
                 lamp.setTagCompound(inv.getStackInSlot(i).getTagCompound().copy());
             }
@@ -177,7 +184,7 @@ public final class LithoRecipes {
 
         @Override
         public ItemStack getRecipeOutput() {
-            return new ItemStack(ModItems.mercuryLamp);
+            return new ItemStack(part);
         }
 
         @Override
@@ -196,10 +203,10 @@ public final class LithoRecipes {
         }
     }
 
-    static ItemStack withLamp(ItemStack out, InventoryCrafting inv) {
+    static ItemStack withLamp(ItemStack out, InventoryCrafting inv, Item from) {
         for (int i = 0; i < inv.getSizeInventory(); i++) {
             ItemStack s = inv.getStackInSlot(i);
-            if (!s.isEmpty() && s.getItem() == ModItems.mercuryLamp) {
+            if (!s.isEmpty() && s.getItem() == from) {
                 out.setTagCompound(s.hasTagCompound() ? s.getTagCompound().copy() : null);
                 return out;
             }
@@ -231,6 +238,7 @@ public final class LithoRecipes {
         }
         if (ie) {
             Ie.register(alchemistry);
+            DuvRecipes.registerIe();
         }
         if (ic2 && alchemistry) {
             Ic2.register();
@@ -304,11 +312,15 @@ public final class LithoRecipes {
                 YouranMod.LOG.info("没有 IC2 的空气或氧气，不加精馏塔的空气分离配方");
                 return;
             }
+            // 氖（服主 11-16）：每 100000 mB 空气平均出 1.8 个炼金化学氖元素，按概率掉出的副产物品；没装炼金化学时不出
+            ItemStack neon = AlchemistryCompat.chemical("neon", 1);
+            ItemStack[] items = neon.isEmpty() ? new ItemStack[0] : new ItemStack[]{neon};
+            float[] chances = neon.isEmpty() ? new float[0] : new float[]{moe.qingu.youran.logic.litho.DuvNumbers.AIR_NEON_PER_100000 * LithoNumbers.AIR_IN / 100000F};
             flaxbeard.immersivepetroleum.api.crafting.DistillationRecipe.addRecipe(new FluidStack[]{oxygen,
                             new FluidStack(moe.qingu.youran.registry.ModFluids.argon, LithoNumbers.AIR_ARGON)},
-                    new ItemStack[0], air, LithoNumbers.AIR_ENERGY, 1, new float[0]);
-            YouranMod.LOG.info("已加沉浸原油精馏塔配方：{} mB 空气 → {} mB 氧气 + {} mB 液氩", LithoNumbers.AIR_IN, LithoNumbers.AIR_OXYGEN,
-                    LithoNumbers.AIR_ARGON);
+                    items, air, LithoNumbers.AIR_ENERGY, 1, chances);
+            YouranMod.LOG.info("已加沉浸原油精馏塔配方：{} mB 空气 → {} mB 氧气 + {} mB 液氩{}", LithoNumbers.AIR_IN, LithoNumbers.AIR_OXYGEN,
+                    LithoNumbers.AIR_ARGON, neon.isEmpty() ? "" : "，按概率出氖元素");
         }
     }
 
@@ -340,6 +352,27 @@ public final class LithoRecipes {
                         ic2.api.recipe.Recipes.inputFactory.forStack(thorium), new ItemStack(ModItems.thoriatedCathodeRod), false);
                 YouranMod.LOG.info("已加 IC2 固体装罐机配方：钨棒 + 钍 → 掺钍阴极棒");
             }
+            // 激光管充气（服主 11-16）：ArF 激光腔 + 氟 / 氖，氦氖激光管 + 氦 / 氖，每次一个元素。登记这几条是为了装罐机收东西、JEI 列得出来；
+            // 产物按罐子格里那一件的数据现算（compat.ic2.GasFillHooks）。罐子按任意元数据认（不比 NBT）
+            int gas = 0;
+            Object[][] fills = {{ModItems.arfLaserCavity, "fluorine"}, {ModItems.arfLaserCavity, "neon"}, {ModItems.heneLaserTube, "helium"},
+                    {ModItems.heneLaserTube, "neon"}};
+            for (Object[] f : fills) {
+                ItemStack element = AlchemistryCompat.chemical((String) f[1], 1);
+                if (element.isEmpty()) {
+                    continue;
+                }
+                Item tube = (Item) f[0];
+                ItemStack shown = tube == ModItems.arfLaserCavity ? ModItems.arfLaserCavity.make(moe.qingu.youran.logic.litho.ExcimerSpec.empty(1))
+                        : ModItems.heneLaserTube.make(moe.qingu.youran.logic.litho.HeNeSpec.empty(moe.qingu.youran.logic.litho.LampGlass.GLASS,
+                        WaferMold.GOLD, 1));
+                if (ic2.api.recipe.Recipes.cannerBottle.addRecipe(ic2.api.recipe.Recipes.inputFactory.forStack(
+                                new ItemStack(tube, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE)),
+                        ic2.api.recipe.Recipes.inputFactory.forStack(element), shown, false)) {
+                    gas++;
+                }
+            }
+            YouranMod.LOG.info("已加 IC2 固体装罐机配方：激光管充气 {} 条", gas);
         }
     }
 
