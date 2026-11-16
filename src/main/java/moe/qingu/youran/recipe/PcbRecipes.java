@@ -38,6 +38,8 @@ import java.util.List;
  * 1 铁粉 + 3000 mB 氯气 → 1 三氯化铁粉（装罐机；沉浸工程那边是灌装机，混合器出不了固体）
  * 1 三氯化铁粉 + 1000 mB 水（或蒸馏水、矿泉水、纯净水）→ 1000 mB 三氯化铁水溶液（混合器；装罐机也行）
  * 1 三氯化铁粉 ⇄ 16 个炼金化学三氯化铁化合物（溶解机 / 化合机）
+ * 软盘套：6 聚氯乙烯团 → 冲床（冲孔模具）→ 已冲孔的；或 IC2 压缩机 → 未冲孔的，再用螺丝刀手工冲孔（20% 冲坏，冲坏的熔炉烧回 4 团）；
+ * 已冲孔的软盘套 + 抛光盘片 → 软盘（工作台或 IC2 固体装罐机）
  * 冲孔模具：工程师装配台“金属冲压模具”蓝图，5 钢板 + 1 工程师锤（或剪线钳，原版模具用的是剪线钳）
  * </pre>
  * 别的模组都是软依赖。数量见 {@link PcbNumbers}。
@@ -101,9 +103,22 @@ public final class PcbRecipes {
                 registry.register(new ScrewdriverPunch(id, new ItemStack(ModItems.pcb, 1, PcbStage.etched(t)), new ItemStack(screwdriver),
                         new ItemStack(ModItems.pcb, 1, PcbStage.punched(t)), PcbStage.SCRAP, PcbNumbers.HAND_PUNCH_BREAK));
             }
+            // 软盘套手工冲孔（20% 冲坏）
+            ResourceLocation jacket = new ResourceLocation(YouranMod.MODID, "floppy_jacket_hand_punch");
+            registry.register(new ScrewdriverPunch(jacket, new ItemStack(ModItems.floppyJacket, 1, moe.qingu.youran.item.ItemFloppyJacket.UNPUNCHED),
+                    new ItemStack(screwdriver), new ItemStack(ModItems.floppyJacket, 1, moe.qingu.youran.item.ItemFloppyJacket.PUNCHED),
+                    moe.qingu.youran.item.ItemFloppyJacket.BROKEN, PcbNumbers.JACKET_HAND_BREAK));
         } else {
-            YouranMod.LOG.info("没有 SCP 模组的螺丝刀，不加手工打孔的配方");
+            YouranMod.LOG.info("没有 SCP 模组的螺丝刀，不加手工打孔、冲软盘套的配方");
         }
+        // 软盘：已冲孔的软盘套 + 抛光盘片（工作台手动装；IC2 固体装罐机也行）
+        ResourceLocation floppy = new ResourceLocation(YouranMod.MODID, "floppy_disk");
+        registry.register(new net.minecraftforge.oredict.ShapelessOreRecipe(floppy, new ItemStack(ModItems.floppyDisk),
+                new ItemStack(ModItems.floppyJacket, 1, moe.qingu.youran.item.ItemFloppyJacket.PUNCHED), new ItemStack(ModItems.polishedPlatter))
+                .setRegistryName(floppy));
+        // 冲坏的软盘套在熔炉里烧回 4 聚氯乙烯团
+        net.minecraftforge.fml.common.registry.GameRegistry.addSmelting(new ItemStack(ModItems.floppyJacket, 1, moe.qingu.youran.item.ItemFloppyJacket.BROKEN),
+                new ItemStack(ModItems.pvcLump, PcbNumbers.JACKET_BROKEN_LUMPS), 0.1F);
         // 蓝图“主板”“扩展卡”（Claude 定的一版，照汞灯蓝图）：铜板 / 酚醛基板 / 铜板（扩展卡反过来）；蓝色染料 ×3；纸 ×3
         blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.MOTHERBOARD, "CSC");
         blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.EXPANSION, "SCS");
@@ -226,6 +241,10 @@ public final class PcbRecipes {
                         new blusunrize.immersiveengineering.api.crafting.IngredientStack(tools, 1));
             }
             ItemStack mold = new ItemStack(ModItems.punchMold);
+            // 软盘套：6 聚氯乙烯团 → 已冲孔的软盘套（冲床一次压成、冲好，不会坏）
+            blusunrize.immersiveengineering.api.crafting.MetalPressRecipe.addRecipe(new ItemStack(ModItems.floppyJacket, 1,
+                    moe.qingu.youran.item.ItemFloppyJacket.PUNCHED), new ItemStack(ModItems.pvcLump), mold, PcbNumbers.PRESS_ENERGY)
+                    .setInputSize(PcbNumbers.JACKET_LUMPS);
             for (BoardType t : BoardType.values()) {
                 blusunrize.immersiveengineering.api.crafting.MetalPressRecipe.addRecipe(new ItemStack(ModItems.pcb, 1, PcbStage.punched(t)),
                         new ItemStack(ModItems.pcb, 1, PcbStage.etched(t)), mold, PcbNumbers.PRESS_ENERGY);

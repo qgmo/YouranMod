@@ -106,6 +106,8 @@ public final class ModItems {
     public static moe.qingu.youran.item.ItemMotherboard motherboard;
     /** EPROM 烧录器（外设，服主 11-16） */
     public static Item epromProgrammer;
+    /** 软盘套（服主 11-16，取代原来的“6 聚氯乙烯片”）：未冲孔 0、已冲孔 1、冲坏 2 */
+    public static Item floppyJacket;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -160,7 +162,7 @@ public final class ModItems {
         refinedPlatter = add(registry, new ItemWithTooltip("refined_platter", 64, "烘过的盘片，还要压光"));
         polishedPlatter = add(registry, new ItemWithTooltip("polished_platter", 64, "压光的盘片，装进软套就是软盘"));
         pvcLump = add(registry, new ItemWithTooltip("pvc_lump", 64, "聚氯乙烯（PVC）"));
-        pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做软盘的软套"));
+        pvcSheet = add(registry, new ItemWithTooltip("pvc_sheet", 64, "聚氯乙烯（PVC）薄片，可以做外设的塑料外壳"));
         polyethyleneLump = add(registry, new ItemWithTooltip("polyethylene_lump", 64, "聚乙烯（PE）"));
         floppyDisk = add(registry, new ItemFloppyDisk());
         siliconDust = add(registry, new ItemWithTooltip("silicon_dust", 64, "粗硅（Si）打成的粉，加盐酸做成三氯氢硅"));
@@ -208,6 +210,7 @@ public final class ModItems {
         motherboard = (moe.qingu.youran.item.ItemMotherboard) add(registry, new moe.qingu.youran.item.ItemMotherboard());
         epromProgrammer = add(registry, new ItemPeripheral("eprom_programmer", Peripherals.KIND_PROGRAMMER).withCasings());
         Peripherals.register(epromProgrammer);
+        floppyJacket = add(registry, new moe.qingu.youran.item.ItemFloppyJacket());
     }
 
     private static Item itemBlock(Block block) {
