@@ -56,6 +56,12 @@ public final class ClientModels {
                 event.getMap().registerSprite(fluid.getFlowing());
             }
         }
+        for (Fluid fluid : ModFluids.lithoFluids()) {
+            if (fluid != null) {
+                event.getMap().registerSprite(fluid.getStill());
+                event.getMap().registerSprite(fluid.getFlowing());
+            }
+        }
     }
 
     private static void fluid(Block block, Item item) {

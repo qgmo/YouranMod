@@ -78,7 +78,9 @@ public final class ModItems {
     /** 外设（服主 11-15；接口见 api.peripheral）：5.25 英寸软驱（个人电脑出厂带一个）、汉卡（普通电脑出厂带一块） */
     public static Item floppyDrive;
     public static Item hanziCard;
-
+    /** 光刻（服主 11-15）：负胶链的环化橡胶、叠氮化钠粉 */
+    public static Item cyclizedRubber;
+    public static Item sodiumAzideDust;
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
 
@@ -150,6 +152,8 @@ public final class ModItems {
         Peripherals.register(floppyDrive);
         Peripherals.register(hanziCard);
         Peripherals.register(locatorModule);
+        cyclizedRubber = add(registry, new moe.qingu.youran.item.ItemLangTooltip("cyclized_rubber", 64));
+        sodiumAzideDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("sodium_azide_dust", 64));
     }
 
     private static Item itemBlock(Block block) {

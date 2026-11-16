@@ -60,7 +60,7 @@ public final class CannerReactionHooks {
         if (tank == null || tank.amount <= 0 || StackUtil.isEmpty(additive)) {
             return Outcome.NOT_HANDLED;
         }
-        ReactionPlan<ItemStack, ReactionItem> plan = CannerReactions.TABLE.plan(tank.getFluid().getName(), tank.amount, additive,
+        ReactionPlan<ItemStack, ReactionItem> plan = CannerReactions.TABLE.plan(moe.qingu.youran.fluid.FluidVariants.key(tank), tank.amount, additive,
                 r -> outputsFit(canner, r));
         if (plan.status() == ReactionPlan.Status.NO_MATCH) {
             return Outcome.NOT_HANDLED;
@@ -109,7 +109,7 @@ public final class CannerReactionHooks {
         if (r.outputFluid() == null) {
             return null;
         }
-        FluidStack stack = FluidRegistry.getFluidStack(r.outputFluid(), r.outputAmount());
+        FluidStack stack = moe.qingu.youran.fluid.FluidVariants.stack(r.outputFluid(), r.outputAmount());
         if (stack == null && MISSING.add("fluid:" + r.outputFluid())) {
             YouranMod.LOG.error("装罐机反应配方的输出流体 {} 没有注册，这条反应不会开始：{}", r.outputFluid(), r);
         }
@@ -147,7 +147,7 @@ public final class CannerReactionHooks {
             return false;
         }
         FluidStack tank = canner.inputTank.getFluid();
-        String fluid = tank == null || tank.amount <= 0 ? null : tank.getFluid().getName();
+        String fluid = tank == null || tank.amount <= 0 ? null : moe.qingu.youran.fluid.FluidVariants.key(tank);
         return CannerReactions.TABLE.accepts(fluid, stack);
     }
 }

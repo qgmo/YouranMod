@@ -1,6 +1,8 @@
 package moe.qingu.youran.registry;
 
 import moe.qingu.youran.fluid.FluidWithPurity;
+import moe.qingu.youran.fluid.FluidArene;
+import moe.qingu.youran.fluid.FluidPhotoresist;
 import net.minecraft.item.EnumRarity;
 import net.minecraft.util.ResourceLocation;
 import net.minecraftforge.fluids.Fluid;
@@ -21,6 +23,12 @@ public final class ModFluids {
     public static Fluid trichlorosilane;
     /** 三氯氢硅氢气混合气（服主 11-15，晶圆第 6 步）：纯度随做它的三氯氢硅（NBT，见 fluid.FluidPurity），气体，没有流体方块，只有通用桶 */
     public static Fluid trichlorosilaneHydrogen;
+    /** 光刻胶线（服主 11-15，负胶）：四氯化锡、芳烃（带叠氮基的是 NBT 变种）、甲酚、双叠氮感光剂、光刻胶（负 / 正是 NBT 变种）；都没有流体方块 */
+    public static Fluid tinTetrachloride;
+    public static Fluid arene;
+    public static Fluid cresol;
+    public static Fluid bisazideSensitizer;
+    public static Fluid photoresist;
 
     private ModFluids() {
     }
@@ -50,6 +58,25 @@ public final class ModFluids {
                 texture("trichlorosilane_hydrogen_flow")).setDensity(2).setViscosity(20).setLuminosity(0).setGaseous(true);
         FluidRegistry.registerFluid(trichlorosilaneHydrogen);
         FluidRegistry.addBucketForFluid(trichlorosilaneHydrogen);
+        // 光刻胶线：SnCl₄ 密度 2.226、黏度约 0.9 mPa·s；芳烃按二甲苯（0.86、0.6）；甲酚（1.03、约 10）；感光剂、光刻胶按溶在芳烃里的溶液估
+        tinTetrachloride = noBlock(fluid("tin_tetrachloride", "tin_tetrachloride").setDensity(2226).setViscosity(900));
+        arene = noBlock(new FluidArene("arene", texture("arene_still"), texture("arene_flow")).setDensity(860).setViscosity(600));
+        cresol = noBlock(fluid("cresol", "cresol").setDensity(1030).setViscosity(10000));
+        bisazideSensitizer = noBlock(fluid("bisazide_sensitizer", "bisazide_sensitizer").setDensity(1000).setViscosity(2000));
+        photoresist = noBlock(new FluidPhotoresist("photoresist", texture("photoresist_still"), texture("photoresist_flow"))
+                .setDensity(950).setViscosity(8000));
+    }
+
+    /** 光刻胶线的流体：都是液体，没有流体方块，只有通用桶 */
+    public static Fluid[] lithoFluids() {
+        return new Fluid[]{tinTetrachloride, arene, cresol, bisazideSensitizer, photoresist};
+    }
+
+    private static Fluid noBlock(Fluid f) {
+        f.setLuminosity(0).setGaseous(false);
+        FluidRegistry.registerFluid(f);
+        FluidRegistry.addBucketForFluid(f);
+        return f;
     }
 
     private static ResourceLocation texture(String name) {

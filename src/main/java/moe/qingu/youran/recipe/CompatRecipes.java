@@ -76,6 +76,8 @@ public final class CompatRecipes {
         if (!silicon.isEmpty()) {
             net.minecraftforge.fml.common.registry.GameRegistry.addSmelting(ModItems.scrapSiliconWafer, silicon, 0.1F);
         }
+        // 光刻（服主 11-15）：负胶链
+        ResistRecipes.postInit(ic2, ie, tic, ie && Loader.isModLoaded("immersivepetroleum"), alchemistry);
         // 硼的来源：洞穴水晶（电气石）进溶解机（要夸克）
         if (alchemistry) {
             BoronRecipes.registerCrystalDissolver();

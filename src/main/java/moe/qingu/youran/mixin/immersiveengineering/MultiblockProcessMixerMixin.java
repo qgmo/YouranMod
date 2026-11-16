@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * 搅拌机的处理过程支持输入、输出不一样多的配方（{@code compat.immersiveengineering.RatioMixerRecipe}）。
  * {@code doProcessTick} 每步先按 {@code Utils.copyFluidStackWithAmount(输入, n)} 从罐里抽 n mB，
  * 再按 {@code Utils.copyFluidStackWithAmount(输出, 抽到的量)} 把同样多的输出装回罐里：
- * 比例配方抽的乘上比例、出的按累计除回来，出 0 mB 的那步不往罐里装（不留下 0 mB 的空条目）。别的配方照原来的走。
+ * 比例配方抽的按累计放大、出的按累计换回来，出 0 mB 的那步不往罐里装（不留下 0 mB 的空条目）。别的配方照原来的走。
  *
  * 另外加上标记接口 {@link RatioMixerProcess}，加配方前据此确认 Mixin 生效了。
  *
@@ -27,6 +27,8 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class MultiblockProcessMixerMixin implements RatioMixerProcess {
     @Unique
     private int youran$drained;
+    @Unique
+    private int youran$steps;
 
     @Unique
     private MixerRecipe youran$recipe() {
@@ -36,7 +38,9 @@ public abstract class MultiblockProcessMixerMixin implements RatioMixerProcess {
     @Redirect(method = "doProcessTick", at = @At(value = "INVOKE", ordinal = 0,
             target = "Lblusunrize/immersiveengineering/common/util/Utils;copyFluidStackWithAmount(Lnet/minecraftforge/fluids/FluidStack;IZ)Lnet/minecraftforge/fluids/FluidStack;"))
     private FluidStack youran$scaleDrain(FluidStack input, int amount, boolean stripPressure) {
-        return Utils.copyFluidStackWithAmount(input, MixerRatioHooks.drainAmount(youran$recipe(), amount), stripPressure);
+        int drain = MixerRatioHooks.drainAmount(youran$recipe(), youran$steps, amount);
+        youran$steps += amount;
+        return Utils.copyFluidStackWithAmount(input, drain, stripPressure);
     }
 
     @Redirect(method = "doProcessTick", at = @At(value = "INVOKE", ordinal = 1,

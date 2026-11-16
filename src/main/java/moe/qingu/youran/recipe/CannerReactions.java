@@ -125,6 +125,10 @@ public final class CannerReactions {
         } else {
             YouranMod.LOG.info("没有流体 {}（盐酸，SCP: Lockdown 注册），不加装罐机的三氯氢硅、硼硅酸盐渣配方", HYDROCHLORIC_ACID);
         }
+        // 光刻胶线（负胶）
+        for (FluidItemReaction<ItemStack, ReactionItem> r : ResistRecipes.cannerReactions()) {
+            TABLE.add(r);
+        }
         YouranMod.LOG.info("装罐机反应配方：内置 {} 条", TABLE.reactions().size());
     }
 
