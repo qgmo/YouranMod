@@ -131,6 +131,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
     private volatile Map<String, Ipv6Address> nameAddresses = Collections.emptyMap();
     private final Map<String, NetStack> hostStacks = new LinkedHashMap<>();
+    /** 原始主机（登记名 → 端口）；开服时在网络线程上填，任意线程读 */
+    private final Map<String, RawHostPort> rawHosts = new ConcurrentHashMap<>();
     private final Set<CompletableFuture<?>> mainThreadTasks = ConcurrentHashMap.newKeySet();
     private final Map<UUID, AtomicInteger> queued = new ConcurrentHashMap<>();
     private final AtomicLong overflowDrops = new AtomicLong();
@@ -488,6 +490,13 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             router.attachDatacenter(idx);
         }
         for (Map.Entry<String, Ipv6Address> e : hosts.entrySet()) {
+            NetworkRegistry.HostDecl decl = decls.get(e.getKey());
+            if (decl != null && decl.isRaw()) {
+                RawHostPort port = new RawHostPort(e.getKey(), e.getValue(), loop, router, rejects);
+                router.attachHost(e.getValue(), port);
+                rawHosts.put(e.getKey(), port);
+                continue;
+            }
             NetStack stack = new NetStack(loop, p -> loop.execute(() -> router.forward(p)), new SecureRandom());
             stack.addAddress(e.getValue());
             stack.setMaxConnections(NetworkConfig.hostMaxTcpConnections);
@@ -567,10 +576,25 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             zonesByHost.computeIfAbsent(e.getKey().substring(0, e.getKey().indexOf(' ')), k -> new ArrayList<>()).add(e.getValue());
         }
         for (Map.Entry<String, List<DnsZoneData>> e : zonesByHost.entrySet()) {
-            new AuthoritativeDnsServer(e.getValue()).start(hostStacks.get(e.getKey()));
+            NetStack zs = hostStacks.get(e.getKey());
+            if (zs == null) {
+                LOG.warn("游戏内网络：{} 是原始主机，没有协议栈，YouranMod 不能替它跑权威 DNS（登记顶级域时 zone 要为 null）", e.getKey());
+                continue;
+            }
+            new AuthoritativeDnsServer(e.getValue()).start(zs);
         }
         // 其他模组的服务
         for (Map.Entry<String, NetworkRegistry.HostDecl> e : decls.entrySet()) {
+            RawHostPort raw = rawHosts.get(e.getKey());
+            if (raw != null) {
+                try {
+                    e.getValue().rawService.start(raw);
+                    LOG.info("游戏内网络：原始主机 {} 在 {}", e.getKey(), raw.address());
+                } catch (Throwable t) {
+                    LOG.error("游戏内网络：原始主机 {} 的回调出错", e.getKey(), t);
+                }
+                continue;
+            }
             NetStack stack = hostStacks.get(e.getKey());
             if (stack == null || e.getValue().service == null) {
                 continue;
@@ -636,6 +660,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             prompts = null;
         }
         locationSigner = null;
+        for (RawHostPort r : rawHosts.values()) {
+            r.close();
+        }
+        rawHosts.clear();
         for (CompletableFuture<?> f : mainThreadTasks) {
             f.completeExceptionally(new IllegalStateException("服务器正在关"));
         }
@@ -681,6 +709,17 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     public Ipv6Address hostAddress(String key) {
         AddressBook b = book;
         return b == null ? null : b.hosts.get(key);
+    }
+
+    @Override
+    public moe.qingu.youran.api.network.RawHost rawHost(String key) {
+        return key == null ? null : rawHosts.get(key);
+    }
+
+    @Override
+    public Ipv6Address networkPrefix() {
+        AddressBook b = book;
+        return b == null ? null : b.layout.prefix();
     }
 
     @Override
@@ -1026,6 +1065,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
 
     NetStack hostStack(String key) {
         return hostStacks.get(key);
+    }
+
+    Map<String, RawHostPort> rawHosts() {
+        return rawHosts;
     }
 
     List<String> tlds() {

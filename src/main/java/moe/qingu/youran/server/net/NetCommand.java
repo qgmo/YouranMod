@@ -167,7 +167,8 @@ final class NetCommand extends CommandBase {
             Ipv6Address a = b.hosts.get(e.getKey());
             Long dc = t.datacenters.get(e.getValue().datacenter);
             String addr = a != null ? a.toString() : dc != null ? b.layout.hostAddress(dc, e.getValue().hostPart).toString() : "?";
-            tell(sender, "  主机 " + e.getKey() + " → " + addr + (a != null ? "" : " §7（这次没登记，保留）"));
+            tell(sender, "  主机 " + e.getKey() + " → " + addr + (a != null ? "" : " §7（这次没登记，保留）")
+                    + (net.rawHosts().containsKey(e.getKey()) ? " §7（原始主机）" : ""));
         }
         tell(sender, "§6DNS §f根 root.yr；YouranMod 的顶级域 .yr .com" + (net.tlds().isEmpty() ? "" : "；其他模组的 ." + String.join(" .", net.tlds())));
         for (Map.Entry<String, String> e : net.names().entrySet()) {
@@ -184,6 +185,10 @@ final class NetCommand extends CommandBase {
         tell(sender, "网卡收下 " + net.nic().accepted + "，丢掉 " + net.rejects().total()
                 + "；测试开关：丢包 " + Math.round(r.lossRate() * 100) + "%（已丢 " + r.simulatedDrops + "），乱序 "
                 + Math.round(r.reorderRate() * 100) + "%（已推迟 " + r.simulatedDelays + "）");
+        for (RawHostPort h : net.rawHosts().values()) {
+            tell(sender, "原始主机 " + h.key() + "：" + (h.isOpen() ? "" : "已关，") + "收下 " + h.received + "、没人收（回不可达）" + h.refused
+                    + "；发出 " + h.sent + "、不合格或排不进 " + h.rejected);
+        }
         RecursiveResolverStats.tell(this, sender, net);
     }
 

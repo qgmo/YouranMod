@@ -14,7 +14,7 @@ import java.util.Random;
 
 /**
  * /48 路由器（网络线程上）。按目的地址交给：坐标路由（第 0 号 /64 → 维度 /72 → 维度路由器 → 设备）、
- * 玩法子路由器（第 1 号 /64 → 机房 /96 → 主机 /128 的协议栈；最后一个 /96 是玩家临时地址，交给 {@link PlayerNics} 过滤）、上行口（/48 以外）。
+ * 玩法子路由器（第 1 号 /64 → 机房 /96 → 主机 /128 的协议栈或原始主机；最后一个 /96 是玩家临时地址，交给 {@link PlayerNics} 过滤）、上行口（/48 以外）。
  * 跳数在这里减一（整个 /48 算一跳），用完回“超时”；到不了的回“目标不可达”（ICMPv6 差错按 RFC 4443 限速）。
  * <p>
  * 测试开关 {@link #setSimulation}：按概率丢包、把包推迟 20–80 毫秒（造成乱序）。
@@ -25,7 +25,7 @@ public final class Router {
     private final DeviceTable devices;
     private final Ipv6Address routerAddress;
     private final Map<Integer, DimRouting> dimensions = new HashMap<>();
-    private final Map<Long, Map<Long, NetStack>> datacenters = new HashMap<>();
+    private final Map<Long, Map<Long, HostPort>> datacenters = new HashMap<>();
     private final RateLimiter errorLimiter = new RateLimiter(200, 200 * Ipv6Packet.MAX_PACKET);
     private final Random random = new Random();
     private Uplink uplink;
@@ -54,10 +54,26 @@ public final class Router {
         }
     }
 
+    /**
+     * 机房主机的收包口：协议栈（{@link NetStack#receive}），或原始主机（{@link RawHostPort}）。
+     * 返回 false 表示这台主机现在收不了（原始主机没有接收方），路由器回“地址不可达”。
+     */
+    interface HostPort {
+        boolean receive(byte[] packet);
+    }
+
     /** 机房里的主机挂上来（启动时，网络线程上） */
     void attachHost(Ipv6Address address, NetStack stack) {
+        attachHost(address, p -> {
+            stack.receive(p);
+            return true;
+        });
+    }
+
+    /** 同上，任意收包口（原始主机） */
+    void attachHost(Ipv6Address address, HostPort port) {
         datacenters.computeIfAbsent(NetworkLayout.datacenterIndexOf(address), k -> new HashMap<>())
-                .put(NetworkLayout.hostPartOf(address), stack);
+                .put(NetworkLayout.hostPartOf(address), port);
     }
 
     /** 机房登记了但还没有主机的，也要能回“地址不可达”而不是“无路由” */
@@ -150,18 +166,17 @@ public final class Router {
                     players.deliver(p);
                     return;
                 }
-                Map<Long, NetStack> dc = datacenters.get(NetworkLayout.datacenterIndexOf(dst));
+                Map<Long, HostPort> dc = datacenters.get(NetworkLayout.datacenterIndexOf(dst));
                 if (dc == null) {
                     unreachable(p, Icmpv6Message.UNREACH_NO_ROUTE);
                     return;
                 }
-                NetStack host = dc.get(NetworkLayout.hostPartOf(dst));
-                if (host == null) {
+                HostPort host = dc.get(NetworkLayout.hostPartOf(dst));
+                if (host == null || !host.receive(p)) {
                     unreachable(p, Icmpv6Message.UNREACH_ADDRESS);
                     return;
                 }
                 deliveredToHosts++;
-                host.receive(p);
                 return;
             }
             default:
