@@ -7,8 +7,11 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.NetworkManager;
 import net.minecraft.network.play.server.SPacketUpdateTileEntity;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import net.minecraftforge.fml.relauncher.Side;
+import net.minecraftforge.fml.relauncher.SideOnly;
 
 import javax.annotation.Nullable;
 
@@ -127,6 +130,13 @@ public class TileLightSource extends TileEntity {
         if (wasLit != lit && world != null) {
             world.checkLight(pos);
         }
+    }
+
+    /** 光束往下照到对准台（下面一格），渲染范围连下面一格一起算 */
+    @SideOnly(Side.CLIENT)
+    @Override
+    public AxisAlignedBB getRenderBoundingBox() {
+        return new AxisAlignedBB(pos.down(), pos.add(1, 1, 1));
     }
 
     @Override

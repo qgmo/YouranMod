@@ -68,6 +68,11 @@ public class TileLithoPart extends TileEntity {
         return LithoStructure.wOf(index);
     }
 
+    /** 形状键（{@link LithoBounds#key}）；没成形或还没收到数据时为 −1 */
+    public int shapeKey() {
+        return formed && index >= 0 ? LithoBounds.key(index, facing, mirrored) : -1;
+    }
+
     public BlockPos masterPos() {
         return pos.add(masterOffset);
     }

@@ -4,6 +4,7 @@ import moe.qingu.youran.registry.YouranTab;
 import net.minecraft.block.Block;
 import net.minecraft.block.SoundType;
 import net.minecraft.block.material.Material;
+import net.minecraft.block.state.BlockFaceShape;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
@@ -25,6 +26,8 @@ import javax.annotation.Nullable;
  *
  * <p>掉落只走一条路：方块被移除时（{@link #breakBlock}，方块实体还在）生成带数据的物品，{@link #getDrops} 不给东西；
  * 创造模式不掉。爆炸、玩家挖都走这里，不会掉两个，也不会按爆炸概率丢灯。被敲掉时如果接在一台成形的光刻机上，先让整台拆开。
+ *
+ * <p>外形是灯罩（不是整格），曝光时灯口发光、光往下照由 {@code LightSourceRenderer} 画。
  */
 public class BlockLightSource extends Block {
     public BlockLightSource(String name) {
@@ -35,6 +38,27 @@ public class BlockLightSource extends Block {
         setResistance(10.0F);
         setSoundType(SoundType.METAL);
         setCreativeTab(YouranTab.tab);
+        setLightOpacity(0);
+    }
+
+    // ---- 外形：灯罩（光刻机成形后它留在对准台正上方，顶上的法兰和四周的顶棚接上，下面是灯口）----
+
+    @SuppressWarnings("deprecation")
+    @Override
+    public boolean isOpaqueCube(IBlockState state) {
+        return false;
+    }
+
+    @SuppressWarnings("deprecation")
+    @Override
+    public boolean isFullCube(IBlockState state) {
+        return false;
+    }
+
+    @SuppressWarnings("deprecation")
+    @Override
+    public BlockFaceShape getBlockFaceShape(IBlockAccess world, IBlockState state, BlockPos pos, EnumFacing face) {
+        return face == EnumFacing.UP ? BlockFaceShape.SOLID : face == EnumFacing.DOWN ? BlockFaceShape.CENTER_BIG : BlockFaceShape.UNDEFINED;
     }
 
     @Override
