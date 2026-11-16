@@ -119,9 +119,12 @@ public final class PcbRecipes {
         // 冲坏的软盘套在熔炉里烧回 4 聚氯乙烯团
         net.minecraftforge.fml.common.registry.GameRegistry.addSmelting(new ItemStack(ModItems.floppyJacket, 1, moe.qingu.youran.item.ItemFloppyJacket.BROKEN),
                 new ItemStack(ModItems.pvcLump, PcbNumbers.JACKET_BROKEN_LUMPS), 0.1F);
-        // 蓝图“主板”“扩展卡”（Claude 定的一版，照汞灯蓝图）：铜板 / 酚醛基板 / 铜板（扩展卡反过来）；蓝色染料 ×3；纸 ×3
-        blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.MOTHERBOARD, "CSC");
-        blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.EXPANSION, "SCS");
+        // 两张蓝图（服主 11-16 定）。主板：铜板 / 酚醛基板 / 铜板；钴锭 ×3（矿辞 ingotCobalt）；纸 ×3
+        blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.MOTHERBOARD,
+                "CSC", "KKK", 'C', "plateCopper", 'S', new ItemStack(ModItems.phenolicSubstrate), 'K', "ingotCobalt");
+        // 扩展卡：酚醛基板 / 任意一张芯片设计图或任意一块掩模 / 酚醛基板；青金石粉 ×3（矿辞 dustLapis）；纸 ×3
+        blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.EXPANSION,
+                "SXS", "LLL", 'S', new ItemStack(ModItems.phenolicSubstrate), 'X', designOrMask(), 'L', "dustLapis");
         // EPROM：2764 芯片本体 + 玻璃管（石英小窗）
         ResourceLocation eprom = new ResourceLocation(YouranMod.MODID, "eprom");
         registry.register(new EpromRecipe(eprom));
@@ -135,8 +138,8 @@ public final class PcbRecipes {
         }
     }
 
-    /** 沉浸工程的蓝图物品：第一行 C = 铜板、S = 酚醛基板 */
-    static void blueprint(IForgeRegistry<IRecipe> registry, String category, String top) {
+    /** 沉浸工程的蓝图物品：上排、中排照传入的样子，下排纸 ×3 */
+    static void blueprint(IForgeRegistry<IRecipe> registry, String category, String top, String middle, Object... keys) {
         Item bp = ForgeRegistries.ITEMS.getValue(new ResourceLocation("immersiveengineering", "blueprint"));
         if (bp == null) {
             return;
@@ -146,8 +149,21 @@ public final class PcbRecipes {
         tag.setString("blueprint", category);
         out.setTagCompound(tag);
         ResourceLocation id = new ResourceLocation(YouranMod.MODID, "blueprint_" + category);
-        registry.register(new ShapedOreRecipe(id, out, top, "DDD", "PPP", 'C', "plateCopper", 'S', new ItemStack(ModItems.phenolicSubstrate),
-                'D', "dyeBlue", 'P', new ItemStack(net.minecraft.init.Items.PAPER)).setRegistryName(id));
+        Object[] in = new Object[3 + keys.length + 2];
+        in[0] = top;
+        in[1] = middle;
+        in[2] = "PPP";
+        System.arraycopy(keys, 0, in, 3, keys.length);
+        in[3 + keys.length] = 'P';
+        in[4 + keys.length] = new ItemStack(net.minecraft.init.Items.PAPER);
+        registry.register(new ShapedOreRecipe(id, out, in).setRegistryName(id));
+    }
+
+    /** 任意型号的芯片设计图或掩模（型号按元数据区分，都认；掩模的磨损数据不看） */
+    static net.minecraft.item.crafting.Ingredient designOrMask() {
+        return net.minecraft.item.crafting.Ingredient.fromStacks(
+                new ItemStack(ModItems.chipDesign, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE),
+                new ItemStack(ModItems.photomask, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE));
     }
 
     /** 电路板两种都认：IC2 电路板（矿物词典 circuitBasic）或沉浸工程电路板（material:27，没登记矿物词典） */
