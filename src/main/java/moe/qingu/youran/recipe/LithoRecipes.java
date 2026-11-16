@@ -343,7 +343,7 @@ public final class LithoRecipes {
 
     /**
      * 匠魂浇铸台补汞：汞灯放在台上（当“铸模”，浇完换成补满的灯），浇汞补到 {@value LithoNumbers#LAMP_MERCURY} mB，
-     * 浇多少看灯里还差多少。已经满的、还没组装的不收。
+     * 浇多少看灯里还差多少（匠魂的浇铸台按 {@code getFluidAmount()} 定容量，这里给刚对上的那盏灯差的量）。已经满的不收。
      */
     static final class MercuryCasting implements slimeknights.tconstruct.library.smeltery.ICastingRecipe {
         static boolean isLamp(ItemStack s) {
@@ -363,9 +363,20 @@ public final class LithoRecipes {
             return new FluidStack(fluid, Math.max(1, need));
         }
 
+        /** 浇铸台找到配方后马上按 {@link #getFluidAmount()} 定罐的容量（不带铸模参数），所以记下刚对上的那盏灯还差多少 */
+        private int lastSpace = LithoNumbers.LAMP_MERCURY;
+
         @Override
         public boolean matches(ItemStack cast, net.minecraftforge.fluids.Fluid fluid) {
-            return fluid == moe.qingu.youran.registry.ModFluids.hydrargyrum && isLamp(cast) && LampNbt.read(cast.getTagCompound()).mercurySpace() > 0;
+            if (fluid != moe.qingu.youran.registry.ModFluids.hydrargyrum || !isLamp(cast)) {
+                return false;
+            }
+            int space = LampNbt.read(cast.getTagCompound()).mercurySpace();
+            if (space <= 0) {
+                return false;
+            }
+            lastSpace = space;
+            return true;
         }
 
         @Override
@@ -385,7 +396,7 @@ public final class LithoRecipes {
 
         @Override
         public int getFluidAmount() {
-            return LithoNumbers.LAMP_MERCURY;
+            return lastSpace;
         }
     }
 }

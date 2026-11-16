@@ -15,7 +15,8 @@ import java.util.List;
  * IC2 热能离心机分铜矿时有几率多出 1 小撮钼粉（服主 11-16）。IC2 的离心机配方产物是固定的，所以在
  * {@code TileEntityStandardMachine#operateOnce} 开头（{@code mixin.ic2.TileEntityStandardMachineMixin}）按几率加上：
  * 输入是粉碎铜矿石（{@code crushedCopper}）{@value LithoNumbers#MO_CENTRIFUGE_CRUSHED}，纯净的（{@code crushedPurifiedCopper}）
- * {@value LithoNumbers#MO_CENTRIFUGE_PURIFIED}。输出格放不下钼粉时这次就不出（不挤掉原来的产物）。
+ * {@value LithoNumbers#MO_CENTRIFUGE_PURIFIED}。离心机只有 3 个输出格：放得下就多出一样；
+ * 放不下（粉碎铜矿石本来就出铜粉、小撮锡粉、石粉 3 样）时这次的石粉换成小撮钼粉；还放不下就这次不出。
  */
 public final class CentrifugeHooks {
     private CentrifugeHooks() {
@@ -33,7 +34,21 @@ public final class CentrifugeHooks {
         }
         List<ItemStack> more = new ArrayList<>(result);
         more.add(new ItemStack(ModItems.smallMolybdenumDust));
-        return machine.outputSlot.canAdd(more) ? more : result;
+        if (machine.outputSlot.canAdd(more)) {
+            return more;
+        }
+        // 离心机只有 3 个输出格，粉碎铜矿石本来就出 3 样（铜粉、小撮锡粉、石粉），格子总是被占着：这次的石粉换成小撮钼粉
+        List<ItemStack> swapped = new ArrayList<>();
+        boolean replaced = false;
+        for (ItemStack s : result) {
+            if (!replaced && hasOre(s, "dustStone")) {
+                swapped.add(new ItemStack(ModItems.smallMolybdenumDust));
+                replaced = true;
+            } else {
+                swapped.add(s);
+            }
+        }
+        return replaced && machine.outputSlot.canAdd(swapped) ? swapped : result;
     }
 
     static boolean hasOre(ItemStack s, String ore) {
