@@ -24,6 +24,9 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
     public static final int TANK_Y = 18;
     public static final int TANK_H = 52;
     public static final int CONTAINER_Y = 74;
+    /** 碱的两格（氢氧根、碳酸钾）的位置 */
+    public static final int ALKALI_X = 198;
+    public static final int ALKALI_Y = 18;
     public static final int PLAYER_X = 40;
     public static final int PLAYER_Y = 158;
 
@@ -49,6 +52,9 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
         for (int i = 0; i < LithoSlots.OUTPUTS; i++) {
             addSlotToContainer(new SlotItemHandler(inv, LithoSlots.OUTPUT_FIRST + i, 162 + i * 18, 66));
         }
+        // 正胶显影吃的碱：氢氧根、碳酸钾（服主 11-16），放在晶圆格右边；加在最后一批机器格，机器格总数见 machineSlots
+        addSlotToContainer(new SlotItemHandler(inv, LithoSlots.HYDROXIDE, ALKALI_X, ALKALI_Y));
+        addSlotToContainer(new SlotItemHandler(inv, LithoSlots.CARBONATE, ALKALI_X + 18, ALKALI_Y));
         for (int r = 0; r < 3; r++) {
             for (int c = 0; c < 9; c++) {
                 addSlotToContainer(new Slot(playerInv, c + r * 9 + 9, PLAYER_X + c * 18, PLAYER_Y + r * 18));
@@ -60,7 +66,7 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
     }
 
     int machineSlots() {
-        return 1 + LithoSlots.CONTAINERS + LithoSlots.WAFERS + 6 + LithoSlots.OUTPUTS;
+        return 1 + LithoSlots.CONTAINERS + LithoSlots.WAFERS + 6 + LithoSlots.OUTPUTS + 2;
     }
 
     @Override

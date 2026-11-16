@@ -17,6 +17,8 @@ import moe.qingu.youran.logic.litho.LithoStructure.Part;
 import moe.qingu.youran.logic.litho.LithoStructure.Port;
 import moe.qingu.youran.logic.litho.ResistType;
 import moe.qingu.youran.logic.litho.Solvent;
+import moe.qingu.youran.logic.resist.PositiveDevelop;
+import moe.qingu.youran.logic.resist.ResistNumbers;
 import moe.qingu.youran.registry.ModItems;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.entity.player.EntityPlayer;
@@ -69,7 +71,8 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
     final LithoTank[] tanks = {
             new LithoTank(LithoNumbers.INPUT_TANK, f -> is(f, STEAM) || is(f, SUPERHEATED)),
             new LithoTank(LithoNumbers.INPUT_TANK, f -> FluidVariants.resist(f) != null),
-            new LithoTank(LithoNumbers.INPUT_TANK, f -> Solvent.byFluid(f.getFluid().getName()) != null && !FluidVariants.isAzideArene(f)),
+            new LithoTank(LithoNumbers.INPUT_TANK, f -> (Solvent.byFluid(f.getFluid().getName()) != null && !FluidVariants.isAzideArene(f))
+                    || PositiveDevelop.isWater(f.getFluid().getName())),
             new LithoTank(LithoNumbers.INPUT_TANK, f -> is(f, ACID)),
             new LithoTank(LithoNumbers.OUTPUT_TANK, f -> is(f, STEAM) || is(f, DISTILLED)),
     };
@@ -117,6 +120,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
     double lampResolution;
     @Nullable
     ResistType resist;
+    /** 当前这一层涂的胶的种类（显影按它选溶剂还是碱液；每层涂胶时更新，没涂时为 null） */
+    @Nullable
+    ResistType layerResist;
     /** 这片晶圆有哪一层涂了变质（已曝光）的光刻胶：做出来一定报废 */
     boolean exposedResist;
     @Nullable
@@ -517,6 +523,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         worstLamp = 1000;
         lampResolution = 0;
         resist = null;
+        layerResist = null;
         exposedResist = false;
         pack = null;
     }
@@ -551,6 +558,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
                 }
                 tanks[TANK_RESIST].drainInternal(LithoNumbers.COAT_RESIST, true);
                 resist = ResistType.worse(resist, type);
+                layerResist = type;
                 exposedResist |= FluidVariants.isExposedResist(r);
                 return null;
             }
@@ -568,6 +576,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
                 return null;
             }
             case DEVELOP: {
+                if (PositiveDevelop.usesAlkali(layerResist)) {
+                    return developWithAlkali();
+                }
                 FluidStack s = tanks[TANK_SOLVENT].getFluid();
                 Solvent solvent = s == null || FluidVariants.isAzideArene(s) ? null : Solvent.byFluid(s.getFluid().getName());
                 if (solvent == null || s.amount < solvent.perLayer) {
@@ -613,6 +624,29 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
             default:
                 return null;
         }
+    }
+
+    /**
+     * 正胶显影（服主 11-16）：溶剂口的水 {@link ResistNumbers#DEVELOP_WATER} mB，加物品口的 2 个氢氧根或 1 个碳酸钾；
+     * 缺水、缺碱时返回缺什么（不扣、不报废，这一步停下等）。碱液显影不改显影溶剂的品质。
+     */
+    @Nullable
+    private LithoStatus developWithAlkali() {
+        FluidStack w = tanks[TANK_SOLVENT].getFluid();
+        int water = w != null && PositiveDevelop.isWater(w.getFluid().getName()) ? w.amount : 0;
+        int hydroxide = inv.getStackInSlot(LithoSlots.HYDROXIDE).getCount();
+        int carbonate = inv.getStackInSlot(LithoSlots.CARBONATE).getCount();
+        PositiveDevelop.Missing missing = PositiveDevelop.check(water, hydroxide, carbonate);
+        if (missing == PositiveDevelop.Missing.WATER) {
+            return LithoStatus.NEED_WATER;
+        }
+        if (missing == PositiveDevelop.Missing.ALKALI) {
+            return LithoStatus.NEED_ALKALI;
+        }
+        PositiveDevelop.Alkali alkali = PositiveDevelop.choose(hydroxide, carbonate);
+        tanks[TANK_SOLVENT].drainInternal(ResistNumbers.DEVELOP_WATER, true);
+        inv.extractItem(alkali == PositiveDevelop.Alkali.HYDROXIDE ? LithoSlots.HYDROXIDE : LithoSlots.CARBONATE, alkali.perLayer, false);
+        return null;
     }
 
     /** 掺杂：0.25 硼锭 + 4 萤石粉，或 4 硼元素 + 4 磷元素（炼金化学） */
@@ -908,6 +942,17 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         }
         energy.set(nbt.getInteger("Energy"));
         inv.deserializeNBT(nbt.getCompoundTag("Inv"));
+        if (inv.getSlots() < LithoSlots.COUNT) {
+            // 旧存档的格子少（后来加了碱的两格）：补到现在的数量，原来的东西留在原格子里
+            List<ItemStack> old = new ArrayList<>();
+            for (int i = 0; i < inv.getSlots(); i++) {
+                old.add(inv.getStackInSlot(i));
+            }
+            inv.setSize(LithoSlots.COUNT);
+            for (int i = 0; i < old.size(); i++) {
+                inv.setStackInSlot(i, old.get(i));
+            }
+        }
         step = LithoStep.byOrdinal(nbt.getInteger("Step"));
         layer = nbt.getInteger("Layer");
         progress = nbt.getInteger("Progress");
@@ -920,6 +965,7 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         worstLamp = nbt.hasKey("WorstLamp") ? nbt.getInteger("WorstLamp") : 1000;
         lampResolution = nbt.getDouble("LampRes");
         resist = ResistType.byId(nbt.getString("Resist"));
+        layerResist = ResistType.byId(nbt.getString("LayerResist"));
         exposedResist = nbt.getBoolean("ExposedResist");
         pack = ChipPackage.byId(nbt.getString("Package"));
         boronQuarters = nbt.getInteger("BoronQ");
@@ -957,6 +1003,9 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         nbt.setDouble("LampRes", lampResolution);
         if (resist != null) {
             nbt.setString("Resist", resist.id);
+        }
+        if (layerResist != null) {
+            nbt.setString("LayerResist", layerResist.id);
         }
         if (exposedResist) {
             nbt.setBoolean("ExposedResist", true);

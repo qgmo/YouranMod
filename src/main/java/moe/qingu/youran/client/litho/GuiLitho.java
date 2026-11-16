@@ -111,6 +111,7 @@ public class GuiLitho extends GuiContainer {
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         fontRenderer.drawString(I18n.format("youranmod.litho.title"), 8, 6, LithoDraw.TEXT);
         fontRenderer.drawString(I18n.format("youranmod.litho.slot.mask"), 132, 9, LithoDraw.TEXT, false);
+        fontRenderer.drawString(I18n.format("youranmod.litho.slot.alkali"), ContainerLitho.ALKALI_X, 9, LithoDraw.TEXT, false);
         NBTTagCompound d = container.data;
         LithoStep step = LithoStep.byOrdinal(d.getInteger("Step"));
         int layers = d.getInteger("Layers");

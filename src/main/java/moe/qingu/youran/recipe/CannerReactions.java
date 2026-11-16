@@ -133,6 +133,10 @@ public final class CannerReactions {
         for (FluidItemReaction<ItemStack, ReactionItem> r : PcbRecipes.cannerReactions()) {
             TABLE.add(r);
         }
+        // 正胶线（服主 11-16）
+        for (FluidItemReaction<ItemStack, ReactionItem> r : PositiveResistRecipes.cannerReactions()) {
+            TABLE.add(r);
+        }
         YouranMod.LOG.info("装罐机反应配方：内置 {} 条", TABLE.reactions().size());
     }
 

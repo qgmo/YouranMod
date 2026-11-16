@@ -1,5 +1,6 @@
 package moe.qingu.youran.litho;
 
+import moe.qingu.youran.compat.alchemistry.AlchemistryCompat;
 import moe.qingu.youran.item.ItemPhotomask;
 import moe.qingu.youran.logic.litho.ChipPackage;
 import moe.qingu.youran.registry.ModItems;
@@ -9,9 +10,10 @@ import net.minecraftforge.oredict.OreDictionary;
 
 import javax.annotation.Nullable;
 
-/** 光刻机认的物品：晶圆、掺杂与金属化的辅料、IC2 外壳、掩模 */
+/** 光刻机认的物品：晶圆、掺杂与金属化的辅料、IC2 外壳、掩模、正胶显影用的碱 */
 public final class LithoItems {
     static final ResourceLocation ALCHEMISTRY_ELEMENT = new ResourceLocation("alchemistry", "element");
+    static final ResourceLocation ALCHEMISTRY_COMPOUND = new ResourceLocation("alchemistry", "compound");
     static final ResourceLocation IC2_CASING = new ResourceLocation("ic2", "casing");
     static final int BORON = 5;
     static final int PHOSPHORUS = 15;
@@ -45,6 +47,24 @@ public final class LithoItems {
 
     public static boolean isPhosphorus(ItemStack s) {
         return isElement(s, PHOSPHORUS);
+    }
+
+    /** 炼金化学氢氧根 */
+    public static boolean isHydroxide(ItemStack s) {
+        return isCompound(s, AlchemistryCompat.HYDROXIDE);
+    }
+
+    /** 炼金化学碳酸钾 */
+    public static boolean isPotassiumCarbonate(ItemStack s) {
+        return isCompound(s, AlchemistryCompat.POTASSIUM_CARBONATE);
+    }
+
+    static boolean isCompound(ItemStack s, String name) {
+        if (s.isEmpty() || !ALCHEMISTRY_COMPOUND.equals(s.getItem().getRegistryName())) {
+            return false;
+        }
+        int meta = AlchemistryCompat.meta(name);
+        return meta >= 0 && s.getMetadata() == meta;
     }
 
     static boolean isElement(ItemStack s, int z) {
@@ -82,6 +102,12 @@ public final class LithoItems {
         }
         if (casing(s) != null) {
             return LithoSlots.CASING;
+        }
+        if (isHydroxide(s)) {
+            return LithoSlots.HYDROXIDE;
+        }
+        if (isPotassiumCarbonate(s)) {
+            return LithoSlots.CARBONATE;
         }
         return -1;
     }

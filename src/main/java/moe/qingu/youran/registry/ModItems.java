@@ -108,6 +108,11 @@ public final class ModItems {
     public static Item epromProgrammer;
     /** 软盘套（服主 11-16，取代原来的“6 聚氯乙烯片”）：未冲孔 0、已冲孔 1、冲坏 2 */
     public static Item floppyJacket;
+    /** 正胶线（服主 11-16）：萘（晶体）、萘酚磺酸粉、重氮萘醌磺酸粉、重氮萘醌磺酰氯粉（配方见 recipe.PositiveResistRecipes） */
+    public static Item naphthalene;
+    public static Item naphtholSulfonicAcidDust;
+    public static Item dnqSulfonicAcidDust;
+    public static Item dnqSulfonylChlorideDust;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -211,6 +216,15 @@ public final class ModItems {
         epromProgrammer = add(registry, new ItemPeripheral("eprom_programmer", Peripherals.KIND_PROGRAMMER).withCasings());
         Peripherals.register(epromProgrammer);
         floppyJacket = add(registry, new moe.qingu.youran.item.ItemFloppyJacket());
+        naphthalene = add(registry, new moe.qingu.youran.item.ItemLangTooltip("naphthalene", 64));
+        naphtholSulfonicAcidDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("naphthol_sulfonic_acid_dust", 64));
+        dnqSulfonicAcidDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("dnq_sulfonic_acid_dust", 64));
+        dnqSulfonylChlorideDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("dnq_sulfonyl_chloride_dust", 64));
+        // 矿物词典：配方一律按这些名字认
+        net.minecraftforge.oredict.OreDictionary.registerOre("crystalNaphthalene", naphthalene);
+        net.minecraftforge.oredict.OreDictionary.registerOre("dustNaphtholSulfonicAcid", naphtholSulfonicAcidDust);
+        net.minecraftforge.oredict.OreDictionary.registerOre("dustDiazonaphthoquinoneSulfonicAcid", dnqSulfonicAcidDust);
+        net.minecraftforge.oredict.OreDictionary.registerOre("dustDiazonaphthoquinoneSulfonylChloride", dnqSulfonylChlorideDust);
     }
 
     private static Item itemBlock(Block block) {

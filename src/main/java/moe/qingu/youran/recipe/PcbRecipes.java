@@ -46,7 +46,7 @@ import java.util.List;
  */
 public final class PcbRecipes {
     /** 能配三氯化铁水溶液的水：原版水、IC2 蒸馏水、本模组矿泉水、意志坚定的纯净水（有哪个算哪个） */
-    static final String[] WATERS = {"water", "ic2distilled_water", "fuild_mineral_water", "purified_water"};
+    static final String[] WATERS = moe.qingu.youran.logic.resist.PositiveDevelop.WATERS;
     static final String ETHANOL = "ethanol";
     static final String AIR = "ic2air";
     static final String OXYGEN = "ic2oxygen";
