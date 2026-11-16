@@ -45,7 +45,7 @@ public class GuiMicroscope extends GuiContainer {
         super(container);
         this.container = container;
         xSize = 256;
-        ySize = 250;
+        ySize = 240;
     }
 
     @Override
@@ -213,11 +213,11 @@ public class GuiMicroscope extends GuiContainer {
         fontRenderer.drawString(I18n.format("youranmod.microscope.right"), RIGHT_CX - 12, CY + R + 4, LithoDraw.TEXT);
         String who = d.getBoolean("Operator") ? I18n.format("youranmod.microscope.operator.you")
                 : I18n.format("youranmod.microscope.operator.other", d.getString("OperatorName"));
-        fontRenderer.drawString(who, 8, 212, d.getBoolean("Operator") ? 0x206020 : 0xA04020);
+        fontRenderer.drawString(who, xSize - 8 - fontRenderer.getStringWidth(who), 6, d.getBoolean("Operator") ? 0x206020 : 0xA04020);
         String rate = I18n.format(d.getBoolean("Aligned") ? "youranmod.microscope.rate.ok" : "youranmod.microscope.rate",
                 d.getInteger("Rate") / 10.0, tol(d.getDouble("Tol")));
-        fontRenderer.drawString(laserLine(d.getCompoundTag("Laser")), 8, 221, 0x2050A0);
-        fontRenderer.drawString(rate, 8, 230, LithoDraw.TEXT);
-        fontRenderer.drawString(I18n.format("youranmod.microscope.keys"), 8, 239, 0x707070);
+        fontRenderer.drawString(laserLine(d.getCompoundTag("Laser")), 8, 211, 0x2050A0);
+        fontRenderer.drawString(rate, 8, 220, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.keys"), 8, 229, 0x707070);
     }
 }

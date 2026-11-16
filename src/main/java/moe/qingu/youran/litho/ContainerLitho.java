@@ -18,18 +18,19 @@ import net.minecraftforge.items.SlotItemHandler;
  */
 public class ContainerLitho extends Container implements LithoSyncTarget {
     public static final int WIDTH = 240;
-    /** 比原来高 24（服主 11-16 加激光对准两格，放在玩家背包上面一行） */
-    public static final int HEIGHT = 264;
+    public static final int HEIGHT = 240;
     /** 五个罐的格子的 x（罐的计量条在格子正上方） */
     public static final int[] TANK_X = {8, 30, 52, 74, 100};
     public static final int TANK_Y = 18;
     public static final int TANK_H = 52;
     public static final int CONTAINER_Y = 74;
     public static final int PLAYER_X = 40;
-    public static final int PLAYER_Y = 182;
-    /** 激光对准两格（主板、激光源）的位置：玩家背包上面一行的右边 */
+    public static final int PLAYER_Y = 158;
+    /** 芯片输出四格的 x（激光对准两格加在它们右边，所以往左挪到和辅料格对齐） */
+    public static final int OUTPUT_X = 132;
+    /** 激光对准两格（主板、激光源）的位置：芯片输出格右边（界面高度不变，720p 下 GUI 缩放 3 也放得下） */
     public static final int BOARD_X = 204;
-    public static final int BOARD_Y = 160;
+    public static final int BOARD_Y = 66;
 
     public final TileLithoMaster master;
     private NBTTagCompound lastSent;
@@ -51,9 +52,9 @@ public class ContainerLitho extends Container implements LithoSyncTarget {
             addSlotToContainer(new SlotItemHandler(inv, aux[i], 132 + i * 18, 42));
         }
         for (int i = 0; i < LithoSlots.OUTPUTS; i++) {
-            addSlotToContainer(new SlotItemHandler(inv, LithoSlots.OUTPUT_FIRST + i, 162 + i * 18, 66));
+            addSlotToContainer(new SlotItemHandler(inv, LithoSlots.OUTPUT_FIRST + i, OUTPUT_X + i * 18, 66));
         }
-        // 激光对准（服主 11-16）：个人电脑主板（激光对准控制程序）、激光源，玩家背包上面一行的右边
+        // 激光对准（服主 11-16）：个人电脑主板（激光对准控制程序）、激光源，芯片输出格右边
         addSlotToContainer(new SlotItemHandler(master.laserAligner().inv, LaserAligner.SLOT_BOARD, BOARD_X, BOARD_Y));
         addSlotToContainer(new SlotItemHandler(master.laserAligner().inv, LaserAligner.SLOT_LASER, BOARD_X + 18, BOARD_Y));
         for (int r = 0; r < 3; r++) {

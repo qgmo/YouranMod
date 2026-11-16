@@ -119,8 +119,6 @@ public class GuiLitho extends GuiContainer {
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         fontRenderer.drawString(I18n.format("youranmod.litho.title"), 8, 6, LithoDraw.TEXT);
         fontRenderer.drawString(I18n.format("youranmod.litho.slot.mask"), 132, 9, LithoDraw.TEXT, false);
-        fontRenderer.drawString(I18n.format("youranmod.litho.slot.laser_align"), ContainerLitho.BOARD_X - 4 - fontRenderer.getStringWidth(
-                I18n.format("youranmod.litho.slot.laser_align")), ContainerLitho.BOARD_Y + 4, LithoDraw.TEXT, false);
         NBTTagCompound d = container.data;
         LithoStep step = LithoStep.byOrdinal(d.getInteger("Step"));
         int layers = d.getInteger("Layers");
@@ -144,14 +142,13 @@ public class GuiLitho extends GuiContainer {
         if (d.hasKey("Lamp")) {
             List<String> lamp = new ArrayList<>();
             if (d.getBoolean("Excimer")) {
-                // 准分子激光光源：窗口与输出一行，三样气体与已用一行
+                // 准分子激光光源：一行输出刻度，一行三样气体（窗口、已用次数看光源物品的悬停说明）
                 moe.qingu.youran.logic.litho.ExcimerSpec ex = moe.qingu.youran.item.LaserNbt.excimer(d.getCompoundTag("Lamp"));
                 List<String> l = new ArrayList<>();
                 moe.qingu.youran.item.ItemLaserCavity.describe(ex, l);
-                lamp.add(I18n.format("youranmod.litho.lamp.excimer", moe.qingu.youran.fluid.FluidPurity.describe(ex.nines),
-                        moe.qingu.youran.item.ItemLaserCavity.gauge(ex.strength())));
+                lamp.add(I18n.format("youranmod.litho.lamp.excimer", moe.qingu.youran.item.ItemLaserCavity.gauge(ex.strength())));
                 lamp.add(l.get(1));
-                lamp.add(l.get(3));
+                lamp.add("");
             } else {
                 ItemLampPart.describe(LampNbt.read(d.getCompoundTag("Lamp")), true, lamp);
             }
