@@ -53,7 +53,7 @@ public class ItemHeNeTube extends ItemLangTooltip {
         describe(spec(stack), now, lines);
     }
 
-    /** 玻璃管、氦 / 氖、合计、预计输出刻度、漏氦快慢 */
+    /** 玻璃管、氦 / 氖、合计、预计输出刻度 */
     @SideOnly(Side.CLIENT)
     public static void describe(HeNeSpec s, long now, List<String> lines) {
         List<String> tube = new ArrayList<>();
@@ -64,6 +64,6 @@ public class ItemHeNeTube extends ItemLangTooltip {
                 DuvNumbers.HENE_MAX_ELEMENTS));
         double out = s.output(t);
         lines.add(I18n.format("youranmod.laser.output", ItemLaserCavity.gauge(out), Math.round(out * 100)));
-        lines.add(I18n.format("youranmod.hene.leak", s.halfLifeTicks() / 24000));
+        // 漏氦不写在提示里（服主 11-16：看不见的物理留给玩家自己发现；氦的数量会慢慢变少）
     }
 }
