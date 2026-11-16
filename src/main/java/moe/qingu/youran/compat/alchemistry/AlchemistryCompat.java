@@ -251,6 +251,47 @@ public final class AlchemistryCompat {
     }
 
     /**
+     * 删掉炼金化学自动给“和元素同名的流体”加的那条“144 mB ⇄ 16 个元素”（按金属锭的量算，它的 {@code initAtomizerRecipes}，
+     * 液化器那条由可逆的雾化器配方生成）。我们的液氩、液氙注册名就叫 argon、xenon（SCP-294 要认），会被它当成熔融金属，
+     * 和我们定的 500 mB ⇄ 8 个（服主 11-16）并存。炼金化学在它的后初始化里才建配方，所以在全部载入完成时调用。
+     */
+    public static void removeIngotFluidPair(net.minecraftforge.fluids.Fluid fluid) {
+        if (fluid == null) {
+            return;
+        }
+        try {
+            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
+            Object modRecipes = modRecipesClass.getField("INSTANCE").get(null);
+            int removed = 0;
+            java.util.Iterator<Object> it = listOf(modRecipesClass, modRecipes, "getAtomizerRecipes").iterator();
+            while (it.hasNext()) {
+                Object r = it.next();
+                net.minecraftforge.fluids.FluidStack in = (net.minecraftforge.fluids.FluidStack) r.getClass().getMethod("getInput").invoke(r);
+                if (isIngotAmount(in, fluid)) {
+                    it.remove();
+                    removed++;
+                }
+            }
+            it = listOf(modRecipesClass, modRecipes, "getLiquifierRecipes").iterator();
+            while (it.hasNext()) {
+                Object r = it.next();
+                net.minecraftforge.fluids.FluidStack out = (net.minecraftforge.fluids.FluidStack) r.getClass().getMethod("getOutput").invoke(r);
+                if (isIngotAmount(out, fluid)) {
+                    it.remove();
+                    removed++;
+                }
+            }
+            YouranMod.LOG.info("删掉炼金化学自动加的 {}（144 mB ⇄ 16 个）配方 {} 条", fluid.getName(), removed);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("删炼金化学自动加的 {} 配方失败", fluid.getName(), e);
+        }
+    }
+
+    private static boolean isIngotAmount(net.minecraftforge.fluids.FluidStack stack, net.minecraftforge.fluids.Fluid fluid) {
+        return stack != null && stack.getFluid() != null && stack.getFluid().getName().equals(fluid.getName()) && stack.amount == 144;
+    }
+
+    /**
      * 雾化器与液化器互逆（同炼金化学自己的水：500 mB ⇄ 8 个，{@code AtomizerRecipe(reversible = true)}）：雾化器 {@code fluid} → {@code element}，
      * 液化器反过来。炼金化学只在它自己的初始化里按“可逆”的雾化器配方生成液化器配方，后加的这里两边都加。后初始化时调用。
      */
