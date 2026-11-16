@@ -42,14 +42,14 @@ public class GuiMicroscope extends GuiContainer {
         super(container);
         this.container = container;
         xSize = 256;
-        ySize = 222;
+        ySize = 224;
     }
 
     @Override
     public void initGui() {
         super.initGui();
         Keyboard.enableRepeatEvents(true);
-        int y = guiTop + 140;
+        int y = guiTop + 146;
         int x = guiLeft + 8;
         buttonList.add(new GuiButton(0, x, y, 38, 18, "X-"));
         buttonList.add(new GuiButton(1, x + 40, y, 38, 18, "X+"));
@@ -180,15 +180,14 @@ public class GuiMicroscope extends GuiContainer {
     protected void drawGuiContainerForegroundLayer(int mouseX, int mouseY) {
         NBTTagCompound d = container.data;
         fontRenderer.drawString(I18n.format("youranmod.microscope.title"), 8, 6, LithoDraw.TEXT);
-        fontRenderer.drawString(I18n.format("youranmod.microscope.left"), LEFT_CX - 10, CY + R + 6, LithoDraw.TEXT);
-        fontRenderer.drawString(I18n.format("youranmod.microscope.right"), RIGHT_CX - 10, CY + R + 6, LithoDraw.TEXT);
-        String rate = I18n.format("youranmod.microscope.rate", d.getInteger("Rate") / 10.0, String.format(java.util.Locale.ROOT, "%.1f", d.getDouble("Tol")));
-        fontRenderer.drawString(rate, 8, 206, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.left"), LEFT_CX - 12, CY + R + 4, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.right"), RIGHT_CX - 12, CY + R + 4, LithoDraw.TEXT);
         String who = d.getBoolean("Operator") ? I18n.format("youranmod.microscope.operator.you")
                 : I18n.format("youranmod.microscope.operator.other", d.getString("OperatorName"));
-        fontRenderer.drawString(who, 8, 186, d.getBoolean("Operator") ? 0x206020 : 0xA04020);
-        fontRenderer.drawString(I18n.format(d.getBoolean("Aligned") ? "youranmod.litho.align.ok" : "youranmod.litho.align.no",
-                d.getInteger("Rate") / 10.0), 8, 196, LithoDraw.TEXT);
-        fontRenderer.drawString(I18n.format("youranmod.microscope.keys"), 92, 6, 0x707070);
+        fontRenderer.drawString(who, 8, 192, d.getBoolean("Operator") ? 0x206020 : 0xA04020);
+        String rate = I18n.format(d.getBoolean("Aligned") ? "youranmod.microscope.rate.ok" : "youranmod.microscope.rate",
+                d.getInteger("Rate") / 10.0, String.format(java.util.Locale.ROOT, "%.1f", d.getDouble("Tol")));
+        fontRenderer.drawString(rate, 8, 201, LithoDraw.TEXT);
+        fontRenderer.drawString(I18n.format("youranmod.microscope.keys"), 8, 211, 0x707070);
     }
 }

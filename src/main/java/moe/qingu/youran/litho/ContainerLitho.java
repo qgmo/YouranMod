@@ -18,14 +18,14 @@ import net.minecraftforge.items.SlotItemHandler;
  */
 public class ContainerLitho extends Container implements LithoSyncTarget {
     public static final int WIDTH = 240;
-    public static final int HEIGHT = 250;
+    public static final int HEIGHT = 240;
     /** 五个罐的格子的 x（罐的计量条在格子正上方） */
     public static final int[] TANK_X = {8, 30, 52, 74, 100};
     public static final int TANK_Y = 18;
     public static final int TANK_H = 52;
     public static final int CONTAINER_Y = 74;
     public static final int PLAYER_X = 40;
-    public static final int PLAYER_Y = 168;
+    public static final int PLAYER_Y = 158;
 
     public final TileLithoMaster master;
     private NBTTagCompound lastSent;

@@ -114,7 +114,7 @@ public class GuiLitho extends GuiContainer {
         NBTTagCompound d = container.data;
         LithoStep step = LithoStep.byOrdinal(d.getInteger("Step"));
         int layers = d.getInteger("Layers");
-        int y = 104;
+        int y = 102;
         if (step == LithoStep.IDLE) {
             fontRenderer.drawString(I18n.format("youranmod.litho.step.idle"), 8, y, LithoDraw.TEXT);
         } else {
@@ -125,23 +125,23 @@ public class GuiLitho extends GuiContainer {
                     : I18n.format("youranmod.litho.step.once", step.stepNumber(d.getInteger("Layer"), layers), layers * 5 + 5, name);
             fontRenderer.drawString(line, 8, y, LithoDraw.TEXT);
         }
-        y += 10;
+        y += 9;
         fontRenderer.drawString(I18n.format(LithoStatus.byOrdinal(d.getInteger("Status")).key()), 8, y, 0x2050A0);
-        y += 10;
+        y += 9;
         fontRenderer.drawString(I18n.format(d.getBoolean("Aligned") ? "youranmod.litho.align.ok" : "youranmod.litho.align.no",
                 d.getInteger("Rate") / 10.0), 8, y, LithoDraw.TEXT);
-        y += 10;
+        y += 9;
         if (d.hasKey("Lamp")) {
             List<String> lamp = new ArrayList<>();
             ItemLampPart.describe(LampNbt.read(d.getCompoundTag("Lamp")), true, lamp);
             fontRenderer.drawString(I18n.format("youranmod.litho.lamp", lamp.get(0)), 8, y, LithoDraw.TEXT);
-            y += 10;
+            y += 9;
             fontRenderer.drawString(lamp.get(1) + "  " + lamp.get(2), 8, y, LithoDraw.TEXT);
         } else {
             fontRenderer.drawString(I18n.format("youranmod.litho.lamp.none"), 8, y, 0xA02020);
-            y += 10;
+            y += 9;
         }
-        y += 10;
+        y += 9;
         fontRenderer.drawString(I18n.format("youranmod.litho.remainder", d.getInteger("BoronQ") / 4.0, d.getInteger("AlQ") / 4.0)
                 + "  " + I18n.format(d.getBoolean("RsInverted") ? "youranmod.litho.redstone.inverted" : "youranmod.litho.redstone.normal"),
                 8, y, 0x707070);

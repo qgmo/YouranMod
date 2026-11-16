@@ -356,9 +356,10 @@ public class TileLithoMaster extends TileLithoPart implements ITickable {
         return aligned;
     }
 
-    /** 操作者拧一格旋钮 */
+    /** 操作者拧一格旋钮：拧过以后要重新按“完成对准” */
     public void turnKnob(Alignment.Axis axis, int dir, boolean fine) {
         alignment.turn(axis, dir, fine);
+        aligned = false;
         markDirty();
     }
 
