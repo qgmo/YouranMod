@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "normal": {
+      "model": "youranmod:mercury_light_source"
+    },
+    "inventory": {
+      "model": "youranmod:mercury_light_source"
+    }
+  }
+}

@@ -31,5 +31,6 @@ public final class BuiltinRecipes {
     public static void registerRecipes(RegistryEvent.Register<IRecipe> event) {
         CannerReactions.registerBuiltins();
         FloppyRecipes.register(event.getRegistry());
+        LithoRecipes.registerCrafting(event.getRegistry());
     }
 }

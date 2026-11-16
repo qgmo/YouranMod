@@ -39,6 +39,9 @@ public final class YouranMod {
     public static final String MODID = "youranmod";
     public static final Logger LOG = LogManager.getLogger("YouranMod");
 
+    @Mod.Instance(MODID)
+    public static YouranMod instance;
+
     static {
         // 流体的桶用 Forge 的通用桶（同 1.3.4）；必须在预初始化之前打开
         FluidRegistry.enableUniversalBucket();
@@ -69,6 +72,11 @@ public final class YouranMod {
         OreDictionary.registerOre("primogem_ore", new ItemStack(ModBlocks.primogemOre));
         OreDictionary.registerOre("dustMagnetite", new ItemStack(ModItems.magnetiteDust));
         OreDictionary.registerOre("dustTinyMagnetite", new ItemStack(ModItems.smallMagnetiteDust));
+        // 光刻机：界面；装了沉浸工程时登记多方块（锤子敲对准台成形，沉浸原油的投影仪也会列出它）
+        net.minecraftforge.fml.common.network.NetworkRegistry.INSTANCE.registerGuiHandler(this, new moe.qingu.youran.litho.LithoGuiHandler());
+        if (net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering")) {
+            moe.qingu.youran.compat.immersiveengineering.LithoMultiblock.register();
+        }
         if (event.getSide().isClient()) {
             moe.qingu.youran.client.network.ClientNetwork.init();
         }
@@ -78,6 +86,15 @@ public final class YouranMod {
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
         CompatRecipes.postInit();
+    }
+
+    /** 全部模组载入完成：沉浸工程铜矿石粉碎配方加副产物（它的矿石配方要到后初始化才全）；工程师手册（沉浸工程在它的后初始化里才建手册）里加光刻机一页（只在客户端） */
+    @Mod.EventHandler
+    public void loadComplete(net.minecraftforge.fml.common.event.FMLLoadCompleteEvent event) {
+        moe.qingu.youran.recipe.MolybdenumRecipes.loadComplete(net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering"));
+        if (event.getSide().isClient() && net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering")) {
+            moe.qingu.youran.compat.immersiveengineering.LithoManual.register();
+        }
     }
 
     /** 服务端（独立服务端或进单人世界时的内置服务端）启动前：读配置、登记 tick 处理 */

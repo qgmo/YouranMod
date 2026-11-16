@@ -27,7 +27,8 @@ import java.util.Map;
  *     <li>600 四氧化三铁 {@code triiron_tetroxide}：铁 3、氧 4；</li>
  *     <li>601 乙酸 {@code acetic_acid}：碳 2、氢 4、氧 2；</li>
  *     <li>602 醋酸纤维素 {@code cellulose_acetate}：碳 12、氢 16、氧 8（三醋酸纤维素的重复单元）；</li>
- *     <li>603 硼酸根 {@code borate}：硼 1、氧 3（电气石里的 BO₃ 单元，芯片线的硼来源）。</li>
+ *     <li>603 硼酸根 {@code borate}：硼 1、氧 3（电气石里的 BO₃ 单元，芯片线的硼来源）；</li>
+ *     <li>604 四氯化锡 {@code tin_tetrachloride}：锡 1、氯 4（光刻胶线，环化橡胶的催化剂）。</li>
  * </ul>
  * 名字在本模组 jar 里的 {@code assets/alchemistry/lang/*.lang}（键 {@code item.alchemistry:compound_<名字>.name}），
  * 客户端加载语言文件时与炼金化学自己的合并。
@@ -39,6 +40,13 @@ public final class AlchemistryCompat {
     public static final String CELLULOSE_ACETATE = "cellulose_acetate";
     /** 硼酸根（服主 11-15，硼的来源） */
     public static final String BORATE = moe.qingu.youran.logic.boron.Tourmaline.BORATE;
+    /** 四氯化锡（服主 11-15，光刻胶线） */
+    public static final String TIN_TETRACHLORIDE = "tin_tetrachloride";
+    /** 炼金化学自带的铵（叠氮化钠的辅料） */
+    public static final String AMMONIUM = "ammonium";
+    /** 钠、钨的原子序数（钠锭、钨锭） */
+    public static final int SODIUM = 11;
+    public static final int TUNGSTEN = 74;
     /** 炼金化学自带的纤维素 */
     public static final String CELLULOSE = "cellulose";
     static final String ITEM_COMPOUND = "alchemistry:compound";
@@ -54,7 +62,8 @@ public final class AlchemistryCompat {
             new CompoundSpec(TRIIRON_TETROXIDE, 600, new Color(40, 40, 46), "iron", 3, "oxygen", 4),
             new CompoundSpec(ACETIC_ACID, 601, new Color(236, 234, 214), "carbon", 2, "hydrogen", 4, "oxygen", 2),
             new CompoundSpec(CELLULOSE_ACETATE, 602, new Color(226, 222, 204), "carbon", 12, "hydrogen", 16, "oxygen", 8),
-            new CompoundSpec(BORATE, 603, new Color(214, 222, 236), "boron", 1, "oxygen", 3));
+            new CompoundSpec(BORATE, 603, new Color(214, 222, 236), "boron", 1, "oxygen", 3),
+            new CompoundSpec(TIN_TETRACHLORIDE, 604, new Color(232, 230, 210), "tin", 1, "chlorine", 4));
 
     /** 化合物名 → 元数据（注册成的，或炼金化学里已有的） */
     private static final Map<String, Integer> METAS = new HashMap<>();
@@ -196,8 +205,16 @@ public final class AlchemistryCompat {
      * 两台机器都按数量处理（液化器每次扣输入的数量，蒸发器每次出整组产物），比例照原样。后初始化时调用。
      */
     public static void registerAceticAcidConversion(net.minecraftforge.fluids.Fluid aceticAcid) {
-        ItemStack compound = stack(ACETIC_ACID, 8);
-        if (compound.isEmpty()) {
+        registerFluidConversion(ACETIC_ACID, 8, aceticAcid, 500);
+    }
+
+    /**
+     * 化合物与流体互换：液化器 {@code count} 个化合物 → {@code amount} mB，蒸发器反过来。后初始化时调用。
+     * 四氯化锡：16 个 ⇄ 144 mB（服主 11-15，照乙酸的做法）。
+     */
+    public static void registerFluidConversion(String name, int count, net.minecraftforge.fluids.Fluid fluid, int amount) {
+        ItemStack compound = stack(name, count);
+        if (compound.isEmpty() || fluid == null) {
             return;
         }
         try {
@@ -205,15 +222,40 @@ public final class AlchemistryCompat {
             Object modRecipes = modRecipesClass.getField("INSTANCE").get(null);
             Object liquifier = Class.forName("al132.alchemistry.recipes.LiquifierRecipe")
                     .getConstructor(ItemStack.class, net.minecraftforge.fluids.FluidStack.class)
-                    .newInstance(compound.copy(), new net.minecraftforge.fluids.FluidStack(aceticAcid, 500));
+                    .newInstance(compound.copy(), new net.minecraftforge.fluids.FluidStack(fluid, amount));
             Object evaporator = Class.forName("al132.alchemistry.recipes.EvaporatorRecipe")
                     .getConstructor(net.minecraftforge.fluids.FluidStack.class, ItemStack.class)
-                    .newInstance(new net.minecraftforge.fluids.FluidStack(aceticAcid, 500), compound.copy());
+                    .newInstance(new net.minecraftforge.fluids.FluidStack(fluid, amount), compound.copy());
             listOf(modRecipesClass, modRecipes, "getLiquifierRecipes").add(liquifier);
             listOf(modRecipesClass, modRecipes, "getEvaporatorRecipes").add(evaporator);
-            YouranMod.LOG.info("已加炼金化学液化器、蒸发器配方：8 {} ⇄ 500 mB 乙酸", ACETIC_ACID);
+            YouranMod.LOG.info("已加炼金化学液化器、蒸发器配方：{} {} ⇄ {} mB {}", count, name, amount, fluid.getName());
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-            YouranMod.LOG.error("加炼金化学的乙酸液化器、蒸发器配方失败", e);
+            YouranMod.LOG.error("加炼金化学的 {} 液化器、蒸发器配方失败", name, e);
+        }
+    }
+
+    /**
+     * 雾化器与液化器互逆（同炼金化学自己的水：500 mB ⇄ 8 个，{@code AtomizerRecipe(reversible = true)}）：雾化器 {@code fluid} → {@code element}，
+     * 液化器反过来。炼金化学只在它自己的初始化里按“可逆”的雾化器配方生成液化器配方，后加的这里两边都加。后初始化时调用。
+     */
+    public static void registerAtomizerPair(net.minecraftforge.fluids.FluidStack fluid, ItemStack element) {
+        if (fluid == null || element.isEmpty()) {
+            return;
+        }
+        try {
+            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
+            Object modRecipes = modRecipesClass.getField("INSTANCE").get(null);
+            Object atomizer = Class.forName("al132.alchemistry.recipes.AtomizerRecipe")
+                    .getConstructor(boolean.class, net.minecraftforge.fluids.FluidStack.class, ItemStack.class)
+                    .newInstance(true, fluid.copy(), element.copy());
+            Object liquifier = Class.forName("al132.alchemistry.recipes.LiquifierRecipe")
+                    .getConstructor(ItemStack.class, net.minecraftforge.fluids.FluidStack.class)
+                    .newInstance(element.copy(), fluid.copy());
+            listOf(modRecipesClass, modRecipes, "getAtomizerRecipes").add(atomizer);
+            listOf(modRecipesClass, modRecipes, "getLiquifierRecipes").add(liquifier);
+            YouranMod.LOG.info("已加炼金化学雾化器、液化器配方：{} mB {} ⇄ {} 个", fluid.amount, fluid.getFluid().getName(), element.getCount());
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("加炼金化学的雾化器、液化器配方失败", e);
         }
     }
 

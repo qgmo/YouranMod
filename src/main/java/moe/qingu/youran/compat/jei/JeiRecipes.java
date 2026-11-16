@@ -37,13 +37,13 @@ final class JeiRecipes {
     static List<FluidItemRecipe> cannerReactions() {
         List<FluidItemRecipe> list = new ArrayList<>();
         for (FluidItemReaction<ItemStack, ReactionItem> r : CannerReactions.TABLE.reactions()) {
-            FluidStack in = FluidRegistry.getFluidStack(r.inputFluid(), r.inputAmount());
+            FluidStack in = moe.qingu.youran.fluid.FluidVariants.stack(r.inputFluid(), r.inputAmount());
             if (in != null && CannerReactions.MIXTURE.equals(r.inputFluid())) {
                 // 混合气只有 9 个 9 起的（配方表按流体种类比，这里显示能做出来的最低纯度，JEI 才能连到炼油厂、冶炼炉）
                 in = FluidPurity.mixture(r.inputAmount(), Purity.WAFER_GRADE_NINES);
             }
             List<ItemStack> items = stacks(r.inputItem());
-            FluidStack out = r.outputFluid() == null ? null : FluidRegistry.getFluidStack(r.outputFluid(), r.outputAmount());
+            FluidStack out = r.outputFluid() == null ? null : moe.qingu.youran.fluid.FluidVariants.stack(r.outputFluid(), r.outputAmount());
             ItemStack outItem = r.outputItem() == null ? ItemStack.EMPTY : r.outputItem().toStack();
             if (in == null || items.isEmpty() || (r.outputFluid() != null && out == null) || (r.outputItem() != null && outItem.isEmpty())) {
                 continue;
