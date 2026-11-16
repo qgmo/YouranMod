@@ -22,7 +22,7 @@ public final class YouranNetwork {
         CHANNEL.registerMessage(ConfirmMessages.AnswerHandler.class, ConfirmMessages.Answer.class, 3, Side.SERVER);
         CHANNEL.registerMessage(LocationMessages.RequestHandler.class, LocationMessages.Request.class, 4, Side.SERVER);
         CHANNEL.registerMessage(LocationMessages.ReplyHandler.class, LocationMessages.Reply.class, 5, Side.CLIENT);
-        // 光刻机界面（2.0.0 光刻）
+        // 光刻机界面（2.1.0 光刻）
         CHANNEL.registerMessage(LithoMessages.SyncHandler.class, LithoMessages.Sync.class, 6, Side.CLIENT);
         CHANNEL.registerMessage(LithoMessages.ActionHandler.class, LithoMessages.Action.class, 7, Side.SERVER);
     }

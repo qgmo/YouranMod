@@ -48,7 +48,7 @@ public final class ModItems {
     public static Item mineralWater;
     public static Item mineralWaterBottle;
     public static Item drinkingWater;
-    /** 磁粉（四氧化三铁粉，Fe3O4），2.0.0 起；矿物词典 dustMagnetite */
+    /** 磁粉（四氧化三铁粉，Fe3O4），2.1.0 起；矿物词典 dustMagnetite */
     public static Item magnetiteDust;
     /** 小撮磁粉，9 个合 1 个磁粉（同 IC2 的小撮铁粉）；矿物词典 dustTinyMagnetite */
     public static Item smallMagnetiteDust;
@@ -163,7 +163,7 @@ public final class ModItems {
         add(registry, itemBlock(ModBlocks.hydrargyrum));
         add(registry, itemBlock(ModBlocks.gallium));
         add(registry, itemBlock(ModBlocks.chlorine));
-        // 2.0.0 新加的放在最后，不改已有物品在新世界里的数字 ID
+        // 2.1.0 新加的放在最后，不改已有物品在新世界里的数字 ID
         magnetiteDust = add(registry, new ItemWithTooltip("magnetite_dust", 64, "四氧化三铁（Fe3O4），有磁性"));
         smallMagnetiteDust = add(registry, new ItemWithTooltip("small_magnetite_dust", 64, "四氧化三铁（Fe3O4），有磁性"));
         cobaltMagneticDust = add(registry, new ItemWithTooltip("cobalt_magnetic_dust", 64, "掺了钴的磁粉，矫顽力更高，用来做软盘的磁性涂层"));
