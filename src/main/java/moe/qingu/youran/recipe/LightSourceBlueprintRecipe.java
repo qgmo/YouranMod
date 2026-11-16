@@ -24,9 +24,10 @@ import java.util.List;
  * <pre>
  * 钨阴极棒   任意玻璃板（paneGlass）   钨棒
  * 青金石粉   青金石粉                 青金石粉       （dustLapis）
- * 三本书随便摆：工程师手册、RF 工具指南、悠然服务器手册（各一本，合成时消耗）
+ * 三本书随便摆：工程师手册、RF 工具指南、炼金化学的书（各一本，合成时消耗）
  * </pre>
- * 悠然服务器手册是 Patchouli 的书 {@code patchouli:guide_book}，要按 NBT {@code {"patchouli:book":"youranmod:guide"}} 认（别的 Patchouli 书不行）。
+ * 炼金化学的书是 Patchouli 的书 {@code patchouli:guide_book}，要按 NBT {@code {"patchouli:book":"alchemistry:alchemistry_book"}} 认（别的 Patchouli 书不行；
+ * 服主 11-16 由“悠然服务器手册”改成炼金化学的书）。
  * 三本书里缺任何一种物品（没装 RFTools 或 Patchouli）就不注册这条配方（日志里记一行），蓝图也就做不出来——生产整合包都装着。
  */
 public final class LightSourceBlueprintRecipe extends ShapedOreRecipe {
@@ -36,7 +37,7 @@ public final class LightSourceBlueprintRecipe extends ShapedOreRecipe {
     static final ResourceLocation RFTOOLS_MANUAL = new ResourceLocation("rftools", "rftools_manual");
     static final ResourceLocation PATCHOULI_BOOK = new ResourceLocation("patchouli", "guide_book");
     static final String PATCHOULI_TAG = "patchouli:book";
-    public static final String GUIDE_BOOK = YouranMod.MODID + ":guide";
+    public static final String GUIDE_BOOK = "alchemistry:alchemistry_book";
 
     private final List<Ingredient> books;
 
@@ -103,7 +104,7 @@ public final class LightSourceBlueprintRecipe extends ShapedOreRecipe {
         return true;
     }
 
-    /** Patchouli 书：物品对、NBT 里 {@code patchouli:book} 是悠然服务器手册 */
+    /** Patchouli 书：物品对、NBT 里 {@code patchouli:book} 是炼金化学的书 */
     static final class GuideBookIngredient extends Ingredient {
         private final ItemStack book;
 

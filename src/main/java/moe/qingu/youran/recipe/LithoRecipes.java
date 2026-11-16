@@ -43,7 +43,7 @@ import net.minecraftforge.registries.IForgeRegistry;
  * <p>另外（服主 11-16）：沉浸原油精馏塔分离 IC2 空气出液氩（{@link Ip}）；沉浸工程挤压机挤 IC2 枯竭燃料棒出液氙
  * （{@code compat.immersiveengineering.XenonSqueezing}）；炼金化学雾化器 500 mB 液氩 / 液氙 → 8 氩 / 氙元素，液化器反过来。
  * <p>“光源”蓝图本身的合成（服主 11-16，取代原来 Claude 定的那版）：上排 钨阴极棒 / 任意玻璃板 / 钨棒，中排 3 青金石粉，
- * 下排三本书随便摆：工程师手册、RF 工具指南、悠然服务器手册（{@link LightSourceBlueprintRecipe}）。
+ * 下排三本书随便摆：工程师手册、RF 工具指南、炼金化学的书（{@link LightSourceBlueprintRecipe}）。
  */
 public final class LithoRecipes {
     /** 匠魂“手柄”部件：铸模 NBT {PartType:"tconstruct:tool_rod"}（中文“手柄铸模”） */
