@@ -29,7 +29,8 @@ import java.util.Map;
  *     <li>602 醋酸纤维素 {@code cellulose_acetate}：碳 12、氢 16、氧 8（三醋酸纤维素的重复单元）；</li>
  *     <li>603 硼酸根 {@code borate}：硼 1、氧 3（电气石里的 BO₃ 单元，芯片线的硼来源）；</li>
  *     <li>604 四氯化锡 {@code tin_tetrachloride}：锡 1、氯 4（光刻胶线，环化橡胶的催化剂）；</li>
- *     <li>605 三氯化铁 {@code ferric_chloride}：铁 1、氯 3（服主 11-16，主板蚀刻液；1 三氯化铁粉 ⇄ 16 个）。</li>
+ *     <li>605 三氯化铁 {@code ferric_chloride}：铁 1、氯 3（服主 11-16，主板蚀刻液；1 三氯化铁粉 ⇄ 16 个）；</li>
+ *     <li>606 氟化钙 {@code calcium_fluoride}：钙 1、氟 2（服主 11-16，萤石溶解时出的）。</li>
  * </ul>
  * 名字在本模组 jar 里的 {@code assets/alchemistry/lang/*.lang}（键 {@code item.alchemistry:compound_<名字>.name}），
  * 客户端加载语言文件时与炼金化学自己的合并。
@@ -45,6 +46,11 @@ public final class AlchemistryCompat {
     public static final String TIN_TETRACHLORIDE = "tin_tetrachloride";
     /** 三氯化铁（服主 11-16，主板蚀刻） */
     public static final String FERRIC_CHLORIDE = "ferric_chloride";
+    /** 氟化钙（服主 11-16，萤石溶解出它；以后可做激光器镜片） */
+    public static final String CALCIUM_FLUORIDE = "calcium_fluoride";
+    /** 炼金化学自带的氢氧根、碳酸钾（萘酚磺酸粉的辅料；正胶显影的碱） */
+    public static final String HYDROXIDE = "hydroxide";
+    public static final String POTASSIUM_CARBONATE = "potassium_carbonate";
     /** 炼金化学自带的铵（叠氮化钠的辅料） */
     public static final String AMMONIUM = "ammonium";
     /** 钠、钨的原子序数（钠锭、钨锭） */
@@ -67,7 +73,8 @@ public final class AlchemistryCompat {
             new CompoundSpec(CELLULOSE_ACETATE, 602, new Color(226, 222, 204), "carbon", 12, "hydrogen", 16, "oxygen", 8),
             new CompoundSpec(BORATE, 603, new Color(214, 222, 236), "boron", 1, "oxygen", 3),
             new CompoundSpec(TIN_TETRACHLORIDE, 604, new Color(232, 230, 210), "tin", 1, "chlorine", 4),
-            new CompoundSpec(FERRIC_CHLORIDE, 605, new Color(120, 70, 25), "iron", 1, "chlorine", 3));
+            new CompoundSpec(FERRIC_CHLORIDE, 605, new Color(120, 70, 25), "iron", 1, "chlorine", 3),
+            new CompoundSpec(CALCIUM_FLUORIDE, 606, new Color(236, 238, 242), "calcium", 1, "fluorine", 2));
 
     /** 化合物名 → 元数据（注册成的，或炼金化学里已有的） */
     private static final Map<String, Integer> METAS = new HashMap<>();
@@ -274,8 +281,59 @@ public final class AlchemistryCompat {
      * 组里有元素 / 化合物找不到时整条不加，返回 false。
      */
     public static boolean addDissolverRecipe(ItemStack input, List<List<moe.qingu.youran.logic.boron.Tourmaline.Portion>> groups) {
-        if (input.isEmpty()) {
+        Object recipe = buildDissolverRecipe(input, groups);
+        if (recipe == null) {
             return false;
+        }
+        try {
+            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
+            listOf(modRecipesClass, modRecipesClass.getField("INSTANCE").get(null), "getDissolverRecipes").add(recipe);
+            return true;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("加炼金化学的溶解机配方失败：{}", input.getItem().getRegistryName(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 换掉炼金化学里已有的溶解机配方：先把输入正好就是 {@code input} 这一种物品的原配方删掉（输入是矿物词典这类一大批物品的不动），
+     * 再加新的（同 {@link #addDissolverRecipe}）。炼金化学自己的配方在它的后初始化里才建好，所以要在它之后调用（全部载入完成时）。
+     * 原配方的“可逆”（化合机用它生成的配方）在它建配方时已经用过，这里不用管。
+     * 新配方建不出来（有产物找不到）时不动原配方，返回 -1；否则返回删掉了几条原配方。
+     */
+    public static int replaceDissolverRecipe(ItemStack input, List<List<moe.qingu.youran.logic.boron.Tourmaline.Portion>> groups) {
+        Object recipe = buildDissolverRecipe(input, groups);
+        if (recipe == null) {
+            return -1;
+        }
+        try {
+            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
+            List<Object> list = listOf(modRecipesClass, modRecipesClass.getField("INSTANCE").get(null), "getDissolverRecipes");
+            java.lang.reflect.Method getInput = recipe.getClass().getMethod("getInput");
+            int removed = 0;
+            for (int i = list.size() - 1; i >= 0; i--) {
+                net.minecraft.item.crafting.Ingredient ingredient = (net.minecraft.item.crafting.Ingredient) getInput.invoke(list.get(i));
+                if (ingredient == null) {
+                    continue;
+                }
+                ItemStack[] matching = ingredient.getMatchingStacks();
+                if (matching.length == 1 && ItemStack.areItemsEqual(matching[0], input)) {
+                    list.remove(i);
+                    removed++;
+                }
+            }
+            list.add(recipe);
+            return removed;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            YouranMod.LOG.error("换炼金化学的溶解机配方失败：{}", input.getItem().getRegistryName(), e);
+            return -1;
+        }
+    }
+
+    /** 做一条炼金化学的溶解机配方（还没加进去）；输入为空或有产物找不到时为 null */
+    private static Object buildDissolverRecipe(ItemStack input, List<List<moe.qingu.youran.logic.boron.Tourmaline.Portion>> groups) {
+        if (input.isEmpty()) {
+            return null;
         }
         try {
             Constructor<?> groupCtor = Class.forName("al132.alchemistry.recipes.ProbabilityGroup").getConstructor(List.class, double.class);
@@ -287,7 +345,7 @@ public final class AlchemistryCompat {
                     ItemStack s = chemical(p.name, p.count);
                     if (s.isEmpty()) {
                         YouranMod.LOG.info("炼金化学里没有 {}，不加 {} 的溶解机配方", p.name, input.getItem().getRegistryName());
-                        return false;
+                        return null;
                     }
                     stacks.add(s);
                     percent = p.percent;
@@ -296,15 +354,12 @@ public final class AlchemistryCompat {
             }
             Object set = Class.forName("al132.alchemistry.recipes.ProbabilitySet").getConstructor(List.class, boolean.class, int.class)
                     .newInstance(built, false, 1);
-            Object recipe = Class.forName("al132.alchemistry.recipes.DissolverRecipe")
+            return Class.forName("al132.alchemistry.recipes.DissolverRecipe")
                     .getConstructor(net.minecraft.item.crafting.Ingredient.class, boolean.class, set.getClass())
                     .newInstance(net.minecraft.item.crafting.Ingredient.fromStacks(input.copy()), false, set);
-            Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
-            listOf(modRecipesClass, modRecipesClass.getField("INSTANCE").get(null), "getDissolverRecipes").add(recipe);
-            return true;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-            YouranMod.LOG.error("加炼金化学的溶解机配方失败：{}", input.getItem().getRegistryName(), e);
-            return false;
+            YouranMod.LOG.error("做炼金化学的溶解机配方失败：{}", input.getItem().getRegistryName(), e);
+            return null;
         }
     }
 

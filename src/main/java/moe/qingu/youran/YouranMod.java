@@ -94,6 +94,7 @@ public final class YouranMod {
     @Mod.EventHandler
     public void loadComplete(net.minecraftforge.fml.common.event.FMLLoadCompleteEvent event) {
         moe.qingu.youran.recipe.MolybdenumRecipes.loadComplete(net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering"));
+        moe.qingu.youran.recipe.FluoriteRecipes.loadComplete(net.minecraftforge.fml.common.Loader.isModLoaded(moe.qingu.youran.compat.alchemistry.AlchemistryCompat.MODID));
         if (event.getSide().isClient() && net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering")) {
             moe.qingu.youran.compat.immersiveengineering.LithoManual.register();
         }
