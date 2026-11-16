@@ -26,7 +26,15 @@ public class ScrewdriverPunch extends ShapelessOreRecipe {
 
     @Override
     public ItemStack getCraftingResult(InventoryCrafting inv) {
-        return HandPunch.mark(super.getCraftingResult(inv), brokenMeta, chance);
+        ItemStack out = HandPunch.mark(super.getCraftingResult(inv), brokenMeta, chance);
+        // 自动合成（RFTools 合成器等）：做出来直接进机器自己的格子，不会经过玩家的物品栏，标记会一直留着、永远不掷，
+        // 于是绕过了打坏的概率。这种合成格背后的界面没有“合成结果”格，产物每次合成现算一遍，在这里就掷掉。
+        // 玩家的合成界面有结果格，合成格每变一次都会现算一遍预览，在这里掷就能反复摆到没坏为止，所以照旧拿走时再掷。
+        // 沉浸工程装配机只在设样板时算一次、之后每次复制那一份，由 TileEntityAssemblerMixin 在复制后掷。
+        if (HandPunch.isMachineCrafting(inv)) {
+            HandPunch.resolve(out, java.util.concurrent.ThreadLocalRandom.current());
+        }
+        return out;
     }
 
     @Override
