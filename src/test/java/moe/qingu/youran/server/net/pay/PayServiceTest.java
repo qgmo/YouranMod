@@ -154,7 +154,7 @@ class PayServiceTest {
         assertEquals("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", IdYrClient.challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"));
         IdYrClient c = new IdYrClient(null, null, "id.yr", false, "pay.yr");
         assertEquals("https://id.yr/authorize?response_type=code&client_id=https%3A%2F%2Fpay.yr%2F&redirect_uri=https%3A%2F%2Fpay.yr%2Flogin%2Fcallback&state=st"
-                + "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&scope=confirm+verify",
+                + "&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&scope=confirm",
                 c.authorizeUrl("https", "st", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", PayService.SCOPE));
         assertTrue(c.issuerOk(null) && c.issuerOk("https://id.yr") && c.issuerOk("http://id.yr"));
         assertTrue(!c.issuerOk("https://evil.yr"));

@@ -19,6 +19,7 @@ import java.util.concurrent.CompletableFuture;
  * <li>服务端只收被问的那个玩家发来的回应，题号要对得上；别人发的、过时的、伪造的回应丢掉并记日志。</li>
  * </ul>
  * 只在服务端有用，任意线程都可以调用。返回的 future 在服务端主线程上完成；网络没在运行时马上以 {@link ConfirmResult.Outcome#UNAVAILABLE} 完成。
+ * 调用方可以 {@code cancel} 返回的 future 撤回这个框（还开着时客户端上的框关掉，不再占着那个玩家；例如 {@code id.yr} 的“重新弹出”先撤回上一个）。
  * 回应只说明“操作者同意了”，要不要再查别的（例如这时设备还在不在）由调用方决定。
  */
 public final class SystemConfirm {

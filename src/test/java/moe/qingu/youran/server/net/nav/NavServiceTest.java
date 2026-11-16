@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
@@ -141,6 +142,16 @@ class NavServiceTest {
         public CompletableFuture<IdYrClient.Outcome> result(String accessToken, String requestId) {
             checked.add(requestId);
             return CompletableFuture.completedFuture(next);
+        }
+
+        /** 追加授权同意了：带新令牌（加上 verify） */
+        static IdYrClient.Outcome granted(UUID who, String name) {
+            return new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, "fd00::1:2",
+                    new IdYrClient.Token(who, name, "token-with-verify", Long.MAX_VALUE, Collections.singleton(IdYrClient.VERIFY)));
+        }
+
+        IdYrClient.Ask last() {
+            return asks.get(asks.size() - 1);
         }
 
         /** 最近一次请求跳回的路径（/verified/编号） */
@@ -408,50 +419,82 @@ class NavServiceTest {
         }
     }
 
-    /** 打开“操作前必须验证身份”要验证身份；打开以后投放先验证，没通过不下单、填的原样带回，通过了照原样下单；结果只能用一次 */
+    /**
+     * 打开“操作前必须验证身份”只要 id.yr 的同意框（追加授权 verify，换上新令牌）；打开以后投放先验证，没通过不下单、填的原样带回、
+     * 给“重新验证”（换人坐下重新打开这一页也一样），点了用同样的内容重新验证；重新登录后先追加授权再验证；关闭要本人验证身份
+     */
     @Test
     void verifyBeforeBuy() throws Exception {
         NavService.Session s = gatedService.addSession(alice, "Alice", System.currentTimeMillis());
         assertTrue(text(send(gatedService, "GET", "platform.180.yr", "/", null, s, PC)).contains("操作前必须验证身份：<b>已关闭</b>"));
-        // 打开：要验证身份
+        // 打开：id.yr 的同意框（追加授权 verify），不是验证身份
         HttpResponse r = send(gatedService, "POST", "platform.180.yr", "/account/security", "csrf=" + s.csrf + "&verify=1", s, PC);
         assertEquals(303, r.status);
         assertEquals("http://id.yr/confirm?request=cr_1", r.headers.get("Location"));
         IdYrClient.Ask ask = fakeId.asks.get(0);
-        assertTrue(ask.verify, "改设置总是验证身份");
-        assertEquals("打开操作前验证身份", ask.title);
+        assertEquals("verify", ask.scope, "打开时追加授权“验证身份”");
+        assertFalse(ask.verify, "打开不用本人验证身份");
         assertEquals(PC, ask.source, "只能在这台电脑上打开");
         assertTrue(ask.redirectUri.startsWith("http://platform.180.yr/verified/g_"));
-        assertFalse(book.verifyRequired(alice), "还没验证");
+        assertFalse(book.verifyRequired(alice), "还没同意");
+        // 不同意：没打开，可以重新确认
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.DENIED, "denied", "fd00::1:2");
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
+        assertEquals(403, r.status);
+        assertTrue(text(r).contains("没有同意") && text(r).contains("重新确认"), text(r));
+        assertFalse(book.verifyRequired(alice));
+        String gate = fakeId.back();
+        r = send(gatedService, "POST", "platform.180.yr", gate + "/again", "csrf=" + s.csrf, s, PC);
+        assertEquals("http://id.yr/confirm?request=cr_2", r.headers.get("Location"), "重新确认：新的请求");
+        assertEquals("verify", fakeId.last().scope);
+        fakeId.next = FakeId.granted(alice, "Alice");
         r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
         assertEquals("/?msg=security_on", r.headers.get("Location"));
         assertTrue(book.verifyRequired(alice));
-        assertEquals(Arrays.asList("cr_1"), fakeId.checked, "向 id.yr 核对了");
+        assertEquals("token-with-verify", s.accessToken, "换上了带 verify 的令牌");
+        assertEquals(Arrays.asList("cr_1", "cr_2"), fakeId.checked, "向 id.yr 核对了");
         assertEquals(404, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC).status, "同一个结果不能再用");
 
-        // 投放：先验证；不是本人（id.yr 回 denied）→ 不下单，图和字原样带回
+        // 投放：先验证；不是本人（id.yr 回 denied）→ 不下单，图和字原样带回，有“重新验证”
         String img = squareImage();
         String form = "csrf=" + s.csrf + "&slot=square&days=2&link=wood.yr&text=" + enc("好木头") + "&image=" + enc(img);
         r = send(gatedService, "POST", "platform.180.yr", "/buy", form, s, PC);
-        assertEquals("http://id.yr/confirm?request=cr_2", r.headers.get("Location"));
+        assertEquals("http://id.yr/confirm?request=cr_3", r.headers.get("Location"));
         assertTrue(env.orders.isEmpty(), "验证前不开单");
-        assertTrue(fakeId.asks.get(1).verify);
-        assertEquals("投放侧栏方块", fakeId.asks.get(1).title);
+        assertTrue(fakeId.last().verify);
+        assertEquals("投放侧栏方块", fakeId.last().title);
         fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.DENIED, "denied", "fd00::1:2");
-        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
+        gate = fakeId.back();
+        r = send(gatedService, "GET", "platform.180.yr", gate, null, s, PC);
         assertEquals(403, r.status);
         assertTrue(text(r).contains("身份验证没有通过"), text(r));
         assertTrue(text(r).contains("value=\"" + img + "\""), "画的图带回表单");
         assertTrue(text(r).contains("value=\"好木头\""));
+        assertTrue(text(r).contains("action=\"" + gate + "/again\"") && text(r).contains("重新验证"), "有“重新验证”");
         assertTrue(env.orders.isEmpty());
         assertTrue(book.all().isEmpty(), "也没占位置");
-        // 再交一次，这回通过：照原样下单、跳到付款页
-        send(gatedService, "POST", "platform.180.yr", "/buy", form, s, PC);
-        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, "fd00::1:2");
+        // 换人坐下（他的浏览器重新打开这一页）：还是没通过的页面，图和字都在，不再去核对
+        int checked = fakeId.checked.size();
+        r = send(gatedService, "GET", "platform.180.yr", gate, null, s, PC);
+        assertEquals(403, r.status);
+        assertTrue(text(r).contains("value=\"好木头\"") && text(r).contains("重新验证"));
+        assertEquals(checked, fakeId.checked.size());
         // 别的登录拿着这个地址没用
         NavService.Session other = gatedService.addSession(admin, "Admin", System.currentTimeMillis());
-        assertEquals(404, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, other, PC).status);
-        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
+        assertEquals(404, send(gatedService, "GET", "platform.180.yr", gate, null, other, PC).status);
+        assertEquals(404, send(gatedService, "POST", "platform.180.yr", gate + "/again", "csrf=" + other.csrf, other, PC).status);
+        assertEquals(403, send(gatedService, "POST", "platform.180.yr", gate + "/again", "csrf=nope", s, PC).status);
+        // 点“重新验证”：同样的内容、新的请求；这回通过：照原样下单、跳到付款页
+        r = send(gatedService, "POST", "platform.180.yr", gate + "/again", "csrf=" + s.csrf, s, PC);
+        assertEquals("http://id.yr/confirm?request=cr_4", r.headers.get("Location"));
+        assertTrue(fakeId.last().verify);
+        assertEquals("投放侧栏方块", fakeId.last().title);
+        assertEquals(gate, fakeId.back(), "还是同一个操作");
+        assertEquals(gate, send(gatedService, "POST", "platform.180.yr", gate + "/again", "csrf=" + s.csrf, s, PC).headers.get("Location"),
+                "进行中再点：回等结果的页面，不再建请求");
+        assertEquals(4, fakeId.asks.size());
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, "fd00::1:2");
+        r = send(gatedService, "GET", "platform.180.yr", gate, null, s, PC);
         assertEquals(303, r.status, text(r));
         assertEquals("http://pay.yr/c/ord_1", r.headers.get("Location"));
         assertEquals(Arrays.asList(1), env.orders);
@@ -473,18 +516,38 @@ class NavServiceTest {
         assertTrue(text(r).contains("value=\"再来\""));
         fakeId.failAsk = null;
 
-        // 关闭：也要验证身份；没通过就还开着
+        // 重新登录（这次登录没有 verify）：先追加授权，通过了接着验证身份，再下单
+        NavService.Session again = gatedService.addSession(alice, "Alice", System.currentTimeMillis());
+        int before = fakeId.asks.size();
+        r = send(gatedService, "POST", "platform.180.yr", "/buy", "csrf=" + again.csrf + "&slot=text&days=1&link=b.yr&text=" + enc("新登录"), again, PC);
+        assertEquals("verify", fakeId.last().scope, "先追加授权");
+        fakeId.next = FakeId.granted(alice, "Alice");
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, again, PC);
+        assertEquals(303, r.status);
+        assertEquals("http://id.yr/confirm?request=cr_" + (before + 2), r.headers.get("Location"), "接着验证身份（新的请求）");
+        assertTrue(fakeId.last().verify);
+        assertEquals("token-with-verify", again.accessToken);
+        fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, "fd00::1:2");
+        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, again, PC);
+        assertTrue(r.headers.get("Location").startsWith("http://pay.yr/c/"), text(r));
+        assertEquals(2, env.orders.size());
+
+        // 关闭：要本人验证身份；没通过就还开着
         send(gatedService, "POST", "platform.180.yr", "/account/security", "csrf=" + s.csrf + "&verify=0", s, PC);
-        assertEquals("关闭操作前验证身份", fakeId.asks.get(fakeId.asks.size() - 1).title);
+        assertEquals("关闭操作前验证身份", fakeId.last().title);
+        assertTrue(fakeId.last().verify, "关闭要验证身份");
         fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.DENIED, "denied", null);
-        assertEquals(403, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC).status);
+        gate = fakeId.back();
+        r = send(gatedService, "GET", "platform.180.yr", gate, null, s, PC);
+        assertEquals(403, r.status);
+        assertTrue(text(r).contains("重新验证"));
         assertTrue(book.verifyRequired(alice));
-        send(gatedService, "POST", "platform.180.yr", "/account/security", "csrf=" + s.csrf + "&verify=0", s, PC);
+        send(gatedService, "POST", "platform.180.yr", gate + "/again", "csrf=" + s.csrf, s, PC);
         fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, null);
-        assertEquals("/?msg=security_off", send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC).headers.get("Location"));
+        assertEquals("/?msg=security_off", send(gatedService, "GET", "platform.180.yr", gate, null, s, PC).headers.get("Location"));
         assertFalse(book.verifyRequired(alice));
         // 关了：投放直接去付款
-        int before = fakeId.asks.size();
+        before = fakeId.asks.size();
         r = send(gatedService, "POST", "platform.180.yr", "/buy", "csrf=" + s.csrf + "&slot=text&days=1&link=a.yr&text=hi", s, PC);
         assertTrue(r.headers.get("Location").startsWith("http://pay.yr/c/"));
         assertEquals(before, fakeId.asks.size());
@@ -494,6 +557,7 @@ class NavServiceTest {
     @Test
     void verifyBeforeAdmin() throws Exception {
         NavService.Session root = gatedService.addSession(admin, "Admin", System.currentTimeMillis());
+        root.scopes = Collections.singleton(IdYrClient.VERIFY);
         AdBook.Ad a = book.draft(AdSlot.BANNER, alice, "Alice", 4, "", "http://a.yr/", 0, 1);
         book.paid(a, "pay_1", 0, 1);
         book.setVerifyRequired(admin, true);
@@ -502,13 +566,15 @@ class NavServiceTest {
         assertEquals("下架广告 #1", fakeId.asks.get(0).title);
         assertEquals(AdBook.State.LIVE, a.state);
         fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.DENIED, "timeout", null);
-        r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, root, PC);
+        String gate = fakeId.back();
+        r = send(gatedService, "GET", "platform.180.yr", gate, null, root, PC);
         assertEquals(403, r.status);
-        assertTrue(text(r).contains("超时") && text(r).contains("后退"), text(r));
+        assertTrue(text(r).contains("超时") && text(r).contains("重新验证"), text(r));
         assertEquals(AdBook.State.LIVE, a.state);
-        send(gatedService, "POST", "platform.180.yr", "/admin/remove", "csrf=" + root.csrf + "&ad=1&refund=none&reason=" + enc("违规"), root, PC);
+        send(gatedService, "POST", "platform.180.yr", gate + "/again", "csrf=" + root.csrf, root, PC);
+        assertEquals("下架广告 #1", fakeId.last().title);
         fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.APPROVED, null, null);
-        assertEquals(303, send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, root, PC).status);
+        assertEquals(303, send(gatedService, "GET", "platform.180.yr", gate, null, root, PC).status);
         assertEquals(AdBook.State.REMOVED, a.state);
         // 存档往返
         AdBook copy = new AdBook(book.rules(), b -> { });

@@ -50,14 +50,17 @@ import static moe.qingu.youran.server.net.pay.PayPages.link;
  *   GET  /login、/login/callback  用 id.yr 游戏角色一键登录（OAuth 授权码 + PKCE）
  *   POST /logout
  *   GET  /op/&lt;号&gt;              id.yr 跳回来的地方：向 id.yr 核对确认结果，通过了就做，显示结果（处理中自动刷新）
+ *   POST /op/&lt;号&gt;/again        没通过时“重新验证 / 重新确认”：同样的内容重新做一次（新的确认请求、新的框）
  *   GET  /account               账户：余额、提现、收到的付款、收支记录、密钥、安全设置
  *   POST /account/withdraw、/account/key、/account/security；GET、POST /account/refund/&lt;付款号&gt;
  *   POST /api/v1/orders；GET /api/v1/orders/&lt;单号&gt;；POST /api/v1/orders/&lt;单号&gt;/cancel；GET /api/v1/balance；GET /api/v1/payments/&lt;号&gt;
  * </pre>
  * 登录状态是 Cookie {@code yrpay}（跟着电脑走：同一台电脑的下一个人看得到，所以空闲 {@code sessionIdleMinutes} 分钟就失效）。
- * 付款、提现、退款、重置密钥都要确认。pay.yr 是 id.yr 的普通网站（服主 11-15）：登录时要了 {@code confirm}（弹窗确认）与 {@code verify}（验证身份）
- * 两项能力，确认框由 id.yr 弹给这台电脑现在的操作者，不必是登录的角色（另一个玩家坐到已登录的电脑前动钱是允许的，“相当于老婆帮你买东西”）；
+ * 付款、提现、退款、重置密钥都要确认。pay.yr 是 id.yr 的普通网站（服主 11-15）：登录时要 {@code confirm}（弹窗确认）这项能力，
+ * 确认框由 id.yr 弹给这台电脑现在的操作者，不必是登录的角色（另一个玩家坐到已登录的电脑前动钱是允许的，“相当于老婆帮你买东西”）；
  * 记账一律照登录的账户，确认框里写明是谁的账户。账户开了“操作前必须验证身份”时改用验证身份：只有登录的角色本人同意才通过。
+ * 登录时不要 {@code verify}（服主 11-16）：打开这一项时请 id.yr 追加授权 {@code verify}（坐在电脑前的人同意就打开）；关闭要本人验证身份；
+ * 这次登录还没有 {@code verify} 时（打开以后重新登录过）先追加授权再验证。没通过时结果页上有“重新验证 / 重新确认”。
  */
 final class PayService {
     static final int PORT = 80;
@@ -71,10 +74,10 @@ final class PayService {
     static final long SESSION_MAX = 2 * 3600_000;
     /** 跳去 id.yr 确认以后多久没回来就当作没确认（id.yr 的请求 2 分钟内要打开、确认框 1 分钟） */
     static final long CONFIRM_STALE = 5 * 60_000;
-    /** 登录时向 id.yr 要的能力 */
-    static final String SCOPE = "confirm verify";
+    /** 登录时向 id.yr 要的能力（“验证身份”在打开设置时追加） */
+    static final String SCOPE = "confirm";
     static final Pattern ORDER_PATH = Pattern.compile("/c/(ord_[a-z0-9]{16})(/pay|/cancel)?");
-    static final Pattern OP_PATH = Pattern.compile("/op/(op_[a-z0-9]{16})");
+    static final Pattern OP_PATH = Pattern.compile("/op/(op_[a-z0-9]{16})(/again)?");
     static final Pattern REFUND_PATH = Pattern.compile("/account/refund/(pay_[a-z0-9]{16})");
     static final Pattern API_ORDER = Pattern.compile("/api/v1/orders/(ord_[a-z0-9]{16})(/cancel)?");
     static final Pattern API_PAYMENT = Pattern.compile("/api/v1/payments/(pay_[a-z0-9]{16})");
@@ -86,13 +89,15 @@ final class PayService {
         final String name;
         final String csrf;
         final long created;
-        /** id.yr 的访问令牌（弹确认框用），什么时候过期；登录用的协议（client_id 的协议） */
-        final String accessToken;
+        /** id.yr 的访问令牌（弹确认框用；追加授权后换成新的）与它的授权范围、什么时候过期；登录用的协议（client_id 的协议） */
+        volatile String accessToken;
+        volatile java.util.Set<String> scopes;
         final long tokenExpires;
         final String scheme;
         volatile long lastSeen;
 
-        Session(String id, UUID player, String name, String csrf, long now, String accessToken, long tokenExpires, String scheme) {
+        Session(String id, UUID player, String name, String csrf, long now, String accessToken, java.util.Set<String> scopes, long tokenExpires,
+                String scheme) {
             this.id = id;
             this.player = player;
             this.name = name;
@@ -100,8 +105,17 @@ final class PayService {
             this.created = now;
             this.lastSeen = now;
             this.accessToken = accessToken;
+            this.scopes = scopes;
             this.tokenExpires = tokenExpires;
             this.scheme = scheme;
+        }
+
+        /** 追加授权换到的新令牌（角色不变时才换） */
+        void swap(IdYrClient.Token t) {
+            if (t != null && t.uuid.equals(player)) {
+                scopes = t.scopes;
+                accessToken = t.accessToken;
+            }
         }
 
         boolean alive(long now) {
@@ -147,10 +161,16 @@ final class PayService {
         volatile String secret;
         /** 准备好的（PreparedPay / PreparedWithdraw / PreparedRefund；安全设置为 Boolean） */
         volatile Object prepared;
-        /** id.yr 的确认请求与地址；这次是不是验证身份 */
+        /** id.yr 的确认请求与地址；这次是不是验证身份；现在这个请求是不是追加授权（打开设置，或验证身份前这次登录还没有 verify） */
         volatile String confirmId;
         volatile String confirmUrl;
         volatile boolean verify;
+        volatile boolean scopeStep;
+        /** 框里的内容（追加授权以后接着验证身份时用） */
+        volatile PayServer.Ask ask;
+        /** “重新验证 / 重新确认”：用原来提交的内容重新做一次；没通过是 id.yr 那边的原因时才给 */
+        volatile java.util.function.Supplier<CompletableFuture<HttpResponse>> again;
+        volatile boolean retryable;
         /** 没做成时“返回”去哪里（带着填的内容） */
         volatile String back;
         /** 同一时间只向 id.yr 核对一次 */
@@ -262,7 +282,10 @@ final class PayService {
             }
             m = OP_PATH.matcher(r.path);
             if (m.matches()) {
-                return get ? op(s, m.group(1)) : done(notAllowed("GET"));
+                if (m.group(2) != null) {
+                    return post ? retry(r, s, m.group(1)) : done(notAllowed("POST"));
+                }
+                return get ? op(r, s, m.group(1)) : done(notAllowed("GET"));
             }
             m = REFUND_PATH.matcher(r.path);
             if (m.matches()) {
@@ -355,7 +378,7 @@ final class PayService {
             if (sessions.size() >= MAX_SESSIONS) {
                 return page(503, PayPages.message("太忙了", null, null, "err", "现在登录的人太多，请稍后再试", null));
             }
-            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis(), who.accessToken, who.expiresAt, l.scheme);
+            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis(), who.accessToken, who.scopes, who.expiresAt, l.scheme);
             sessions.put(s.id, s);
             Ledger.LOG.info("pay.yr：{} 用游戏角色登录（来源 {}）", who.name, r.remoteAddress);
             return redirect(l.next).withHeader("Set-Cookie", cookie(s.id, l.scheme.equals("https"), -1));
@@ -602,6 +625,7 @@ final class PayService {
             return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
         op.back = checkoutUrl(orderId, prefer, use);
+        op.again = () -> pay(r, s, orderId, System.currentTimeMillis());
         if (!lock(orderId, op, s, now)) {
             ops.remove(op.id);
             return done(page(409, PayPages.message("正在付款", s.name, s.csrf, "err", "这张收款单正在别处付款（确认框还开着）。", link(op.back, "回付款页"))));
@@ -654,19 +678,30 @@ final class PayService {
 
     /**
      * 内容准备好了：请 id.yr 建确认请求（账户开了“操作前必须验证身份”时是验证身份），把浏览器 303 过去；确认完 id.yr 跳回 {@code /op/<号>}。
-     * 建不成时这一次作废，显示原因。
+     * 打开“操作前必须验证身份”只要追加授权 {@code verify}（坐在电脑前的人同意就行）；关闭要验证身份。要验证身份而这次登录还没有 {@code verify} 时，
+     * 先追加授权，通过了再验证身份（{@link #op}）。建不成时这一次作废，显示原因。
      */
     private CompletableFuture<HttpResponse> askId(HttpRequest r, Session s, Op op, PayServer.Ask ask) {
-        boolean verify = op.kind == OpKind.SECURITY || core.verifyRequired(s.player);
-        op.verify = verify;
+        boolean enabling = op.kind == OpKind.SECURITY && Boolean.TRUE.equals(op.prepared);
+        op.verify = !enabling && (op.kind == OpKind.SECURITY || core.verifyRequired(s.player));
+        op.ask = ask;
+        return askStep(r, s, op, OpState.PREPARING);
+    }
+
+    /** 建这一步的 id.yr 请求（{@code from}：这张单现在应在的状态；被新的一次顶掉了就不建） */
+    private CompletableFuture<HttpResponse> askStep(HttpRequest r, Session s, Op op, OpState from) {
+        boolean scope = op.kind == OpKind.SECURITY && !op.verify || op.verify && !s.scopes.contains(IdYrClient.VERIFY);
         String back = s.scheme + "://" + moe.qingu.youran.api.pay.PayApi.DOMAIN + "/op/" + op.id;
-        IdYrClient.Ask a = IdYrClient.Ask.of(verify, ask.title, ask.items, ask.purpose, r.remoteAddress, back, op.id);
+        PayServer.Ask ask = op.ask;
+        IdYrClient.Ask a = scope ? IdYrClient.Ask.scope(IdYrClient.VERIFY, r.remoteAddress, back, op.id)
+                : IdYrClient.Ask.of(op.verify, ask.title, ask.items, ask.purpose, r.remoteAddress, back, op.id);
+        op.scopeStep = scope;
         return id.ask(s.accessToken, a).handle((t, e) -> {
             if (t == null) {
                 return failed(op, e);
             }
             synchronized (op) {
-                if (op.state != OpState.PREPARING) {
+                if (op.state != from) {
                     // 等的时候被新的一次顶掉了
                     return redirect("/op/" + op.id);
                 }
@@ -687,9 +722,11 @@ final class PayService {
             moe.qingu.youran.api.network.idyr.IdYrException x = (moe.qingu.youran.api.network.idyr.IdYrException) c;
             op.fail(x.tokenExpired() ? "登录过期了，请重新登录。" : x.insufficientScope() ? "登录时没有授权 pay.yr 弹确认框，请退出后重新登录。"
                     : "id.yr 暂时不能弹确认框（" + x.code + "），请稍后再试。");
+            op.retryable = !x.tokenExpired() && !x.insufficientScope();
             Ledger.LOG.warn("pay.yr：向 {} 建确认请求失败：{}", id.domain(), x.getMessage());
         } else {
             op.fail("连不上 " + id.domain() + "，请稍后再试。");
+            op.retryable = true;
             Ledger.LOG.warn("pay.yr：向 {} 建确认请求失败：{}", id.domain(), c == null ? "?" : c.toString());
         }
         unlock(op);
@@ -756,25 +793,28 @@ final class PayService {
 
     // ---------------------------------------------------------------- 等结果
 
-    private CompletableFuture<HttpResponse> op(Session s, String opId) {
+    private CompletableFuture<HttpResponse> op(HttpRequest r, Session s, String opId) {
         Op op = ops.get(opId);
         if (op == null || s == null || !op.sessionId.equals(s.id)) {
             return done(page(404, PayPages.message("没有这个操作", nameOf(s), csrfOf(s), "err", "没有这个操作（过期了，或者登录换了）。", link("/account", "我的账户"))));
         }
         if (op.state == OpState.CONFIRMING && op.checking.compareAndSet(false, true)) {
             // 从 id.yr 跳回来了（或者自己刷新）：向 id.yr 核对结果，网址里带的结果不算数
-            return id.result(s.accessToken, op.confirmId).handle((out, e) -> {
-                if (out == null) {
-                    Throwable c = e instanceof java.util.concurrent.CompletionException && e.getCause() != null ? e.getCause() : e;
-                    if (c instanceof moe.qingu.youran.api.network.idyr.IdYrException && ((moe.qingu.youran.api.network.idyr.IdYrException) c).httpStatus < 500) {
-                        op.fail(((moe.qingu.youran.api.network.idyr.IdYrException) c).tokenExpired() ? "登录过期了，没有执行。请重新登录。" : "核对不了确认结果（"
-                                + ((moe.qingu.youran.api.network.idyr.IdYrException) c).code + "），没有执行。");
+            return id.result(s.accessToken, op.confirmId).thenCompose(out -> {
+                if (out.approved() && op.scopeStep && op.state == OpState.CONFIRMING) {
+                    // 追加授权通过了：换上新令牌；打开设置就执行，要验证身份的接着去验证（新的请求、新的框）
+                    s.swap(out.token);
+                    if (!s.scopes.contains(IdYrClient.VERIFY)) {
+                        op.fail("id.yr 没有给“验证身份”的授权，没有执行。");
+                        op.retryable = true;
                         unlock(op);
-                    } else {
-                        Ledger.LOG.warn("pay.yr：向 {} 核对确认结果失败：{}", id.domain(), c == null ? "?" : c.toString());
+                        op.checking.set(false);
+                        return done(opPage(s, op));
                     }
-                    op.checking.set(false);
-                    return opPage(s, op);
+                    if (op.verify) {
+                        op.checking.set(false);
+                        return askStep(r, s, op, OpState.CONFIRMING);
+                    }
                 }
                 boolean run = false;
                 synchronized (op) {
@@ -791,14 +831,46 @@ final class PayService {
                 } else if (out.approved()) {
                     Ledger.LOG.info("pay.yr：操作 {} 已经作废，id.yr 那边的同意不算", op.id);
                 } else if (out.status == IdYrClient.Outcome.Status.DENIED) {
-                    op.fail(out.text(op.verify) + "没有执行。");
+                    op.fail((op.scopeStep ? ("denied".equals(out.reason) ? "在 id.yr 的确认框里没有同意。" : out.text(false)) : out.text(op.verify)) + "没有执行。");
+                    op.retryable = true;
                     unlock(op);
+                }
+                op.checking.set(false);
+                return done(opPage(s, op));
+            }).exceptionally(e -> {
+                Throwable c = e instanceof java.util.concurrent.CompletionException && e.getCause() != null ? e.getCause() : e;
+                if (c instanceof moe.qingu.youran.api.network.idyr.IdYrException && ((moe.qingu.youran.api.network.idyr.IdYrException) c).httpStatus < 500) {
+                    op.fail(((moe.qingu.youran.api.network.idyr.IdYrException) c).tokenExpired() ? "登录过期了，没有执行。请重新登录。" : "核对不了确认结果（"
+                            + ((moe.qingu.youran.api.network.idyr.IdYrException) c).code + "），没有执行。");
+                    unlock(op);
+                } else {
+                    Ledger.LOG.warn("pay.yr：向 {} 核对确认结果失败：{}", id.domain(), c == null ? "?" : c.toString());
                 }
                 op.checking.set(false);
                 return opPage(s, op);
             });
         }
         return done(opPage(s, op));
+    }
+
+    /** 没通过时的“重新验证 / 重新确认”：用原来提交的内容重新做一次（新的操作、新的确认请求） */
+    private CompletableFuture<HttpResponse> retry(HttpRequest r, Session s, String opId) {
+        Op op = ops.get(opId);
+        if (op == null || s == null || !op.sessionId.equals(s.id)) {
+            return done(page(404, PayPages.message("没有这个操作", nameOf(s), csrfOf(s), "err", "没有这个操作（过期了，或者登录换了）。", link("/account", "我的账户"))));
+        }
+        if (!s.csrf.equals(r.form().get("csrf"))) {
+            return done(page(403, PayPages.message("页面过期了", s.name, s.csrf, "err", "页面过期了，请刷新后再试。", link("/op/" + op.id, "回去"))));
+        }
+        java.util.function.Supplier<CompletableFuture<HttpResponse>> again = op.again;
+        synchronized (op) {
+            if (op.state != OpState.FAILED || !op.retryable || again == null) {
+                return done(redirect("/op/" + op.id));
+            }
+            // 只重来一次（重复点按钮不会开出两个）
+            op.retryable = false;
+        }
+        return again.get();
     }
 
     private HttpResponse opPage(Session s, Op op) {
@@ -820,13 +892,19 @@ final class PayService {
             case PREPARING:
             case CONFIRMING:
                 return ok(PayPages.page("请确认", s.name, s.csrf, "<h1>等确认结果</h1>\n"
-                        + "<p class=\"wait\">" + (op.verify ? "要在游戏弹出的确认框里验证身份。" : "要在游戏弹出的确认框里确认。") + "</p>\n"
+                        + "<p class=\"wait\">" + (op.scopeStep ? "要在游戏弹出的确认框里同意 pay.yr 验证身份。" : op.verify ? "要在游戏弹出的确认框里验证身份。"
+                        : "要在游戏弹出的确认框里确认。") + "</p>\n"
                         + "<p>" + (op.confirmUrl != null ? link(op.confirmUrl, "回到确认页") + " · " : "") + link("/op/" + op.id, "刷新") + "</p>\n", 2, "/op/" + op.id));
             case PROCESSING:
                 return ok(PayPages.page("正在处理", s.name, s.csrf, "<h1>正在处理</h1>\n<p class=\"wait\">请稍等。</p>\n", 2, "/op/" + op.id));
-            case FAILED:
-                return ok(PayPages.message(op.kind == OpKind.PAY ? "没有付款" : "没有完成", s.name, s.csrf, "err", op.message,
-                        op.kind == OpKind.PAY ? link(back, "回付款页") + " · " + link("/c/" + op.orderId + "/cancel", "不付了，返回网站") : link(back, "返回")));
+            case FAILED: {
+                String links = op.kind == OpKind.PAY ? link(back, "回付款页") + " · " + link("/c/" + op.orderId + "/cancel", "不付了，返回网站") : link(back, "返回");
+                if (op.retryable && op.again != null) {
+                    links = "</p>\n<form method=\"post\" action=\"/op/" + op.id + "/again\"><div><input type=\"hidden\" name=\"csrf\" value=\"" + esc(s.csrf)
+                            + "\" /><input type=\"submit\" class=\"go\" value=\"" + (op.verify ? "重新验证" : "重新确认") + "\" /></div></form>\n<p>" + links;
+                }
+                return ok(PayPages.message(op.kind == OpKind.PAY ? "没有付款" : "没有完成", s.name, s.csrf, "err", op.message, links));
+            }
             default:
                 break;
         }
@@ -1010,6 +1088,7 @@ final class PayService {
         if (op == null) {
             return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
+        op.again = () -> withdraw(r, s, System.currentTimeMillis());
         op.back = back;
         return ctx.onMainThread(() -> {
             PayServer.PreparedWithdraw prep;
@@ -1111,6 +1190,7 @@ final class PayService {
         if (op == null) {
             return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
+        op.again = () -> refund(r, s, paymentId, System.currentTimeMillis());
         op.back = back;
         return ctx.onMainThread(() -> {
             PayServer.PreparedRefund prep;
@@ -1135,11 +1215,12 @@ final class PayService {
         if (op == null) {
             return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
         }
+        op.again = () -> key(r, s, System.currentTimeMillis());
         op.back = "/account";
         return askId(r, s, op, core.keyAsk(s.name));
     }
 
-    /** 打开、关闭“操作前必须验证身份”：两个方向都要验证身份（只有帐号本人能改；关了才不会被坐在前面的别人顺手关掉） */
+    /** 打开“操作前必须验证身份”：在 id.yr 的同意框里给这次登录加上“验证身份”（坐在电脑前的人同意就行）；关闭：要本人验证身份（别人关不掉） */
     private CompletableFuture<HttpResponse> security(HttpRequest r, Session s, long now) {
         if (s == null) {
             return done(redirect("/login?next=/account"));
@@ -1155,6 +1236,7 @@ final class PayService {
         }
         op.prepared = on;
         op.back = "/account";
+        op.again = () -> security(r, s, System.currentTimeMillis());
         return askId(r, s, op, core.securityAsk(s.name, on));
     }
 

@@ -26,7 +26,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,11 +38,14 @@ import java.util.regex.Pattern;
  * platform.180.yr   GET /  价格与我的广告；GET|POST /buy  投放；GET /ad/编号  一条广告；POST /ad/编号/again  用同样的内容重新下单；
  *                   GET|POST /report  举报；GET /admin、POST /admin/remove、/admin/ban、/admin/unban  管理；
  *                   GET /login、/login/callback、POST /logout  用 id.yr 游戏角色一键登录；
- *                   POST /account/security  打开、关闭“操作前必须验证身份”；GET /verified/编号  id.yr 验证身份后跳回来
+ *                   POST /account/security  打开、关闭“操作前必须验证身份”；GET /verified/编号  id.yr 验证身份后跳回来；
+ *                   POST /verified/编号/again  没通过时“重新验证”
  * help.180.yr       GET /、/home、/ads、/rules、/canvas、/verify
  * </pre>
  * 登录是 Cookie {@code yr180}（只在 platform.180.yr 上；跟着电脑走，同 pay.yr）。坐在电脑前的人就能用这台电脑上登录着的帐号（服主 11-15）。
- * 帐号开了“操作前必须验证身份”时，投放、重新下单、管理操作前先请 id.yr 验证身份（只有登录的角色本人同意才做）；打开、关闭这一项本身总要验证身份。
+ * 帐号开了“操作前必须验证身份”时，投放、重新下单、管理操作前先请 id.yr 验证身份（只有登录的角色本人同意才做）。登录时不要 {@code verify}（服主 11-16）：
+ * 打开这一项时请 id.yr 追加授权 {@code verify}（坐在电脑前的人在 id.yr 的同意框里同意就打开）；关闭要本人验证身份；这次登录还没有 {@code verify}
+ * 时（打开以后重新登录过）先追加授权再验证。没通过时页面上有“重新验证”，填的内容都还在。
  */
 final class NavService {
     static final Logger LOG = LogManager.getLogger("YouranMod");
@@ -57,14 +59,14 @@ final class NavService {
     static final int MAX_LOGINS = 512;
     static final int MAX_BODY = 96 * 1024;
     static final int SEARCH_MAX = 30;
-    /** 等验证身份的操作最多记几个、多久（id.yr 的请求 2 分钟内要打开、确认框 1 分钟） */
+    /** 等验证身份的操作最多记几个、多久没动静就忘掉（id.yr 的请求 2 分钟内要打开，框作废了还可以重新弹出，最多约 6 分钟） */
     static final int MAX_GATES = 512;
-    static final long GATE_TTL = 5 * 60_000L;
-    /** 登录时向 id.yr 要的能力 */
-    static final String SCOPE = "verify";
+    static final long GATE_TTL = 10 * 60_000L;
+    /** 登录时向 id.yr 要的能力：不要（“验证身份”在打开设置时追加） */
+    static final String SCOPE = null;
     private static final Pattern AD_IMG = Pattern.compile("/ad/([0-9]{1,9})\\.png");
     private static final Pattern AD_PAGE = Pattern.compile("/ad/([0-9]{1,9})(/again)?");
-    private static final Pattern GATE_PAGE = Pattern.compile("/verified/(g_[A-Za-z0-9_-]{16,40})");
+    private static final Pattern GATE_PAGE = Pattern.compile("/verified/(g_[A-Za-z0-9_-]{16,40})(/again)?");
 
     /** 要动游戏、查 pay.yr 的事（实现在 {@link NavServer}） */
     interface Env {
@@ -103,13 +105,14 @@ final class NavService {
         final String name;
         final String csrf;
         final long created;
-        /** id.yr 的访问令牌（验证身份用）、什么时候过期；登录用的协议（client_id 的协议） */
-        final String accessToken;
+        /** id.yr 的访问令牌（验证身份用；追加授权后换成新的）与它的授权范围、什么时候过期；登录用的协议（client_id 的协议） */
+        volatile String accessToken;
+        volatile Set<String> scopes;
         final long tokenExpires;
         final String scheme;
         volatile long lastSeen;
 
-        Session(String id, UUID player, String name, String csrf, long now, String accessToken, long tokenExpires, String scheme) {
+        Session(String id, UUID player, String name, String csrf, long now, String accessToken, Set<String> scopes, long tokenExpires, String scheme) {
             this.id = id;
             this.player = player;
             this.name = name;
@@ -117,27 +120,53 @@ final class NavService {
             this.created = now;
             this.lastSeen = now;
             this.accessToken = accessToken;
+            this.scopes = scopes;
             this.tokenExpires = tokenExpires;
             this.scheme = scheme;
         }
+
+        /** 追加授权换到的新令牌（角色不变时才换） */
+        void swap(IdYrClient.Token t) {
+            if (t != null && t.uuid.equals(player)) {
+                scopes = t.scopes;
+                accessToken = t.accessToken;
+            }
+        }
+    }
+
+    /** 没通过时的页面：一句原因、“重新验证”按钮（HTML，可能为空串） */
+    interface Refused {
+        HttpResponse page(String why, String retry);
     }
 
     /**
-     * 一个等 id.yr 验证身份的操作：通过了照原样做（{@link #action}），没通过回原来的页面、填的原样带回（{@link #refused}）。
+     * 一个等 id.yr 的操作：通过了照原样做（{@link #action}），没通过回原来的页面、填的原样带回、给“重新验证”（{@link #refused}）。
+     * {@link #verify} 为真时要本人验证身份（这次登录没有 {@code verify} 时先追加授权）；为假时是打开设置：只要追加授权 {@code verify}。
      */
     static final class Gate {
         final String id;
         final String sessionId;
-        final long created;
+        final boolean verify;
+        final String title;
+        final List<String> items;
         final Supplier<CompletableFuture<HttpResponse>> action;
-        final Function<String, HttpResponse> refused;
+        final Refused refused;
+        volatile long touched;
         volatile String confirmId;
+        /** 现在这个 id.yr 请求是追加授权 */
+        volatile boolean scopeStep;
+        /** 没通过的原因（留着给“重新验证”）；还在进行为 null */
+        volatile String failed;
         final AtomicBoolean checking = new AtomicBoolean();
 
-        Gate(String id, String sessionId, long created, Supplier<CompletableFuture<HttpResponse>> action, Function<String, HttpResponse> refused) {
+        Gate(String id, String sessionId, long now, boolean verify, String title, List<String> items, Supplier<CompletableFuture<HttpResponse>> action,
+             Refused refused) {
             this.id = id;
             this.sessionId = sessionId;
-            this.created = created;
+            this.touched = now;
+            this.verify = verify;
+            this.title = title;
+            this.items = items;
             this.action = action;
             this.refused = refused;
         }
@@ -336,7 +365,10 @@ final class NavService {
         }
         Matcher g = GATE_PAGE.matcher(r.path);
         if (g.matches()) {
-            return get ? verified(s, scheme, g.group(1)) : done(notAllowed("GET"));
+            if (g.group(2) != null) {
+                return post ? retry(r, s, scheme, g.group(1)) : done(notAllowed("POST"));
+            }
+            return get ? verified(r, s, scheme, g.group(1)) : done(notAllowed("GET"));
         }
         Matcher m = AD_IMG.matcher(r.path);
         if (m.matches()) {
@@ -447,10 +479,15 @@ final class NavService {
     }
 
     private String buyPage(Session s, String scheme, AdSlot slot, String error, String days, String link, String text, String image) {
+        return buyPage(s, scheme, slot, error, "", days, link, text, image);
+    }
+
+    /** {@code again}：没通过验证时的“重新验证”按钮（HTML） */
+    private String buyPage(Session s, String scheme, AdSlot slot, String error, String again, String days, String link, String text, String image) {
         StringBuilder b = new StringBuilder();
         b.append("<h1>投放").append(slot.label).append("</h1>\n");
         if (error != null) {
-            b.append("<p class=\"err\">").append(NavPages.esc(error)).append("</p>");
+            b.append("<p class=\"err\">").append(NavPages.esc(error)).append("</p>").append(again);
         }
         if (book.isBanned(s.player)) {
             b.append("<p class=\"err\">你已被禁止投放广告。</p>");
@@ -521,7 +558,7 @@ final class NavService {
         return gated(r, s, "投放" + slot.label, java.util.Arrays.asList(d + " 游戏天，" + (book.rules().emeraldsPerDay.get(slot) * (long) d) + " 绿宝石", "链接：" + okLink),
                 () -> order(s, scheme, slot, d, okText, okLink, img, System.currentTimeMillis(),
                         p -> page(p.status, buyPage(s, scheme, slot, p.message, days, link, text, echo))),
-                why -> page(403, buyPage(s, scheme, slot, why + "没有下单。填的内容都在，可以再提交。", days, link, text, echo)));
+                (why, again) -> page(403, buyPage(s, scheme, slot, why + "没有下单。填的内容都在。", again, days, link, text, echo)));
     }
 
     /** 下单失败时给什么页面 */
@@ -636,7 +673,8 @@ final class NavService {
         return gated(r, s, "重新下单广告 #" + a.id, java.util.Arrays.asList(a.slot.label + "，" + a.days + " 游戏天", "链接：" + a.link),
                 () -> order(s, scheme, a.slot, a.days, a.text, a.link, img, System.currentTimeMillis(),
                         p -> page(p.status, frame("不能重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(p.message) + "</p>"))),
-                why -> page(403, frame("没有重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "</p><p><a href=\"/ad/" + a.id + "\">回广告 #" + a.id + "</a></p>")));
+                (why, again) -> page(403, frame("没有重新下单", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "</p>" + again
+                        + "<p><a href=\"/ad/" + a.id + "\">回广告 #" + a.id + "</a></p>")));
     }
 
     // ---------------------------------------------------------------- 举报
@@ -818,7 +856,7 @@ final class NavService {
                                 + "<p><a href=\"/admin\">回管理页</a></p>"));
                     }
                     return redirect("/admin?msg=" + IdYrClient.enc(done));
-                }), why -> adminRefused(s, scheme, why + "没有下架 #" + a.id));
+                }), (why, again) -> adminRefused(s, scheme, why + "没有下架 #" + a.id, again));
     }
 
     /** 先退款（在主线程上），退好了再下架；完成时给一句结果 */
@@ -851,7 +889,7 @@ final class NavService {
         }
         boolean all = "1".equals(f.get("remove_all"));
         return gated(r, s, "封禁投放者 " + a.ownerName, java.util.Collections.singletonList(all ? "同时下架他的广告（退没播的）" : "不下架已有的广告"),
-                () -> ban(a, s, reason, all), why -> adminRefused(s, scheme, why + "没有封禁 " + a.ownerName));
+                () -> ban(a, s, reason, all), (why, again) -> adminRefused(s, scheme, why + "没有封禁 " + a.ownerName, again));
     }
 
     private CompletableFuture<HttpResponse> ban(AdBook.Ad a, Session s, String reason, boolean all) {
@@ -897,54 +935,85 @@ final class NavService {
                 return done(redirect("/admin?msg=" + IdYrClient.enc("已解封 " + ban.name)));
             }
             return done(redirect("/admin"));
-        }, why -> adminRefused(s, scheme, why + "没有解封 " + ban.name));
+        }, (why, again) -> adminRefused(s, scheme, why + "没有解封 " + ban.name, again));
     }
 
     // ---------------------------------------------------------------- 操作前必须验证身份
 
-    private HttpResponse adminRefused(Session s, String scheme, String why) {
-        return page(403, frame("管理", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "。点浏览器的“后退”回去，填的理由还在。</p><p><a href=\"/admin\">回管理页</a></p>"));
+    private HttpResponse adminRefused(Session s, String scheme, String why, String again) {
+        return page(403, frame("管理", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "。</p>" + again + "<p><a href=\"/admin\">回管理页</a></p>"));
     }
 
     /**
      * 帐号开了“操作前必须验证身份”时：先请 id.yr 验证身份（只有登录的角色本人同意才通过），通过了才做 {@code action}；
-     * 没开时直接做。建请求失败、没通过时给 {@code refused}（一句原因）。
+     * 没开时直接做。建请求失败、没通过时给 {@code refused}（一句原因与“重新验证”）。
      */
     private CompletableFuture<HttpResponse> gated(HttpRequest r, Session s, String title, List<String> items,
-                                                  Supplier<CompletableFuture<HttpResponse>> action, Function<String, HttpResponse> refused) {
+                                                  Supplier<CompletableFuture<HttpResponse>> action, Refused refused) {
         if (!book.verifyRequired(s.player)) {
             return action.get();
         }
-        return verify(r, s, title, items, action, refused);
+        return start(r, s, true, title, items, action, refused);
     }
 
-    /** 请 id.yr 验证身份，把浏览器 303 过去；回来时（{@code /verified/编号}）通过了做 {@code action} */
-    private CompletableFuture<HttpResponse> verify(HttpRequest r, Session s, String title, List<String> items,
-                                                   Supplier<CompletableFuture<HttpResponse>> action, Function<String, HttpResponse> refused) {
+    /** 记下这个操作，向 id.yr 建请求，把浏览器 303 过去；回来时（{@code /verified/编号}）通过了做 {@code action} */
+    private CompletableFuture<HttpResponse> start(HttpRequest r, Session s, boolean verify, String title, List<String> items,
+                                                  Supplier<CompletableFuture<HttpResponse>> action, Refused refused) {
         if (id == null) {
-            return done(refused.apply("验证不了身份（id.yr 没开）。"));
+            return done(refused.page("验证不了身份（id.yr 没开）。", ""));
         }
         long now = System.currentTimeMillis();
         sweepGates(now);
         if (gates.size() >= MAX_GATES) {
-            return done(refused.apply("现在太忙，请稍后再试。"));
+            return done(refused.page("现在太忙，请稍后再试。", ""));
         }
-        Gate g = new Gate("g_" + random(18), s.id, now, action, refused);
+        Gate g = new Gate("g_" + random(18), s.id, now, verify, title, items, action, refused);
         gates.put(g.id, g);
+        return ask(r, s, g);
+    }
+
+    /**
+     * 向 id.yr 建这一步的请求：打开设置是追加授权 {@code verify}；要验证身份而这次登录还没有 {@code verify} 时也先追加授权；否则验证身份。
+     * 建不成时这一次没通过（可以重新验证）。
+     */
+    private CompletableFuture<HttpResponse> ask(HttpRequest r, Session s, Gate g) {
         String back = s.scheme + "://" + PLATFORM + "/verified/" + g.id;
-        List<String> lines = new ArrayList<>();
-        for (String i : items) {
-            lines.add(i.codePointCount(0, i.length()) > ConfirmRequest.MAX_ITEM ? i.substring(0, i.offsetByCodePoints(0, ConfirmRequest.MAX_ITEM - 1)) + "…" : i);
+        boolean scope = !g.verify || !s.scopes.contains(IdYrClient.VERIFY);
+        IdYrClient.Ask a;
+        if (scope) {
+            a = IdYrClient.Ask.scope(IdYrClient.VERIFY, r.remoteAddress, back, g.id);
+        } else {
+            List<String> lines = new ArrayList<>();
+            for (String i : g.items) {
+                lines.add(i.codePointCount(0, i.length()) > ConfirmRequest.MAX_ITEM ? i.substring(0, i.offsetByCodePoints(0, ConfirmRequest.MAX_ITEM - 1)) + "…" : i);
+            }
+            String t = g.title.codePointCount(0, g.title.length()) > ConfirmRequest.MAX_TITLE
+                    ? g.title.substring(0, g.title.offsetByCodePoints(0, ConfirmRequest.MAX_TITLE - 1)) + "…" : g.title;
+            a = IdYrClient.Ask.verify(t, lines, ConfirmRequest.Purpose.ACTION, r.remoteAddress, back, g.id);
         }
-        String t = title.codePointCount(0, title.length()) > ConfirmRequest.MAX_TITLE ? title.substring(0, title.offsetByCodePoints(0, ConfirmRequest.MAX_TITLE - 1)) + "…" : title;
-        return id.ask(s.accessToken, IdYrClient.Ask.verify(t, lines, ConfirmRequest.Purpose.ACTION, r.remoteAddress, back, g.id)).handle((ticket, e) -> {
+        g.scopeStep = scope;
+        g.confirmId = null;
+        g.touched = System.currentTimeMillis();
+        return id.ask(s.accessToken, a).handle((ticket, e) -> {
             if (ticket == null) {
-                gates.remove(g.id);
-                return refused.apply(askError(e));
+                return fail(s, g, askError(e));
             }
             g.confirmId = ticket.id;
             return redirect(ticket.url);
         });
+    }
+
+    /** 没通过：记下原因（留着这个操作给“重新验证”），回原来的页面 */
+    private HttpResponse fail(Session s, Gate g, String why) {
+        g.failed = why;
+        g.touched = System.currentTimeMillis();
+        return g.refused.page(why, retryForm(s, g));
+    }
+
+    /** “重新验证”按钮（打开设置时是“重新确认”） */
+    private static String retryForm(Session s, Gate g) {
+        return "<form method=\"post\" action=\"/verified/" + g.id + "/again\"><div><input type=\"hidden\" name=\"csrf\" value=\"" + NavPages.esc(s.csrf)
+                + "\" /><input class=\"go\" type=\"submit\" value=\"" + (g.verify ? "重新验证" : "重新确认") + "\" /></div></form>";
     }
 
     private String askError(Throwable e) {
@@ -952,47 +1021,90 @@ final class NavService {
         if (c instanceof IdYrException) {
             IdYrException x = (IdYrException) c;
             LOG.warn("180.yr：向 {} 建验证请求失败：{}", id.domain(), x.getMessage());
-            return x.tokenExpired() ? "登录过期了，请重新登录。" : x.insufficientScope() ? "登录时没有授权“验证身份”，请退出后重新登录。" : "验证不了身份（" + x.code + "）。";
+            return x.tokenExpired() ? "登录过期了，请重新登录。" : "验证不了身份（" + x.code + "）。";
         }
         LOG.warn("180.yr：向 {} 建验证请求失败：{}", id == null ? "id.yr" : id.domain(), c == null ? "?" : c.toString());
         return "连不上 id.yr，请稍后再试。";
     }
 
-    /** id.yr 验证完跳回来：向 id.yr 核对（网址里带的结果不算数），通过了照原样做 */
-    private CompletableFuture<HttpResponse> verified(Session s, String scheme, String gateId) {
+    /**
+     * id.yr 跳回来（或刷新、换人坐下后重新打开这一页）：向 id.yr 核对（网址里带的结果不算数）。追加授权通过了换上新令牌，要验证身份的接着去验证；
+     * 验证通过了照原样做；没通过回原来的页面并给“重新验证”。
+     */
+    private CompletableFuture<HttpResponse> verified(HttpRequest r, Session s, String scheme, String gateId) {
         Gate g = gates.get(gateId);
-        if (g == null || s == null || !g.sessionId.equals(s.id) || g.confirmId == null) {
+        if (g == null || s == null || !g.sessionId.equals(s.id)) {
             return done(page(404, frame("验证身份", s, scheme, "<p class=\"err\">这次验证已经结束或过期了，请回去重新操作。</p><p><a href=\"/\">回首页</a></p>")));
         }
-        if (!g.checking.compareAndSet(false, true)) {
+        String why = g.failed;
+        if (why != null) {
+            return done(g.refused.page(why, retryForm(s, g)));
+        }
+        if (g.confirmId == null || !g.checking.compareAndSet(false, true)) {
             return done(waitingGate(s, scheme, g));
         }
-        return id.result(s.accessToken, g.confirmId).thenCompose(out -> {
+        String confirmId = g.confirmId;
+        return id.result(s.accessToken, confirmId).thenCompose(out -> {
             if (out.status == IdYrClient.Outcome.Status.PENDING) {
                 g.checking.set(false);
                 return done(waitingGate(s, scheme, g));
             }
-            gates.remove(g.id);
-            if (out.approved()) {
-                return g.action.get();
+            if (!out.approved()) {
+                g.checking.set(false);
+                return done(fail(s, g, g.scopeStep ? scopeText(out) : out.text(true)));
             }
-            return done(g.refused.apply(out.text(true)));
-        }).exceptionally(e -> {
+            if (g.scopeStep) {
+                s.swap(out.token);
+                if (!s.scopes.contains(IdYrClient.VERIFY)) {
+                    g.checking.set(false);
+                    return done(fail(s, g, "id.yr 没有给“验证身份”的授权。"));
+                }
+                if (g.verify) {
+                    // 授权有了，接着请本人验证身份（新的请求、新的框）
+                    g.checking.set(false);
+                    return ask(r, s, g);
+                }
+            }
             gates.remove(g.id);
-            return g.refused.apply(askError(e));
+            return g.action.get();
+        }).exceptionally(e -> {
+            g.checking.set(false);
+            return fail(s, g, askError(e));
         });
     }
 
+    /** 追加授权没通过的说明 */
+    static String scopeText(IdYrClient.Outcome out) {
+        return "denied".equals(out.reason) ? "在 id.yr 的确认框里没有同意。" : out.text(false);
+    }
+
+    /** 没通过时的“重新验证”：同一个操作、填的内容不变，重新向 id.yr 建请求（新的框） */
+    private CompletableFuture<HttpResponse> retry(HttpRequest r, Session s, String scheme, String gateId) {
+        Gate g = gates.get(gateId);
+        if (g == null || s == null || !g.sessionId.equals(s.id)) {
+            return done(page(404, frame("验证身份", s, scheme, "<p class=\"err\">这次验证已经结束或过期了，请回去重新操作。</p><p><a href=\"/\">回首页</a></p>")));
+        }
+        if (!s.csrf.equals(r.form().get("csrf"))) {
+            return done(page(403, frame("页面过期了", s, scheme, "<p class=\"err\">页面过期了，请回去刷新后再试。</p>")));
+        }
+        if (g.failed == null || !g.checking.compareAndSet(false, true)) {
+            return done(redirect("/verified/" + g.id));
+        }
+        g.failed = null;
+        g.checking.set(false);
+        return ask(r, s, g);
+    }
+
     private HttpResponse waitingGate(Session s, String scheme, Gate g) {
-        return ok(NavPages.frame("验证身份", "广告平台", s.name, s.csrf, isAdmin(s), scheme, "<h1>等验证结果</h1><p>要在游戏弹出的确认框里验证身份。</p>"
+        return ok(NavPages.frame("验证身份", "广告平台", s.name, s.csrf, isAdmin(s), scheme, "<h1>等验证结果</h1><p>要在游戏弹出的确认框里确认。</p>"
                 + "<p><a href=\"/verified/" + g.id + "\">刷新</a></p>", 2, "/verified/" + g.id));
     }
 
     private void sweepGates(long now) {
-        gates.values().removeIf(g -> now - g.created > GATE_TTL);
+        gates.values().removeIf(g -> now - g.touched > GATE_TTL);
     }
 
-    /** 打开、关闭“操作前必须验证身份”：两个方向都要验证身份（只有帐号本人能改） */
+    /** 打开“操作前必须验证身份”：在 id.yr 的同意框里给这次登录加上“验证身份”（坐在电脑前的人同意就行）；关闭：要本人验证身份 */
     private CompletableFuture<HttpResponse> security(HttpRequest r, Session s, String scheme, long now) {
         if (s == null) {
             return done(redirect("/login?next=/"));
@@ -1001,12 +1113,11 @@ final class NavService {
             return done(page(403, frame("页面过期了", s, scheme, "<p class=\"err\">页面过期了，请回去刷新后再试。</p>")));
         }
         boolean on = "1".equals(r.form().get("verify"));
-        return verify(r, s, (on ? "打开" : "关闭") + "操作前验证身份", java.util.Arrays.asList("platform.180.yr 帐号：" + s.name,
-                on ? "打开后投放广告、管理前要 " + s.name + " 本人确认" : "关闭后，坐在这台电脑前的人就能操作"), () -> {
+        return start(r, s, !on, "关闭操作前验证身份", java.util.Arrays.asList("platform.180.yr 帐号：" + s.name, "关闭后，坐在这台电脑前的人就能操作"), () -> {
             book.setVerifyRequired(s.player, on);
             LOG.info("180.yr：{} {}了“操作前必须验证身份”", s.name, on ? "打开" : "关闭");
             return done(redirect("/?msg=" + (on ? "security_on" : "security_off")));
-        }, why -> page(403, frame("没有改", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "设置没有改。</p><p><a href=\"/\">回首页</a></p>")));
+        }, (why, again) -> page(403, frame("没有改", s, scheme, "<p class=\"err\">" + NavPages.esc(why) + "设置没有改。</p>" + again + "<p><a href=\"/\">回首页</a></p>")));
     }
 
     // ---------------------------------------------------------------- 登录（同 pay.yr）
@@ -1060,7 +1171,7 @@ final class NavService {
             if (sessions.size() >= MAX_SESSIONS) {
                 return page(503, frame("太忙了", null, scheme, "<p class=\"err\">现在太忙，请稍后再试。</p>"));
             }
-            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis(), who.accessToken, who.expiresAt, l.scheme);
+            Session s = new Session(random(32), who.uuid, who.name, random(24), System.currentTimeMillis(), who.accessToken, who.scopes, who.expiresAt, l.scheme);
             sessions.put(s.id, s);
             LOG.info("180.yr：{} 登录了广告平台（来源 {}）", who.name, r.remoteAddress);
             return redirect(l.next).withHeader("Set-Cookie", cookie(s.id, l.scheme.equals("https"), -1));
@@ -1122,7 +1233,7 @@ final class NavService {
 
     /** 测试用：直接放一个登录 */
     Session addSession(UUID player, String name, long now) {
-        Session s = new Session(random(32), player, name, random(24), now, "test-token", Long.MAX_VALUE, "http");
+        Session s = new Session(random(32), player, name, random(24), now, "test-token", Collections.<String>emptySet(), Long.MAX_VALUE, "http");
         sessions.put(s.id, s);
         return s;
     }

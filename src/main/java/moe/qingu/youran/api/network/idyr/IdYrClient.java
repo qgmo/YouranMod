@@ -33,7 +33,8 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * 网站当 {@code id.yr}（游戏角色一键登录，YouranAuth 提供）的客户端：登录（OAuth 授权码 + PKCE S256，不预先注册，{@code client_id} 是网站自己的网址）、
- * 凭访问令牌现查信息、<b>弹窗确认</b>与<b>验证身份</b>（授权范围 {@code confirm}、{@code verify}，接口见 {@code id.yr/docs/confirm}）。
+ * 凭访问令牌现查信息、<b>弹窗确认</b>与<b>验证身份</b>（授权范围 {@code confirm}、{@code verify}，接口见 {@code id.yr/docs/confirm}）、
+ * <b>追加授权</b>（已登录后再要范围，例如玩家打开“操作前必须验证身份”时才要 {@code verify}：{@link Ask#scope}，同意后 {@link Outcome#token} 是新令牌）。
  * 请求都走游戏内网络（网站这台主机的协议栈），在代码上不依赖 YouranAuth。pay.yr、platform.180.yr、MineBay 都用它，玩家自己的 Java 网站也可以用。
  * <p>
  * 弹窗确认 / 验证身份的用法：后台 {@link #ask} 建请求 → 把浏览器 303 到 {@link Ticket#url} → id.yr 弹框、跳回 {@link Ask#redirectUri}
@@ -44,6 +45,9 @@ import java.util.concurrent.CompletableFuture;
 public class IdYrClient {
     public static final String DEFAULT_DOMAIN = "id.yr";
     public static final long TIMEOUT_MS = 10_000;
+    /** 授权范围：弹窗确认、验证身份 */
+    public static final String CONFIRM = "confirm";
+    public static final String VERIFY = "verify";
 
     /** 兑换出来的：角色与访问令牌 */
     public static final class Token {
@@ -61,12 +65,18 @@ public class IdYrClient {
             this.expiresAt = expiresAt;
             this.scopes = Collections.unmodifiableSet(new LinkedHashSet<>(scopes));
         }
+
+        public boolean has(String scope) {
+            return scopes.contains(scope);
+        }
     }
 
     /** 要弹的框 */
     public static final class Ask {
-        /** 验证身份（只有令牌对应的角色本人同意才通过）；false 为弹窗确认（谁坐在电脑前就问谁） */
+        /** 验证身份（只有令牌对应的角色本人同意才通过）；false 为弹窗确认（谁坐在电脑前就问谁）或追加授权 */
         public final boolean verify;
+        /** 追加授权：要加的范围（空格分隔；框里的字由 id.yr 定，坐在电脑前的人同意就算）；其他时候为 null */
+        public final String scope;
         public final String title;
         public final List<String> items;
         public final ConfirmRequest.Purpose purpose;
@@ -76,7 +86,13 @@ public class IdYrClient {
         public final String state;
 
         private Ask(boolean verify, String title, List<String> items, ConfirmRequest.Purpose purpose, Ipv6Address source, String redirectUri, String state) {
+            this(verify, null, title, items, purpose, source, redirectUri, state);
+        }
+
+        private Ask(boolean verify, String scope, String title, List<String> items, ConfirmRequest.Purpose purpose, Ipv6Address source, String redirectUri,
+                    String state) {
             this.verify = verify;
+            this.scope = scope;
             this.title = title;
             this.items = Collections.unmodifiableList(new ArrayList<>(items));
             this.purpose = purpose;
@@ -93,6 +109,16 @@ public class IdYrClient {
         /** 验证身份（标题可以为 null：用 id.yr 的“确认你是 X”） */
         public static Ask verify(String title, List<String> items, ConfirmRequest.Purpose purpose, Ipv6Address source, String redirectUri, String state) {
             return new Ask(true, title, items, purpose, source, redirectUri, state);
+        }
+
+        /** 追加授权：请坐在电脑前的人同意这次登录再加 {@code scope}（如 {@link #VERIFY}） */
+        public static Ask scope(String scope, Ipv6Address source, String redirectUri, String state) {
+            return new Ask(false, scope, null, Collections.<String>emptyList(), ConfirmRequest.Purpose.SHARE, source, redirectUri, state);
+        }
+
+        /** {@code /confirm/new} 的 {@code type} */
+        public String type() {
+            return scope != null ? "scope" : verify ? "verify" : "confirm";
         }
 
         /** 同样的内容，按 {@code verify} 选弹窗确认还是验证身份 */
@@ -132,11 +158,18 @@ public class IdYrClient {
         public final String reason;
         /** 打开它的电脑；还没结果时为 null */
         public final String source;
+        /** 追加授权同意了：加了范围的新令牌（旧令牌已作废）；其他时候为 null */
+        public final Token token;
 
         public Outcome(Status status, String reason, String source) {
+            this(status, reason, source, null);
+        }
+
+        public Outcome(Status status, String reason, String source, Token token) {
             this.status = status;
             this.reason = reason;
             this.source = source;
+            this.token = token;
         }
 
         public boolean approved() {
@@ -226,13 +259,7 @@ public class IdYrClient {
             if (r.status != 200 || !o.has("uuid") || !o.has("name") || !o.has("access_token")) {
                 throw new IdYrException(r.status, err(o, r.status), "id.yr 拒绝兑换：" + err(o, r.status));
             }
-            long ttl = o.has("expires_in") ? o.get("expires_in").getAsLong() : 3600;
-            Set<String> scopes = new LinkedHashSet<>();
-            if (o.has("scope") && !o.get("scope").getAsString().trim().isEmpty()) {
-                scopes.addAll(Arrays.asList(o.get("scope").getAsString().trim().split(" +")));
-            }
-            return new Token(UUID.fromString(o.get("uuid").getAsString()), o.get("name").getAsString(), o.get("access_token").getAsString(),
-                    now + Math.max(60, Math.min(86400, ttl)) * 1000L, scopes);
+            return token(o, now);
         });
     }
 
@@ -253,14 +280,17 @@ public class IdYrClient {
     /** 建一个确认请求（令牌要有 {@code confirm} / {@code verify} 范围） */
     public CompletableFuture<Ticket> ask(String accessToken, Ask ask) {
         StringBuilder b = new StringBuilder();
-        b.append("type=").append(ask.verify ? "verify" : "confirm");
+        b.append("type=").append(ask.type());
+        if (ask.scope != null) {
+            b.append("&scope=").append(enc(ask.scope));
+        }
         if (ask.title != null) {
             b.append("&title=").append(enc(ask.title));
         }
         for (int i = 0; i < ask.items.size(); i++) {
             b.append("&item").append(i + 1).append('=').append(enc(ask.items.get(i)));
         }
-        b.append("&purpose=").append(purposeCode(ask.purpose)).append("&source=").append(enc(String.valueOf(ask.source)))
+        b.append(ask.scope != null ? "" : "&purpose=" + purposeCode(ask.purpose)).append("&source=").append(enc(String.valueOf(ask.source)))
                 .append("&redirect_uri=").append(enc(ask.redirectUri));
         if (ask.state != null) {
             b.append("&state=").append(enc(ask.state));
@@ -274,23 +304,43 @@ public class IdYrClient {
         });
     }
 
-    /** 核对结果（有结果后只能取一次） */
+    /** 核对结果（有结果后只能取一次；追加授权同意时带新令牌） */
     public CompletableFuture<Outcome> result(String accessToken, String requestId) {
+        long now = System.currentTimeMillis();
         return post("/confirm/result", accessToken, "request=" + enc(requestId)).thenApply(r -> {
             JsonObject o = json(r);
             if (r.status != 200 || !o.has("status")) {
                 throw new IdYrException(r.status, err(o, r.status), "id.yr 核对不了确认结果：" + err(o, r.status));
             }
-            return parseOutcome(o);
+            return parseOutcome(o, now);
         });
     }
 
     /** {@code /confirm/result} 的 JSON → 结果 */
     public static Outcome parseOutcome(JsonObject o) {
+        return parseOutcome(o, System.currentTimeMillis());
+    }
+
+    static Outcome parseOutcome(JsonObject o, long now) {
         String st = o.get("status").getAsString();
         Outcome.Status s = "approved".equals(st) ? Outcome.Status.APPROVED : "pending".equals(st) ? Outcome.Status.PENDING : Outcome.Status.DENIED;
+        Token t = s == Outcome.Status.APPROVED && o.has("access_token") ? token(o, now) : null;
         return new Outcome(s, s == Outcome.Status.DENIED ? (o.has("reason") ? o.get("reason").getAsString() : "denied") : null,
-                o.has("source") ? o.get("source").getAsString() : null);
+                o.has("source") ? o.get("source").getAsString() : null, t);
+    }
+
+    /** {@code /token} 或追加授权结果里的令牌 */
+    static Token token(JsonObject o, long now) {
+        if (!o.has("uuid") || !o.has("name") || !o.has("access_token")) {
+            throw new IdYrException(200, "bad_response", "id.yr 给的令牌不完整");
+        }
+        long ttl = o.has("expires_in") ? o.get("expires_in").getAsLong() : 3600;
+        Set<String> scopes = new LinkedHashSet<>();
+        if (o.has("scope") && !o.get("scope").getAsString().trim().isEmpty()) {
+            scopes.addAll(Arrays.asList(o.get("scope").getAsString().trim().split(" +")));
+        }
+        return new Token(UUID.fromString(o.get("uuid").getAsString()), o.get("name").getAsString(), o.get("access_token").getAsString(),
+                now + Math.max(1, Math.min(86400, ttl)) * 1000L, scopes);
     }
 
     static String purposeCode(ConfirmRequest.Purpose p) {

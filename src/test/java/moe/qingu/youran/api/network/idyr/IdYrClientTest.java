@@ -44,6 +44,27 @@ class IdYrClientTest {
         assertTrue(IdYrClient.reasonText("whatever", false).contains("暂时不可用"));
     }
 
+    /** 追加授权：类型、同意后结果里带新令牌 */
+    @Test
+    void scopeAsks() {
+        IdYrClient.Ask a = IdYrClient.Ask.scope(IdYrClient.VERIFY, null, "https://shop.yr/back", "s");
+        assertEquals("scope", a.type());
+        assertEquals("verify", a.scope);
+        assertFalse(a.verify);
+        assertEquals("verify", IdYrClient.Ask.verify(null, java.util.Collections.<String>emptyList(), null, null, "x", null).type());
+        assertEquals("confirm", IdYrClient.Ask.confirm("t", java.util.Collections.<String>emptyList(), null, null, "x", null).type());
+        java.util.UUID u = java.util.UUID.randomUUID();
+        IdYrClient.Outcome o = IdYrClient.parseOutcome(new JsonParser().parse("{\"type\":\"scope\",\"status\":\"approved\",\"source\":\"fd00::1\","
+                + "\"access_token\":\"new\",\"expires_in\":120,\"scope\":\"confirm verify\",\"uuid\":\"" + u + "\",\"name\":\"Alice\"}").getAsJsonObject(), 1000);
+        assertTrue(o.approved());
+        assertEquals("new", o.token.accessToken);
+        assertEquals(u, o.token.uuid);
+        assertTrue(o.token.has(IdYrClient.VERIFY) && o.token.has(IdYrClient.CONFIRM));
+        assertEquals(121_000, o.token.expiresAt);
+        assertNull(IdYrClient.parseOutcome(new JsonParser().parse("{\"status\":\"approved\"}").getAsJsonObject()).token, "别的类型没有令牌");
+        assertNull(IdYrClient.parseOutcome(new JsonParser().parse("{\"status\":\"denied\",\"access_token\":\"x\"}").getAsJsonObject()).token);
+    }
+
     @Test
     void urlsAndErrors() {
         IdYrClient c = new IdYrClient(null, null, "ID.YR ", true, "platform.180.yr");

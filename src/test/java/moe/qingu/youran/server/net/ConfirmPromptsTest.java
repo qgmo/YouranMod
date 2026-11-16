@@ -142,6 +142,27 @@ class ConfirmPromptsTest {
         assertFalse(b.isDone());
     }
 
+    /** 调用方撤回（id.yr 的“重新弹出”）：客户端的框关掉，同一个人马上能再弹；撤回的框再回应不算 */
+    @Test
+    void cancelledByCaller() {
+        CompletableFuture<ConfirmResult> f = ask();
+        long first = shownIds.get(0);
+        f.cancel(false);
+        CompletableFuture<ConfirmResult> again = ask();
+        assertFalse(again.isDone(), "撤回的不再占着这个玩家");
+        assertEquals(2, shownIds.size());
+        assertTrue(sent.contains("close " + alice + " " + first), "叫客户端关掉撤回的框：" + sent);
+        assertFalse(prompts.answer(alice, first, true), "撤回的框再回应不算");
+        assertTrue(prompts.answer(alice, shownIds.get(1), true));
+        assertTrue(again.join().approved());
+        // 没人再弹时，下一 tick 也会关掉撤回的框
+        CompletableFuture<ConfirmResult> third = ask();
+        third.cancel(false);
+        prompts.tick();
+        assertNull(prompts.pending(alice));
+        assertTrue(sent.contains("close " + alice + " " + shownIds.get(2)));
+    }
+
     @Test
     void forgedAnswersAreIgnored() {
         CompletableFuture<ConfirmResult> f = ask();
