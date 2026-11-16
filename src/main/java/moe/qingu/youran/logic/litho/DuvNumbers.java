@@ -23,6 +23,9 @@ public final class DuvNumbers {
     /** 灌氩（服主 11-16）：每次 10 mB，最多 750 mB */
     public static final int ARGON_PER_FILL = 10;
     public static final int ARGON_MAX_MB = 750;
+    /** 氟、氖的上限（服主 11-16 定）：氟最多 3 个、氖最多 48 个，同氩 750 mB 正好三份最佳配比；到上限后固体装罐机不再收这种元素 */
+    public static final int FLUORINE_MAX = 3;
+    public static final int NEON_MAX = 48;
     /** 每个氟管多少次曝光（服主 11-16：500 次，按小数扣）；腔里的氟按千分之一个记（每次扣 {@value #FLUORINE_MILLI_PER_EXPOSURE}） */
     public static final int FLUORINE_EXPOSURES = 500;
     public static final int MILLI = 1000;

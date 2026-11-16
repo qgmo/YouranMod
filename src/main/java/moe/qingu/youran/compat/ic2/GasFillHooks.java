@@ -14,7 +14,8 @@ import net.minecraft.util.ResourceLocation;
 /**
  * IC2 固体装罐机给激光管充气（服主 11-16），由 {@code mixin.ic2.TileEntityCannerMixin} 在固体装罐模式下调用：
  * <ul>
- *     <li>ArF 激光腔放“罐子”格，输入格每次放一个炼金化学氟元素或氖元素 → 腔里多一个（{@code item.LaserNbt}）；</li>
+ *     <li>ArF 激光腔放“罐子”格，输入格每次放一个炼金化学氟元素或氖元素 → 腔里多一个（{@code item.LaserNbt}）；氟满 3 个、氖满 48 个就不再做
+ *     （服主 11-16），元素不吞；</li>
  *     <li>氦氖激光管放“罐子”格，每次一个氦元素或氖元素，满 250 个（合计）就不再做。</li>
  * </ul>
  * 配方表里登记了这几条（{@code recipe.LithoRecipes}，JEI 与装罐机收不收东西都靠它），产物要按罐子里那一件的数据现算，所以由这里回答。
@@ -47,7 +48,12 @@ public final class GasFillHooks {
                 return CannerReactionHooks.Outcome.NOT_HANDLED;
             }
             ItemLaserCavity item = (ItemLaserCavity) container.getItem();
-            out = item.make(z == FLUORINE ? ItemLaserCavity.spec(container).plusFluorine() : ItemLaserCavity.spec(container).plusNeon());
+            moe.qingu.youran.logic.litho.ExcimerSpec s = ItemLaserCavity.spec(container);
+            // 到上限（服主 11-16：氟 3、氖 48）不再做，元素留在输入格（同氩满了）
+            if (z == FLUORINE ? !s.fluorineRoom() : !s.neonRoom()) {
+                return CannerReactionHooks.Outcome.IDLE;
+            }
+            out = item.make(z == FLUORINE ? s.plusFluorine() : s.plusNeon());
         } else if (container.getItem() instanceof ItemHeNeTube) {
             if (z != HELIUM && z != NEON) {
                 return CannerReactionHooks.Outcome.NOT_HANDLED;

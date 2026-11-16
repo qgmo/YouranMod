@@ -74,6 +74,37 @@ class ExcimerSpecTest {
         assertEquals(1, three.plusFluorine().gasOutput(), EPS);
     }
 
+    /** 氟最多 3 个、氖最多 48 个（服主 11-16）：到上限不再收；氟消耗成小数后能再补，补到 3 为止 */
+    @Test
+    void fluorineAndNeonCaps() {
+        ExcimerSpec s = ExcimerSpec.empty(3);
+        for (int i = 0; i < 3; i++) {
+            assertTrue(s.fluorineRoom());
+            s = s.plusFluorine();
+        }
+        assertEquals(3000, s.fluorineMilli);
+        assertTrue(!s.fluorineRoom());
+        assertEquals(3000, s.plusFluorine().fluorineMilli);
+        for (int i = 0; i < 48; i++) {
+            assertTrue(s.neonRoom());
+            s = s.plusNeon();
+        }
+        assertEquals(48, s.neon);
+        assertTrue(!s.neonRoom());
+        assertEquals(48, s.plusNeon().neon);
+        // 用掉 0.6 个氟（300 次曝光）以后能再放一个，补到正好 3 个
+        for (int i = 0; i < 300; i++) {
+            s = s.afterExposure();
+        }
+        assertEquals(2400, s.fluorineMilli);
+        assertTrue(s.fluorineRoom());
+        s = s.plusFluorine();
+        assertEquals(3000, s.fluorineMilli);
+        assertTrue(!s.fluorineRoom());
+        // 满腔正是三份最佳配比
+        assertEquals(1, new ExcimerSpec(3, DuvNumbers.FLUORINE_MAX * 1000, DuvNumbers.NEON_MAX, DuvNumbers.ARGON_MAX_MB, 0).gasOutput(), EPS);
+    }
+
     /** 灌氩：每次最多 10 mB，到 750 mB 为止 */
     @Test
     void argonFilling() {

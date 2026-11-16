@@ -57,14 +57,24 @@ public final class ExcimerSpec implements LightSpec {
         return new ExcimerSpec(nines, fluorineMilli, neon, argonMb + addMb, used);
     }
 
-    /** 放进一个氟元素 */
-    public ExcimerSpec plusFluorine() {
-        return new ExcimerSpec(nines, fluorineMilli + DuvNumbers.MILLI, neon, argonMb, used);
+    /** 还能放氟：不到 {@value DuvNumbers#FLUORINE_MAX} 个（被消耗成小数后也能再放，补到 3 为止） */
+    public boolean fluorineRoom() {
+        return fluorineMilli < DuvNumbers.FLUORINE_MAX * DuvNumbers.MILLI;
     }
 
-    /** 放进一个氖元素 */
+    /** 还能放氖：不到 {@value DuvNumbers#NEON_MAX} 个 */
+    public boolean neonRoom() {
+        return neon < DuvNumbers.NEON_MAX;
+    }
+
+    /** 放进一个氟元素，最多到 3 个（2.4 个时放一个是 3 个） */
+    public ExcimerSpec plusFluorine() {
+        return new ExcimerSpec(nines, Math.min(DuvNumbers.FLUORINE_MAX * DuvNumbers.MILLI, fluorineMilli + DuvNumbers.MILLI), neon, argonMb, used);
+    }
+
+    /** 放进一个氖元素，最多到 48 个 */
     public ExcimerSpec plusNeon() {
-        return new ExcimerSpec(nines, fluorineMilli, neon + 1, argonMb, used);
+        return new ExcimerSpec(nines, fluorineMilli, Math.min(DuvNumbers.NEON_MAX, neon + 1), argonMb, used);
     }
 
     /** 配比决定的输出（0–1）：最佳为 1，三样同比例放大不变 */
