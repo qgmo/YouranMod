@@ -24,6 +24,7 @@ import net.minecraftforge.fml.relauncher.Side;
  * <ul>
  *   <li>进度：“悠然服务器”（进服就给）、“用冰块包裹我”（穿齐冰制盔甲）、“Money!”（身上有任一种悠然币）、
  *   “这可比钻石要强太多了”（身上有任一种没用过的来自异世的工具）；</li>
+ *   <li>每秒：桶装的三氯氢硅、混合气截纯度、给凋零（{@link ToxicCarry}）；</li>
  *   <li>在主城维度里：掉进虚空（y ≤ 0）传回主城；走进垃圾回收站岛屿时给进度并提示传送点已解锁。</li>
  * </ul>
  * 1.3.4 每 tick 先翻一遍物品栏再看进度完成没有；这里先看进度（一次查表），没完成的才翻物品栏。
@@ -44,6 +45,9 @@ public final class PlayerTickHandler {
             coins = new HashSet<>(Arrays.asList(ModItems.oneYuan, ModItems.oneYuanCoin, ModItems.fiveYuan, ModItems.tenYuan));
             tools = new HashSet<>(Arrays.asList(ModItems.primogemPickaxe, ModItems.primogemAxe, ModItems.primogemSword,
                     ModItems.primogemShovel));
+        }
+        if (player.ticksExisted % 20 == 0) {
+            ToxicCarry.check(player);
         }
         if (!Advancements.isDone(player, Advancements.GET_ICE_FULL) && wearsFullIceArmor(player)) {
             Advancements.grant(player, Advancements.GET_ICE_FULL);
