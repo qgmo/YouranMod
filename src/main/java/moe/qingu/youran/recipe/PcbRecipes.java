@@ -104,6 +104,9 @@ public final class PcbRecipes {
         } else {
             YouranMod.LOG.info("没有 SCP 模组的螺丝刀，不加手工打孔的配方");
         }
+        // 蓝图“主板”“扩展卡”（Claude 定的一版，照汞灯蓝图）：铜板 / 酚醛基板 / 铜板（扩展卡反过来）；蓝色染料 ×3；纸 ×3
+        blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.MOTHERBOARD, "CSC");
+        blueprint(registry, moe.qingu.youran.compat.immersiveengineering.BoardAssemblyNames.EXPANSION, "SCS");
         // EPROM：2764 芯片本体 + 玻璃管（石英小窗）
         ResourceLocation eprom = new ResourceLocation(YouranMod.MODID, "eprom");
         registry.register(new EpromRecipe(eprom));
@@ -115,6 +118,21 @@ public final class PcbRecipes {
                     'S', "plateSteel", 'A', "plateAluminum", 'M', new ItemStack(ieMaterial, 1, 8) /* 铁质机械零件：沉浸工程没登记矿物词典 */,
                     'C', circuitBoards()).setRegistryName(uv));
         }
+    }
+
+    /** 沉浸工程的蓝图物品：第一行 C = 铜板、S = 酚醛基板 */
+    static void blueprint(IForgeRegistry<IRecipe> registry, String category, String top) {
+        Item bp = ForgeRegistries.ITEMS.getValue(new ResourceLocation("immersiveengineering", "blueprint"));
+        if (bp == null) {
+            return;
+        }
+        ItemStack out = new ItemStack(bp);
+        net.minecraft.nbt.NBTTagCompound tag = new net.minecraft.nbt.NBTTagCompound();
+        tag.setString("blueprint", category);
+        out.setTagCompound(tag);
+        ResourceLocation id = new ResourceLocation(YouranMod.MODID, "blueprint_" + category);
+        registry.register(new ShapedOreRecipe(id, out, top, "DDD", "PPP", 'C', "plateCopper", 'S', new ItemStack(ModItems.phenolicSubstrate),
+                'D', "dyeBlue", 'P', new ItemStack(net.minecraft.init.Items.PAPER)).setRegistryName(id));
     }
 
     /** 电路板两种都认：IC2 电路板（矿物词典 circuitBasic）或沉浸工程电路板（material:27，没登记矿物词典） */

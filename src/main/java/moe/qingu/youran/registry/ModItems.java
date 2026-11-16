@@ -102,6 +102,8 @@ public final class ModItems {
     public static Item punchMold;
     public static moe.qingu.youran.item.ItemEprom eprom;
     public static Item uvEraser;
+    /** 主板（服主 11-16）：装了芯片的普通电脑 / 个人电脑主板（元数据 = 种类） */
+    public static moe.qingu.youran.item.ItemMotherboard motherboard;
 
     /** 全部物品，按注册顺序（客户端登记模型用） */
     private static final List<Item> ALL = new ArrayList<>();
@@ -170,7 +172,7 @@ public final class ModItems {
         locatorModule = add(registry, new ItemPeripheral(moe.qingu.youran.api.network.location.LocatorModule.NAME,
                 Peripherals.KIND_LOCATOR, Peripherals.CAP_LOCATION));
         floppyDrive = add(registry, new ItemPeripheral("floppy_drive", Peripherals.KIND_FLOPPY));
-        hanziCard = add(registry, new ItemPeripheral("hanzi_card", Peripherals.KIND_HANZI));
+        hanziCard = add(registry, new moe.qingu.youran.item.ItemHanziCard("hanzi_card", Peripherals.KIND_HANZI));
         Peripherals.register(floppyDrive);
         Peripherals.register(hanziCard);
         Peripherals.register(locatorModule);
@@ -201,6 +203,7 @@ public final class ModItems {
         punchMold = add(registry, new moe.qingu.youran.item.ItemLangTooltip("punch_mold", 1));
         eprom = (moe.qingu.youran.item.ItemEprom) add(registry, new moe.qingu.youran.item.ItemEprom());
         uvEraser = add(registry, itemBlock(ModBlocks.uvEraser));
+        motherboard = (moe.qingu.youran.item.ItemMotherboard) add(registry, new moe.qingu.youran.item.ItemMotherboard());
     }
 
     private static Item itemBlock(Block block) {
