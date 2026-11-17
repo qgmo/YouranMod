@@ -17,6 +17,7 @@ import mezz.jei.api.recipe.IRecipeCategory;
 import mezz.jei.api.recipe.IRecipeWrapper;
 import moe.qingu.youran.YouranMod;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.item.ItemStack;
 
@@ -109,13 +110,19 @@ final class Ic2Categories {
             return icon;
         }
 
+        /** IC2 那张机器图在页面里往右挪多少，让它居中（同 IC2 自己的装罐机页；服主 11-17） */
+        private int shift() {
+            return Math.max(0, (PAGE_WIDTH - super.getBackground().getWidth()) / 2);
+        }
+
         /**
          * IC2 的背景底下接一块放说明（同洗矿机页、精馏塔页）：说明从 IC2 那张图的下沿往下写，页面宽 160，不压在机器图上
-         * （服主 11-17：改良正胶页的说明压在装罐机上）
+         * （服主 11-17：改良正胶页的说明压在装罐机上）。机器图在页面里居中，格子、罐子、进度箭头一起挪。
          */
         @Override
         public IDrawable getBackground() {
             IDrawable ic2 = super.getBackground();
+            int dx = shift();
             return new IDrawable() {
                 @Override
                 public int getWidth() {
@@ -130,14 +137,26 @@ final class Ic2Categories {
                 // IC2 的背景画在不带偏移的 draw(Minecraft) 里（带偏移的那个是空的），两个都要转过去
                 @Override
                 public void draw(Minecraft minecraft) {
+                    GlStateManager.pushMatrix();
+                    GlStateManager.translate(dx, 0, 0);
                     ic2.draw(minecraft);
+                    GlStateManager.popMatrix();
                 }
 
                 @Override
                 public void draw(Minecraft minecraft, int xOffset, int yOffset) {
-                    ic2.draw(minecraft, xOffset, yOffset);
+                    ic2.draw(minecraft, xOffset + dx, yOffset);
                 }
             };
+        }
+
+        /** IC2 的进度箭头也画在机器图里，跟着挪 */
+        @Override
+        public void drawExtras(Minecraft minecraft) {
+            GlStateManager.pushMatrix();
+            GlStateManager.translate(shift(), 0, 0);
+            super.drawExtras(minecraft);
+            GlStateManager.popMatrix();
         }
 
         @Override
@@ -145,20 +164,21 @@ final class Ic2Categories {
             FluidItemRecipe recipe = (FluidItemRecipe) wrapper;
             IGuiFluidStackGroup fluids = layout.getFluidStacks();
             IGuiItemStackGroup items = layout.getItemStacks();
+            int dx = shift();
             if (recipe.inputFluid != null) {
-                fluids.init(0, true, IN_TANK_X, TANK_Y, 12, 47, TANK_CAPACITY, false, tankOverlay);
+                fluids.init(0, true, dx + IN_TANK_X, TANK_Y, 12, 47, TANK_CAPACITY, false, tankOverlay);
                 fluids.set(0, recipe.inputFluid);
             }
             if (recipe.outputFluid != null) {
-                fluids.init(1, false, OUT_TANK_X, TANK_Y, 12, 47, TANK_CAPACITY, false, tankOverlay);
+                fluids.init(1, false, dx + OUT_TANK_X, TANK_Y, 12, 47, TANK_CAPACITY, false, tankOverlay);
                 fluids.set(1, recipe.outputFluid);
             }
             if (!recipe.inputItems.isEmpty()) {
-                items.init(0, true, bottling ? 0 : IN_ITEM_X, bottling ? 0 : IN_ITEM_Y);
+                items.init(0, true, dx + (bottling ? 0 : IN_ITEM_X), bottling ? 0 : IN_ITEM_Y);
                 items.set(0, recipe.inputItems);
             }
             if (!recipe.outputItems.isEmpty()) {
-                items.init(1, false, OUT_ITEM_X, OUT_ITEM_Y);
+                items.init(1, false, dx + OUT_ITEM_X, OUT_ITEM_Y);
                 items.set(1, recipe.outputItems);
             }
         }
