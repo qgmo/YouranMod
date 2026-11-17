@@ -37,8 +37,18 @@ class MixinSetupTest {
                 "mixins.youranmod.tic.json"), MixinSetup.configs(true, true, true, true));
         assertEquals(Collections.singletonList("mixins.youranmod.tic.json"), MixinSetup.configs(false, false, true, true));
         assertEquals(MixinSetup.configs(true, true, false), MixinSetup.configs(true, true, false, false));
-        assertEquals(4, MixinSetup.MAIN_CLASSES.length);
+        assertEquals(5, MixinSetup.MAIN_CLASSES.length);
         assertEquals(MixinSetup.TIC_MAIN_CLASS, MixinSetup.MAIN_CLASSES[3]);
+    }
+
+    /** 暮色森林（拆解台）的配置只看暮色森林装没装，排在最后；核心插件也按它的主类把 jar 提前加进类路径 */
+    @Test
+    void tfConfig() {
+        assertEquals(java.util.Arrays.asList("mixins.youranmod.ic2.json", "mixins.youranmod.ie.json", "mixins.youranmod.ip.json",
+                "mixins.youranmod.tic.json", "mixins.youranmod.tf.json"), MixinSetup.configs(true, true, true, true, true));
+        assertEquals(Collections.singletonList("mixins.youranmod.tf.json"), MixinSetup.configs(false, false, false, false, true));
+        assertEquals(MixinSetup.configs(true, true, true, true), MixinSetup.configs(true, true, true, true, false));
+        assertEquals(MixinSetup.TF_MAIN_CLASS, MixinSetup.MAIN_CLASSES[4]);
     }
 
     /** 核心插件在 mods 与 mods/1.12.2 里按主类找 IC2 的 jar */

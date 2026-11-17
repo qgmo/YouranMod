@@ -23,6 +23,8 @@ public final class MixinSetup {
     public static final String IP_CONFIG = "mixins.youranmod.ip.json";
     /** 修补匠魂的类（浇铸台收带 NBT 的流体）：没装匠魂时不注册 */
     public static final String TIC_CONFIG = "mixins.youranmod.tic.json";
+    /** 修补暮色森林的类（拆解台不拆会刷物、洗数据的东西）：没装暮色森林时不注册 */
+    public static final String TF_CONFIG = "mixins.youranmod.tf.json";
     /** IC2 的主类，用来认出它的 jar */
     static final String IC2_MAIN_CLASS = "ic2/core/IC2.class";
     /** 沉浸工程的主类 */
@@ -31,8 +33,10 @@ public final class MixinSetup {
     static final String IP_MAIN_CLASS = "flaxbeard/immersivepetroleum/ImmersivePetroleum.class";
     /** 匠魂的主类 */
     static final String TIC_MAIN_CLASS = "slimeknights/tconstruct/TConstruct.class";
-    /** 要修补的模组的主类，核心插件按这些找 jar（顺序同 {@link #configs(boolean, boolean, boolean, boolean)} 的参数） */
-    static final String[] MAIN_CLASSES = {IC2_MAIN_CLASS, IE_MAIN_CLASS, IP_MAIN_CLASS, TIC_MAIN_CLASS};
+    /** 暮色森林的主类 */
+    static final String TF_MAIN_CLASS = "twilightforest/TwilightForestMod.class";
+    /** 要修补的模组的主类，核心插件按这些找 jar（顺序同 {@link #configs(boolean, boolean, boolean, boolean, boolean)} 的参数） */
+    static final String[] MAIN_CLASSES = {IC2_MAIN_CLASS, IE_MAIN_CLASS, IP_MAIN_CLASS, TIC_MAIN_CLASS, TF_MAIN_CLASS};
 
     private MixinSetup() {
     }
@@ -41,7 +45,8 @@ public final class MixinSetup {
     public static List<String> lateConfigs() {
         ClassLoader loader = MixinSetup.class.getClassLoader();
         return configs(present(loader, IC2_CONFIG, IC2_MAIN_CLASS), present(loader, IE_CONFIG, IE_MAIN_CLASS),
-                present(loader, IP_CONFIG, IP_MAIN_CLASS), present(loader, TIC_CONFIG, TIC_MAIN_CLASS));
+                present(loader, IP_CONFIG, IP_MAIN_CLASS), present(loader, TIC_CONFIG, TIC_MAIN_CLASS),
+                present(loader, TF_CONFIG, TF_MAIN_CLASS));
     }
 
     private static boolean present(ClassLoader loader, String config, String mainClass) {
@@ -56,8 +61,12 @@ public final class MixinSetup {
         return configs(ic2, ie, ip, false);
     }
 
-    /** 沉浸原油的配置要沉浸工程也在（它的类继承沉浸工程的类）；匠魂的单独看 */
     static List<String> configs(boolean ic2, boolean ie, boolean ip, boolean tic) {
+        return configs(ic2, ie, ip, tic, false);
+    }
+
+    /** 沉浸原油的配置要沉浸工程也在（它的类继承沉浸工程的类）；匠魂、暮色森林的单独看 */
+    static List<String> configs(boolean ic2, boolean ie, boolean ip, boolean tic, boolean tf) {
         List<String> configs = new ArrayList<>();
         if (ic2) {
             configs.add(IC2_CONFIG);
@@ -70,6 +79,9 @@ public final class MixinSetup {
         }
         if (tic) {
             configs.add(TIC_CONFIG);
+        }
+        if (tf) {
+            configs.add(TF_CONFIG);
         }
         return Collections.unmodifiableList(configs);
     }

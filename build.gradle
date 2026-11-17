@@ -72,6 +72,12 @@ if (!ipJar.isFile()) {
     throw new GradleException("缺少沉浸原油：把整合包里的 ${property('ip_jar')} 放到 libs/（只编译，不进仓库，见 README）")
 }
 
+// 暮色森林的 jar（只编译）：同沉浸原油，放在 libs/ 下，文件名见 gradle.properties 的 tf_jar
+def tfJar = file("libs/${property('tf_jar')}")
+if (!tfJar.isFile()) {
+    throw new GradleException("缺少暮色森林：把整合包里的 ${property('tf_jar')} 放到 libs/（只编译，不进仓库，见 README）")
+}
+
 // 家具 fork 的 MineBay 上架接口的编译用替身（src/minebayApi，见里面的 package-info）：家具依赖 YouranMod，YouranMod 不能反过来依赖家具的 jar。
 // 只给 compat.minebay 编译用，不打包、不上运行时；运行时用家具里的真类（没装家具时不加载 compat.minebay）
 sourceSets {
@@ -106,6 +112,8 @@ dependencies {
     // 沉浸原油（只编译、不打包）：仓库没有许可证、也不在 Maven 上，不能放进本仓库；把整合包里的 jar 放到 libs/（不进仓库，见 README）。
     // 只有 compat.immersivepetroleum 与 mixin.immersivepetroleum 引用，没装时不注册 Mixin、不加载这些类
     compileOnly rfg.deobf(files(ipJar))
+    // 暮色森林 3.11.1021（与整合包同版本，只编译、不打包）：只有 mixin.twilightforest（拆解台）引用，没装暮色森林时不注册这个 Mixin
+    compileOnly rfg.deobf(files(tfJar))
     // 匠魂 2.13.0.183 与 Mantle 1.3.3.55（与整合包同版本）：只编译、不打包；只有 compat.tconstruct 引用（浇铸台的事件、合金与浇铸配方），
     // 没装匠魂时不加载这些类
     compileOnly(rfg.deobf('slimeknights:TConstruct:1.12.2-2.13.0.183')) { transitive = false }
