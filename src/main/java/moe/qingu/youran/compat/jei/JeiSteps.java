@@ -68,7 +68,7 @@ final class JeiSteps {
         ItemStack lamp = new ItemStack(ModItems.mercuryLamp);
         lamp.setTagCompound(moe.qingu.youran.item.CreativeStandards.lamp());
         String note = I18n.format("youranmod.jei.uv_eraser.note");
-        for (BoardType t : BoardType.values()) {
+        for (BoardType t : BoardType.circuits()) {  // 有自己线路的几种；家具电脑主板没有底片、光板
             List<ItemStack> films = Collections.singletonList(new ItemStack(ModItems.pcbFilm, 1, t.id));
             List<ItemStack> coated = Arrays.asList(new ItemStack(ModItems.pcb, 1, PcbStage.COATED), new ItemStack(ModItems.pcb, 1, PcbStage.COATED_SPOILED));
             List<ItemStack> exposed = Arrays.asList(new ItemStack(ModItems.pcb, 1, PcbStage.afterExposure(PcbStage.COATED, t)),
@@ -108,7 +108,7 @@ final class JeiSteps {
     /** 说明页（ingredient info）：没有地方写配方的几样 */
     static List<ItemStack> etchedBoards() {
         List<ItemStack> l = new ArrayList<>();
-        for (BoardType t : BoardType.values()) {
+        for (BoardType t : BoardType.circuits()) {  // 有自己线路的几种；家具电脑主板没有底片、光板
             l.add(new ItemStack(ModItems.pcb, 1, PcbStage.etched(t)));
         }
         return l;

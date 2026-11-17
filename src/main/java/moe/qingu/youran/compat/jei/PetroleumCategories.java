@@ -40,7 +40,7 @@ final class PetroleumCategories {
         private static final int OUT_X = 112;
         private static final int TANK_Y = 21;
         private static final int TANK_W = 16;
-        private static final int TANK_H = 47;
+        private static final int TANK_H = TankSegments.TANK_HEIGHT;
 
         private final String uid;
         private final CropBackground background;
@@ -98,15 +98,19 @@ final class PetroleumCategories {
                 java.util.List<net.minecraftforge.fluids.FluidStack> outs = new java.util.ArrayList<>();
                 outs.add(recipe.outputFluid);
                 outs.addAll(recipe.extraOutputFluids);
-                int total = 0;
-                for (net.minecraftforge.fluids.FluidStack f : outs) {
-                    total += f.amount;
+                int[] amounts = new int[outs.size()];
+                for (int i = 0; i < amounts.length; i++) {
+                    amounts[i] = outs.get(i).amount;
                 }
+                int[] heights = TankSegments.split(amounts);
                 int y = TANK_Y - CROP_Y + TANK_H;
                 for (int i = 0; i < outs.size(); i++) {
-                    int h = outs.size() == 1 ? TANK_H : Math.max(4, TANK_H * outs.get(i).amount / total);
+                    int h = heights[i];
                     y -= h;
-                    fluids.init(1 + i, false, OUT_X + dx, y, TANK_W, h, outs.get(i).amount, false, i == 0 ? tankOverlay : null);
+                    // 刻度覆盖图是整个罐子那么高，挂在最上面那一格（它的上沿就是罐子上沿、最后画），盖住整个罐子；
+                    // 挂在下面的格子上会从那一格往下伸出罐子
+                    boolean top = i == outs.size() - 1;
+                    fluids.init(1 + i, false, OUT_X + dx, y, TANK_W, h, outs.get(i).amount, false, top ? tankOverlay : null);
                     fluids.set(1 + i, outs.get(i));
                 }
             }
