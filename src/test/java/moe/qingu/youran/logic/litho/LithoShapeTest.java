@@ -281,6 +281,42 @@ class LithoShapeTest {
         assertTrue(gaps.isEmpty(), "外壳有缝：" + gaps);
     }
 
+    /**
+     * 没有 Z-fighting（服主 11-17：光刻机最左边模型闪）：两个长方体在同一平面、同一朝向都画了面，且有重叠面积，
+     * 显卡分不清谁在前，看起来就会闪。相邻两块各画一半（边贴边、不重叠）是可以的。
+     */
+    @Test
+    void noCoplanarOverlappingFaces() {
+        List<Box> boxes = LithoShape.boxes();
+        List<String> fights = new ArrayList<>();
+        for (int a = 0; a < boxes.size(); a++) {
+            Box p = boxes.get(a);
+            for (int b = a + 1; b < boxes.size(); b++) {
+                Box q = boxes.get(b);
+                for (Side s : Side.values()) {
+                    if (p.tex(s) == null || q.tex(s) == null) {
+                        continue;
+                    }
+                    int ax = s.axis;
+                    float pp = s.sign > 0 ? p.max[ax] : p.min[ax];
+                    float qp = s.sign > 0 ? q.max[ax] : q.min[ax];
+                    if (Math.abs(pp - qp) > 1e-4f) {
+                        continue;
+                    }
+                    int t1 = (ax + 1) % 3;
+                    int t2 = (ax + 2) % 3;
+                    float w = Math.min(p.max[t1], q.max[t1]) - Math.max(p.min[t1], q.min[t1]);
+                    float h = Math.min(p.max[t2], q.max[t2]) - Math.max(p.min[t2], q.min[t2]);
+                    if (w > 1e-3f && h > 1e-3f) {
+                        fights.add(s + " 面 " + ax + "=" + pp + "：(" + p.min[0] + "," + p.min[1] + "," + p.min[2] + ")-(" + p.max[0] + "," + p.max[1] + "," + p.max[2]
+                                + ") 与 (" + q.min[0] + "," + q.min[1] + "," + q.min[2] + ")-(" + q.max[0] + "," + q.max[1] + "," + q.max[2] + ") 重叠 " + w + "×" + h);
+                    }
+                }
+            }
+        }
+        assertTrue(fights.isEmpty(), fights.size() + " 处同一平面重叠：\n" + String.join("\n", fights));
+    }
+
     private static void fillRange(boolean[] fill, int ny, int nz, float[] min, float[] max, int r) {
         for (int x = Math.round(min[0] * r); x < Math.round(max[0] * r); x++) {
             for (int y = Math.round(min[1] * r); y < Math.round(max[1] * r); y++) {

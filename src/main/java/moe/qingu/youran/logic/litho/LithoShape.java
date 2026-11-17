@@ -269,8 +269,8 @@ public final class LithoShape {
     /** 外框：底边、顶边、竖柱（贴着外轮廓，面板都往里缩 1 像素，看起来是一台机器的骨架） */
     private static void frame() {
         // 底边（门洞那一格不放，进出不绊脚）
-        box(0, 0, 0, 48, 3, 2).all(FRAME);
-        box(64, 0, 0, 112, 3, 2).all(FRAME);
+        box(0, 0, 0, 46, 3, 2).all(FRAME);
+        box(66, 0, 0, 112, 3, 2).all(FRAME);
         box(0, 0, 62, 112, 3, 64).all(FRAME);
         box(0, 0, 2, 2, 3, 62).all(FRAME);
         box(110, 0, 2, 112, 3, 62).all(FRAME);
@@ -279,15 +279,15 @@ public final class LithoShape {
         box(0, 46, 62, 112, 48, 64).all(FRAME);
         box(0, 46, 2, 2, 48, 62).all(FRAME);
         box(110, 46, 2, 112, 48, 62).all(FRAME);
-        // 正面、背面的竖柱：两端与分段处
+        // 正面、背面的竖柱：两端与分段处（顶面被顶边盖住，不画，免得和面板的顶面叠在同一平面上闪）
         for (float x : new float[]{0, 31, 79, 110}) {
-            box(x, 3, 0, x + 2, 46, 2).all(FRAME);
-            box(x, 3, 62, x + 2, 46, 64).all(FRAME);
+            box(x, 3, 0, x + 2, 46, 2).all(FRAME).no(Side.UP);
+            box(x, 3, 62, x + 2, 46, 64).all(FRAME).no(Side.UP);
         }
         // 左端、右端中间的竖柱
-        box(0, 3, 15, 2, 46, 17).all(FRAME);
-        box(0, 3, 47, 2, 46, 49).all(FRAME);
-        box(110, 3, 47, 112, 46, 49).all(FRAME);
+        box(0, 3, 15, 2, 46, 17).all(FRAME).no(Side.UP);
+        box(0, 3, 47, 2, 46, 49).all(FRAME).no(Side.UP);
+        box(110, 3, 47, 112, 46, 49).all(FRAME).no(Side.UP);
     }
 
     /** 炉段（w0–w1）：正面炉门、控制箱，中间强化高炉砖炉膛，背面散热器（冷凝器）和两个流体口 */
@@ -298,11 +298,11 @@ public final class LithoShape {
         box(16, 3, 1, 31, 16, 16).front(GAUGE).top(PANEL).right(PANEL);
         // 第 1 层：两扇炉门（黄黑警示条的门框）
         box(1, 16, 2, 31, 32, 16).front(DOOR).left(PANEL).right(PANEL);
-        box(1, 16, 1, 31, 18, 2).all(HAZARD);
-        box(1, 30, 1, 31, 32, 2).all(HAZARD);
-        box(15, 18, 1, 17, 30, 2).all(HAZARD);
-        box(1, 18, 1, 2, 30, 2).all(HAZARD);
-        box(30, 18, 1, 31, 30, 2).all(HAZARD);
+        // 背面贴着门板，不画（和左边立柱的背面同在 z = 2）；最左一条整个埋在立柱里，不放
+        box(1, 16, 1, 31, 18, 2).all(HAZARD).no(Side.BACK);
+        box(1, 30, 1, 31, 32, 2).all(HAZARD).no(Side.BACK);
+        box(15, 18, 1, 17, 30, 2).all(HAZARD).no(Side.BACK);
+        box(30, 18, 1, 31, 30, 2).all(HAZARD).no(Side.BACK);
         box(11, 21, 0, 13, 27, 2).all(FRAME).deco();
         box(19, 21, 0, 21, 27, 2).all(FRAME).deco();
         // 第 2 层：散热百叶
@@ -339,9 +339,9 @@ public final class LithoShape {
         box(36, 38, 10, 76, 40, 12).all(TUBE_YELLOW).deco();
         // 工作台（对准台那一排）：柜体、台面、背板、右边隔板
         box(32, 0, 17, 80, 16, 32).front(DESK_FRONT).top(DESK_TOP);
-        box(32, 16, 16, 80, 18, 32).top(DESK_TOP).front(FRAME).bottom(FRAME);
+        box(32, 16, 16, 79, 18, 32).top(DESK_TOP).front(FRAME).bottom(FRAME);
         box(32, 18, 31, 79, 32, 32).front(PANEL_LIGHT).top(FRAME);
-        box(79, 16, 16, 80, 32, 48).left(PANEL_LIGHT).right(BENCH).front(FRAME);
+        box(79, 16, 16, 80, 32, 48).left(PANEL_LIGHT).right(BENCH).front(FRAME).bottom(FRAME);
         // 左：掩模架；右：操作台与屏幕
         box(34, 18, 22, 46, 30, 30).front(MASK_RACK).sides(PANEL).front(MASK_RACK).top(PANEL);
         box(66, 18, 18, 78, 23, 30).back(PANEL).front(CONSOLE).top(fit(OWN + "console", 0, 0, 16, 6)).left(PANEL).right(PANEL);
@@ -372,7 +372,9 @@ public final class LithoShape {
         box(57, 18.5f, 17.5f, 59, 20.5f, 19).all(KNOB).deco();
         // 显微镜：右边的立柱、悬臂上的镜头座、两个物镜、两个目镜（伸向站在小间里的人）。
         // 镜头座偏右、贴着掩模前沿：让开正中，光源的光束从灯口直照到掩模（见 LightSourceRenderer），站在小间左半边抬头能看见灯口
-        box(60, 20, 17, 62, 29, 20).all(MICRO);
+        // 立柱穿过悬臂的那一段在悬臂里面，分成上下两截，免得右面与悬臂的右面叠在同一平面上
+        box(60, 20, 17, 62, 25.5f, 20).all(MICRO).no(Side.UP);
+        box(60, 28.5f, 17, 62, 29, 20).all(MICRO);
         box(55, 25.5f, 16, 62, 28.5f, 20.5f).all(MICRO);
         box(56, 24.5f, 17.5f, 58, 25.5f, 19.5f).all(LENS).deco();
         box(59, 24.5f, 17.5f, 61, 25.5f, 19.5f).all(LENS).deco();
@@ -405,8 +407,10 @@ public final class LithoShape {
         box(83, 16, 22, 93, 19, 34).sides(TANK).top(TANK_RINSE).deco();
         box(85, 16, 38, 93, 22, 46).all(CASSETTE).deco();
         // 玻璃挡板：正面一整块（中间一根竖框、一根拉手），右端两块
-        box(80, 16, 0, 110, 18, 2).all(FRAME);
-        box(80, 18, 0.75f, 110, 32, 1.25f).all(GLASS_CLEAR).glass();
+        box(81, 16, 0, 110, 18, 2).all(FRAME);
+        // 玻璃分成两块，中间让拉手竖框隔开（玻璃不穿过竖框，免得上下面与竖框叠在同一平面上）
+        box(80, 18, 0.75f, 95, 32, 1.25f).all(GLASS_CLEAR).glass();
+        box(97, 18, 0.75f, 110, 32, 1.25f).all(GLASS_CLEAR).glass();
         box(95, 18, 0.5f, 97, 32, 1.5f).all(FRAME);
         box(84, 22, 0, 107, 23, 0.75f).all(FRAME).deco();
         box(110, 16, 2, 112, 18, 47).all(FRAME);
