@@ -18,6 +18,8 @@ import net.minecraft.nbt.NBTTagCompound;
  * 内存（{@code Model:"4164"}）没有 {@code StdFreq}、{@code MinFreq}、{@code MaxAdjFreq}；{@code MaxFreq} 照样有（存取时间是它的倒数）。
  * 报废的芯片 {@code Scrapped:1b}、{@code ScrapReason}（resolution / alignment / defect / exposed_resist），没有三项指标。
  * 涂过变质（已曝光）光刻胶的，{@code Made} 里另记 {@code ExposedResist:1b}。
+ * 装进电脑开过机的 CPU 另记 {@code Used}（长整数，已开机秒数，{@code api.chip.CpuChip#USED}）；在电脑里用坏的报废原因是
+ * {@code worn_out}（寿命用完）、{@code overheat}（过热烧坏），见 {@code api.chip.ChipWear}。
  */
 public final class ChipNbt {
     public static final String SERIAL = "Serial";
