@@ -13,8 +13,9 @@ import java.util.Map;
 import java.util.function.Predicate;
 
 /**
- * 180.yr 上的网站目录（开服时建好，之后不变，任意线程读）：模组登记的导航信息（{@code YouranNetworkApi.registerNavigation}）、
- * YouranMod 替别人写的兜底项、配置里另加的，去掉配置里隐藏的和在 DNS 里查不到的。搜索按名字、域名、一句话。
+ * 180.yr 上的网站目录（开服时建好，任意线程读）：模组登记的导航信息（{@code YouranNetworkApi.registerNavigation}）、
+ * YouranMod 替别人写的兜底项、配置里另加的，去掉配置里隐藏的；在 DNS 里查不到的每次用时现查、不显示
+ * （域名在运行中注册、删除，导航跟着变）。搜索按名字、域名、一句话。
  */
 final class NavDirectory {
     /** 一个网站 */
@@ -46,21 +47,34 @@ final class NavDirectory {
         }
     }
 
-    private final List<Site> sites;
+    private final List<Site> candidates;
+    private final Predicate<String> exists;
 
-    private NavDirectory(List<Site> sites) {
-        this.sites = Collections.unmodifiableList(sites);
+    private NavDirectory(List<Site> candidates, Predicate<String> exists) {
+        this.candidates = Collections.unmodifiableList(candidates);
+        this.exists = exists;
     }
 
     static NavDirectory of(List<Site> sites) {
-        return new NavDirectory(new ArrayList<>(sites));
+        return new NavDirectory(new ArrayList<>(sites), d -> true);
+    }
+
+    /** 现在查得到的网站（按登记顺序） */
+    private List<Site> sites() {
+        List<Site> out = new ArrayList<>();
+        for (Site s : candidates) {
+            if (exists.test(s.domain)) {
+                out.add(s);
+            }
+        }
+        return out;
     }
 
     /**
      * @param decls  模组登记的（按登记顺序；同一域名先登记的算，兜底的让给非兜底的）
      * @param extra  配置里另加的（{@code [*]域名|分类|名字|一句话}，覆盖模组登记的）
      * @param hidden 配置里隐藏的域名
-     * @param exists 域名（A-label）在 DNS 里查不查得到
+     * @param exists 域名（A-label）在 DNS 里查不查得到（每次用目录时现查）
      */
     static NavDirectory build(List<Decl> decls, String[] extra, String[] hidden, Predicate<String> exists, List<String> problems) {
         Map<String, Decl> byName = new LinkedHashMap<>();
@@ -92,11 +106,9 @@ final class NavDirectory {
         }
         List<Site> out = new ArrayList<>();
         for (Decl d : byName.values()) {
-            if (exists.test(d.domain)) {
-                out.add(new Site(d.domain, d.info));
-            }
+            out.add(new Site(d.domain, d.info));
         }
-        return new NavDirectory(out);
+        return new NavDirectory(out, exists);
     }
 
     /** 配置里的一行：{@code [*]域名|分类|名字|一句话} */
@@ -122,13 +134,19 @@ final class NavDirectory {
         return new Decl(n, featured ? info.featured() : info, false);
     }
 
+    /** 登记了的（不管现在查不查得到） */
+    int candidateCount() {
+        return candidates.size();
+    }
+
     List<Site> all() {
-        return sites;
+        return Collections.unmodifiableList(sites());
     }
 
     /** “名站导航”格子：按分栏顺序，同一分栏按登记顺序 */
     List<Site> featured() {
         List<Site> out = new ArrayList<>();
+        List<Site> sites = sites();
         for (SiteInfo.Category c : SiteInfo.Category.values()) {
             for (Site s : sites) {
                 if (s.info.featured && s.info.category == c) {
@@ -145,7 +163,7 @@ final class NavDirectory {
         for (SiteInfo.Category c : SiteInfo.Category.values()) {
             m.put(c, new ArrayList<Site>());
         }
-        for (Site s : sites) {
+        for (Site s : sites()) {
             m.get(s.info.category).add(s);
         }
         return m;
@@ -165,6 +183,7 @@ final class NavDirectory {
             return out;
         }
         String[] words = q.split(" ");
+        List<Site> sites = sites();
         List<int[]> scored = new ArrayList<>();
         for (int i = 0; i < sites.size(); i++) {
             Site s = sites.get(i);

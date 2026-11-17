@@ -1,7 +1,6 @@
 package moe.qingu.youran.network;
 
 import moe.qingu.youran.api.network.DimensionNetwork;
-import moe.qingu.youran.api.network.DnsZone;
 import moe.qingu.youran.api.network.HostService;
 import moe.qingu.youran.api.network.RawHostService;
 import moe.qingu.youran.api.network.SiteInfo;
@@ -21,13 +20,9 @@ import java.util.regex.Pattern;
 public final class NetworkRegistry {
     /** 登记名：模组 ID + 冒号 + 名字（如 {@code cfm:minebay}） */
     public static final Pattern KEY = Pattern.compile("[a-z0-9_.-]{1,64}:[a-z0-9_./-]{1,64}");
-    /** 顶级域：字母、数字、连字符，不以连字符开头或结尾 */
-    public static final Pattern TLD = Pattern.compile("[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?");
 
     private static final List<DatacenterDecl> datacenters = new ArrayList<>();
     private static final List<HostDecl> hosts = new ArrayList<>();
-    private static final List<TldDecl> tlds = new ArrayList<>();
-    private static final List<NameDecl> names = new ArrayList<>();
     private static final Map<Integer, DimensionNetwork> dimensionNetworks = new HashMap<>();
     private static final List<NavDecl> navs = new ArrayList<>();
 
@@ -67,28 +62,6 @@ public final class NetworkRegistry {
         }
     }
 
-    public static final class TldDecl {
-        public final String tld;
-        public final String hostKey;
-        public final DnsZone zone;
-
-        TldDecl(String tld, String hostKey, DnsZone zone) {
-            this.tld = tld;
-            this.hostKey = hostKey;
-            this.zone = zone;
-        }
-    }
-
-    public static final class NameDecl {
-        public final String name;
-        public final String hostKey;
-
-        NameDecl(String name, String hostKey) {
-            this.name = name;
-            this.hostKey = hostKey;
-        }
-    }
-
     /** 导航信息（浏览器主页 180.yr 用） */
     public static final class NavDecl {
         /** 域名（A-label） */
@@ -124,14 +97,6 @@ public final class NetworkRegistry {
         hosts.add(new HostDecl(key, datacenter, fixedHost, null, service));
     }
 
-    public static synchronized void addTld(String tld, String hostKey, DnsZone zone) {
-        tlds.add(new TldDecl(tld, hostKey, zone));
-    }
-
-    public static synchronized void addName(String name, String hostKey) {
-        names.add(new NameDecl(name, hostKey));
-    }
-
     public static synchronized void putDimensionNetwork(int dimension, DimensionNetwork network) {
         dimensionNetworks.put(dimension, network);
     }
@@ -142,14 +107,6 @@ public final class NetworkRegistry {
 
     public static synchronized List<HostDecl> hosts() {
         return Collections.unmodifiableList(new ArrayList<>(hosts));
-    }
-
-    public static synchronized List<TldDecl> tlds() {
-        return Collections.unmodifiableList(new ArrayList<>(tlds));
-    }
-
-    public static synchronized List<NameDecl> names() {
-        return Collections.unmodifiableList(new ArrayList<>(names));
     }
 
     public static synchronized Map<Integer, DimensionNetwork> dimensionNetworks() {

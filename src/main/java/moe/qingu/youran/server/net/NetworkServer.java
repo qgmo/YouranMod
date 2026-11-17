@@ -28,8 +28,11 @@ import moe.qingu.youran.network.NetworkBackend;
 import moe.qingu.youran.network.NetworkHooks;
 import moe.qingu.youran.network.NetworkRegistry;
 import moe.qingu.youran.network.ServerNetworkModule;
-import moe.qingu.youran.server.net.service.AuthoritativeDnsServer;
-import moe.qingu.youran.server.net.service.DnsZoneData;
+import moe.qingu.youran.api.network.dns.DefaultRegistrar;
+import moe.qingu.youran.api.network.dns.DnsRegistry;
+import moe.qingu.youran.api.network.dns.DnsServer;
+import moe.qingu.youran.api.network.dns.Registration;
+import moe.qingu.youran.network.DnsState;
 import moe.qingu.youran.server.net.service.NtpServer;
 import moe.qingu.youran.server.net.service.RecursiveResolver;
 import moe.qingu.youran.server.net.service.TestWebsite;
@@ -78,6 +81,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     static final String HOST_NTP = "youranmod:ntp";
     static final String HOST_ROOT_DNS = "youranmod:dns-root";
     static final String HOST_YR_DNS = "youranmod:dns-yr";
+    /** YouranMod 自己网站（test.yr、pay.yr、180.yr……）的 DNS：这些二级域名以模组身份注册在 .yr 下，委派给它 */
+    static final String HOST_SITES_DNS = "youranmod:dns-sites";
+    /** YouranMod 注册域名用的模组身份 */
+    static final String MOD_ID = "youranmod";
     static final String HOST_TEST = "youranmod:test";
     /** 人机验证（captcha.yr，服主 11-15） */
     static final String HOST_CAPTCHA = "youranmod:captcha";
@@ -97,6 +104,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     static final long PART_NTP = 0x123;
     static final long PART_ROOT_DNS = 0x1_0053L;
     static final long PART_YR_DNS = 0x2_0053L;
+    static final long PART_SITES_DNS = 0x3_0053L;
     /** 一个玩家在 Netty 线程上排进网络线程、还没处理的包最多这么多；再多的直接丢掉（防止一个客户端塞满队列） */
     static final int MAX_QUEUED_PER_PLAYER = 256;
 
@@ -128,18 +136,17 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private moe.qingu.youran.server.net.nav.NavServer nav;
     /** 每个玩家请位置的频率（主线程） */
     private final SourceLimiter locationLimit = new SourceLimiter(0.5, 3, 4096);
-    /** YouranMod 自己的 .yr / .com 名字（A-label）→ 地址（开服时算好，任意线程读） */
-    private volatile Map<String, Ipv6Address> nameAddresses = Collections.emptyMap();
+    /** .yr、.com 的注册局，YouranMod 自己网站的 DNS（网络线程上建好；没建起来为 null） */
+    private volatile DefaultRegistrar yrRegistrar;
+    private volatile DefaultRegistrar comRegistrar;
+    private volatile DnsServer sitesDns;
+    private File worldDirectory;
     private final Map<String, NetStack> hostStacks = new LinkedHashMap<>();
     /** 原始主机（登记名 → 端口）；开服时在网络线程上填，任意线程读 */
     private final Map<String, RawHostPort> rawHosts = new ConcurrentHashMap<>();
     private final Set<CompletableFuture<?>> mainThreadTasks = ConcurrentHashMap.newKeySet();
     private final Map<UUID, AtomicInteger> queued = new ConcurrentHashMap<>();
     private final AtomicLong overflowDrops = new AtomicLong();
-    private final List<String> tlds = new ArrayList<>();
-    private final Map<String, String> names = new LinkedHashMap<>();
-    /** 每台主机的域名（HTTPS 证书用） */
-    private final Map<String, List<String>> hostNames = new LinkedHashMap<>();
     /** 中间 CA 签好的叶子证书；没配中间 CA 时为 null（只有 HTTP） */
     private LeafCache leafCache;
     private Ipv6Address routerAddress;
@@ -156,6 +163,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             return;
         }
         this.server = server;
+        this.worldDirectory = server.getWorld(0).getSaveHandler().getWorldDirectory();
         NetworkSaveData data = NetworkSaveData.get(server.getWorld(0));
         table = data.table;
         List<String> problems = new ArrayList<>();
@@ -194,6 +202,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_NTP, PART_NTP, dc));
         hostRequests.add(new AllocationTable.Request(HOST_ROOT_DNS, PART_ROOT_DNS, dc));
         hostRequests.add(new AllocationTable.Request(HOST_YR_DNS, PART_YR_DNS, dc));
+        hostRequests.add(new AllocationTable.Request(HOST_SITES_DNS, PART_SITES_DNS, dc));
         hostRequests.add(new AllocationTable.Request(HOST_TEST, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_CAPTCHA, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_LOCATION, -1, dc));
@@ -227,70 +236,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         resolverAddress = hostAddresses.get(HOST_RESOLVER);
         ntpAddress = hostAddresses.get(HOST_NTP);
 
-        // DNS：顶级域与名字
-        Map<String, NetworkRegistry.TldDecl> tldDecls = new LinkedHashMap<>();
-        for (NetworkRegistry.TldDecl t : NetworkRegistry.tlds()) {
-            if (t.tld.equals("yr") || t.tld.equals("com")) {
-                LOG.warn("游戏内网络：顶级域 .{} 是 YouranMod 的，{} 不能登记", t.tld, t.hostKey);
-            } else if (tldDecls.containsKey(t.tld)) {
-                LOG.warn("游戏内网络：顶级域 .{} 登记了两次，后一次（{}）不算", t.tld, t.hostKey);
-            } else if (!hostAddresses.containsKey(t.hostKey)) {
-                LOG.warn("游戏内网络：顶级域 .{} 的权威服务器 {} 没有分到地址，不登记", t.tld, t.hostKey);
-            } else {
-                tldDecls.put(t.tld, t);
-            }
-        }
-        Map<String, Ipv6Address> yrRecords = new LinkedHashMap<>();
-        Map<String, Ipv6Address> comRecords = new LinkedHashMap<>();
-        yrRecords.put("test.yr", hostAddresses.get(HOST_TEST));
-        // 国际化域名的测试别名（DNS 与证书里是 A-label）
-        yrRecords.put(moe.qingu.youran.api.network.DomainNames.toAscii(TEST_IDN_NAME), hostAddresses.get(HOST_TEST));
-        if (hostAddresses.containsKey(HOST_CAPTCHA)) {
-            yrRecords.put(CAPTCHA_NAME, hostAddresses.get(HOST_CAPTCHA));
-        }
-        if (hostAddresses.containsKey(HOST_LOCATION)) {
-            yrRecords.put(LOCATION_NAME, hostAddresses.get(HOST_LOCATION));
-        }
-        if (hostAddresses.containsKey(HOST_PAY)) {
-            yrRecords.put(PAY_NAME, hostAddresses.get(HOST_PAY));
-            // pay.yr 的开发者文档站（服主 11-15：长说明挪到单独的站），同一台主机，按 Host 分
-            yrRecords.put(moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN, hostAddresses.get(HOST_PAY));
-        }
-        if (hostAddresses.containsKey(moe.qingu.youran.server.net.nav.NavServer.HOST)) {
-            for (String n : moe.qingu.youran.server.net.nav.NavServer.NAMES) {
-                yrRecords.put(n, hostAddresses.get(moe.qingu.youran.server.net.nav.NavServer.HOST));
-            }
-        }
-        for (NetworkRegistry.NameDecl n : NetworkRegistry.names()) {
-            Ipv6Address a = hostAddresses.get(n.hostKey);
-            Map<String, Ipv6Address> target = n.name.endsWith(".yr") ? yrRecords : comRecords;
-            if (a == null) {
-                LOG.warn("游戏内网络：名字 {} 指向的主机 {} 没有分到地址，不登记", n.name, n.hostKey);
-            } else if (target.containsKey(n.name) || n.name.equals("ns.yr") || n.name.equals("root.yr")) {
-                LOG.warn("游戏内网络：名字 {} 已经有了，{} 不能再登记", n.name, n.hostKey);
-            } else {
-                target.put(n.name, a);
-            }
-        }
-        tlds.clear();
-        tlds.addAll(tldDecls.keySet());
-        names.clear();
-        for (String n : yrRecords.keySet()) {
-            names.put(n, keyOf(hostAddresses, yrRecords.get(n)));
-        }
-        for (String n : comRecords.keySet()) {
-            names.put(n, keyOf(hostAddresses, comRecords.get(n)));
-        }
-        Map<String, Ipv6Address> addrs = new LinkedHashMap<>(yrRecords);
-        addrs.putAll(comRecords);
-        addrs.put("ns.yr", hostAddresses.get(HOST_YR_DNS));
-        addrs.put("root.yr", hostAddresses.get(HOST_ROOT_DNS));
-        nameAddresses = Collections.unmodifiableMap(addrs);
-
-        hostNames.clear();
-        for (Map.Entry<String, String> e : names.entrySet()) {
-            hostNames.computeIfAbsent(e.getValue(), k -> new ArrayList<>()).add(e.getKey());
-        }
         leafCache = loadCa(server);
 
         // 运行时
@@ -311,7 +256,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             router.setPlayers(players);
             nic.setPlayers(players);
         }
-        long serial = System.currentTimeMillis() / 1000;
         Map<String, NetworkRegistry.HostDecl> declByKey = new LinkedHashMap<>();
         for (NetworkRegistry.HostDecl h : hostDecls) {
             declByKey.putIfAbsent(h.key, h);
@@ -336,13 +280,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         } else {
             LOG.info("游戏内网络：180.yr 在配置里关掉了（nav.enabled=false）");
         }
-        loop.execute(() -> startHosts(hostAddresses, declByKey, tldDecls, yrRecords, comRecords, activeDcCopy, serial));
+        // 先挂上：主机的启动回调里就能用 YouranNetworkApi.hostAddress 等查别的主机
+        NetworkHooks.setBackend(this);
+        loop.execute(() -> startHosts(hostAddresses, declByKey, activeDcCopy));
         loop.execute(this::scheduleOverflowLog);
 
         events = new NetworkEvents(devices, testDevices, this::playerLoggedIn, this::playerLoggedOut, this::serverTick);
         MinecraftForge.EVENT_BUS.register(events);
         event.registerServerCommand(new NetCommand(this));
-        NetworkHooks.setBackend(this);
         LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机 {} 个；递归解析器 {}，NTP {}{}",
                 layout.prefix(), dims, activeDc.size(), hostAddresses.size(), resolverAddress, ntpAddress,
                 players == null ? "" : "；玩家临时地址 " + layout.playersPrefix() + "/96");
@@ -449,14 +394,17 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
     }
 
-    /** 机房主机的 TLS；没配中间 CA、或主机没有域名时为 null */
-    private TlsServerContext hostTls(String hostKey) {
-        List<String> n = hostNames.get(hostKey);
-        if (n == null || n.isEmpty()) {
+    /** 机房主机的 TLS，只签主机自己给的这些名字（与 DNS 无关）；没配中间 CA、或没有名字时为 null */
+    TlsServerContext hostTls(Collection<String> names) {
+        List<String> fixed = new ArrayList<>();
+        for (String n : names) {
+            fixed.add(DomainNames.toAscii(n));
+        }
+        if (fixed.isEmpty()) {
             return null;
         }
-        List<String> fixed = Collections.unmodifiableList(new ArrayList<>(n));
-        return serverTls(() -> fixed);
+        List<String> list = Collections.unmodifiableList(fixed);
+        return serverTls(() -> list);
     }
 
     @Override
@@ -473,19 +421,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
     }
 
-    private static String keyOf(Map<String, Ipv6Address> hosts, Ipv6Address a) {
-        for (Map.Entry<String, Ipv6Address> e : hosts.entrySet()) {
-            if (e.getValue().equals(a)) {
-                return e.getKey();
-            }
-        }
-        return "?";
-    }
-
     /** 网络线程上：给每台主机建协议栈、挂到路由器上、启动服务 */
-    private void startHosts(Map<String, Ipv6Address> hosts, Map<String, NetworkRegistry.HostDecl> decls,
-                            Map<String, NetworkRegistry.TldDecl> tldDecls, Map<String, Ipv6Address> yrRecords,
-                            Map<String, Ipv6Address> comRecords, Map<String, Long> datacenters, long serial) {
+    private void startHosts(Map<String, Ipv6Address> hosts, Map<String, NetworkRegistry.HostDecl> decls, Map<String, Long> datacenters) {
         for (long idx : datacenters.values()) {
             router.attachDatacenter(idx);
         }
@@ -503,63 +440,27 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             router.attachHost(e.getValue(), stack);
             hostStacks.put(e.getKey(), stack);
         }
-        Ipv6Address root = hosts.get(HOST_ROOT_DNS);
-        Ipv6Address yr = hosts.get(HOST_YR_DNS);
-        // 根区：.yr、.com 委派给 YouranMod 的顶级域服务器，其他模组的顶级域委派给它们自己的主机
-        Map<String, List<DnsZoneData.NameServer>> delegations = new LinkedHashMap<>();
-        List<DnsZoneData.NameServer> yrNs = Collections.singletonList(new DnsZoneData.NameServer("ns.yr", yr));
-        delegations.put("yr", yrNs);
-        delegations.put("com", yrNs);
-        Map<String, DnsZoneData> modZones = new LinkedHashMap<>();
-        for (NetworkRegistry.TldDecl t : tldDecls.values()) {
-            Ipv6Address a = hosts.get(t.hostKey);
-            String nsName = "ns." + t.tld;
-            delegations.put(t.tld, Collections.singletonList(new DnsZoneData.NameServer(nsName, a)));
-            if (t.zone != null) {
-                Map<String, List<Ipv6Address>> rec = new LinkedHashMap<>();
-                rec.put(nsName, Collections.singletonList(a));
-                modZones.put(t.hostKey + " " + t.tld, new DnsZoneData(t.tld,
-                        Collections.singletonList(new DnsZoneData.NameServer(nsName, a)),
-                        Collections.<String, List<DnsZoneData.NameServer>>emptyMap(), rec, t.zone, serial));
-            }
-        }
-        DnsZoneData rootZone = new DnsZoneData("", Collections.singletonList(new DnsZoneData.NameServer("root.yr", root)),
-                delegations, Collections.<String, List<Ipv6Address>>emptyMap(), null, serial);
-        Map<String, List<Ipv6Address>> yrRec = new LinkedHashMap<>();
-        yrRec.put("ns.yr", Collections.singletonList(yr));
-        yrRec.put("root.yr", Collections.singletonList(root));
-        for (Map.Entry<String, Ipv6Address> e : yrRecords.entrySet()) {
-            yrRec.put(e.getKey(), Collections.singletonList(e.getValue()));
-        }
-        Map<String, List<Ipv6Address>> comRec = new LinkedHashMap<>();
-        for (Map.Entry<String, Ipv6Address> e : comRecords.entrySet()) {
-            comRec.put(e.getKey(), Collections.singletonList(e.getValue()));
-        }
-        DnsZoneData yrZone = new DnsZoneData("yr", yrNs, Collections.<String, List<DnsZoneData.NameServer>>emptyMap(), yrRec, null, serial);
-        DnsZoneData comZone = new DnsZoneData("com", yrNs, Collections.<String, List<DnsZoneData.NameServer>>emptyMap(), comRec, null, serial);
-
-        new AuthoritativeDnsServer(Collections.singletonList(rootZone)).start(hostStacks.get(HOST_ROOT_DNS));
-        new AuthoritativeDnsServer(Arrays.asList(yrZone, comZone)).start(hostStacks.get(HOST_YR_DNS));
-        resolver = new RecursiveResolver(hostStacks.get(HOST_RESOLVER), Collections.singletonList(root));
+        startDns(hosts);
+        resolver = new RecursiveResolver(hostStacks.get(HOST_RESOLVER), DnsState.rootServers());
         resolver.start();
         new NtpServer(System::currentTimeMillis).start(hostStacks.get(HOST_NTP));
-        TestWebsite.start(hostStacks.get(HOST_TEST), hostTls(HOST_TEST));
+        TestWebsite.start(hostStacks.get(HOST_TEST), hostTls(TEST_NAMES));
         CaptchaService cs = captcha;
         NetStack captchaStack = hostStacks.get(HOST_CAPTCHA);
         if (cs != null && captchaStack != null) {
-            cs.start(captchaStack, hostTls(HOST_CAPTCHA));
+            cs.start(captchaStack, hostTls(Collections.singletonList(CAPTCHA_NAME)));
         }
         LocationSigner signer = locationSigner;
         NetStack locationStack = hostStacks.get(HOST_LOCATION);
         if (signer != null && locationStack != null) {
-            new LocationService(signer, System::currentTimeMillis).start(locationStack, hostTls(HOST_LOCATION));
+            new LocationService(signer, System::currentTimeMillis).start(locationStack, hostTls(Collections.singletonList(LOCATION_NAME)));
         }
         moe.qingu.youran.server.net.pay.PayServer ps = pay;
         NetStack payStack = hostStacks.get(HOST_PAY);
         if (ps != null && payStack != null) {
             String idName = DomainNames.tryToAscii(moe.qingu.youran.server.net.pay.PayConfig.idDomain.trim().toLowerCase(java.util.Locale.ROOT));
             moe.qingu.youran.server.net.pay.PayServer.startWeb(ps, new Context(HOST_PAY, hosts.get(HOST_PAY), payStack), resolverAddress,
-                    () -> idName != null && nameAddresses.containsKey(idName));
+                    () -> idName != null && !DnsState.lookup(idName).isEmpty());
         }
 
         moe.qingu.youran.server.net.nav.NavServer ns = nav;
@@ -567,22 +468,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (ns != null && navStack != null) {
             String idName = DomainNames.tryToAscii(moe.qingu.youran.server.net.nav.NavConfig.idDomain.trim().toLowerCase(java.util.Locale.ROOT));
             ns.startWeb(new Context(moe.qingu.youran.server.net.nav.NavServer.HOST, hosts.get(moe.qingu.youran.server.net.nav.NavServer.HOST), navStack),
-                    resolverAddress, () -> idName != null && nameAddresses.containsKey(idName), n -> nameAddresses.containsKey(n));
+                    resolverAddress, () -> idName != null && !DnsState.lookup(idName).isEmpty(), n -> !DnsState.lookup(n).isEmpty());
         }
 
-        // 其他模组的顶级域：替它们跑权威 DNS
-        Map<String, List<DnsZoneData>> zonesByHost = new LinkedHashMap<>();
-        for (Map.Entry<String, DnsZoneData> e : modZones.entrySet()) {
-            zonesByHost.computeIfAbsent(e.getKey().substring(0, e.getKey().indexOf(' ')), k -> new ArrayList<>()).add(e.getValue());
-        }
-        for (Map.Entry<String, List<DnsZoneData>> e : zonesByHost.entrySet()) {
-            NetStack zs = hostStacks.get(e.getKey());
-            if (zs == null) {
-                LOG.warn("游戏内网络：{} 是原始主机，没有协议栈，YouranMod 不能替它跑权威 DNS（登记顶级域时 zone 要为 null）", e.getKey());
-                continue;
-            }
-            new AuthoritativeDnsServer(e.getValue()).start(zs);
-        }
         // 其他模组的服务
         for (Map.Entry<String, NetworkRegistry.HostDecl> e : decls.entrySet()) {
             RawHostPort raw = rawHosts.get(e.getKey());
@@ -605,6 +493,97 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                 LOG.error("游戏内网络：主机 {} 的服务启动失败", e.getKey(), t);
             }
         }
+    }
+
+    /** 测试网站的名字（还有国际化域名的别名；DNS 与证书里是 A-label） */
+    static final List<String> TEST_NAMES = Collections.unmodifiableList(Arrays.asList("test.yr", DomainNames.toAscii(TEST_IDN_NAME)));
+
+    /**
+     * 网络线程上：根、.yr / .com、YouranMod 自己网站的 DNS。根区跟着顶级域登记处；.yr 用默认注册局，.com 只收以模组身份注册的；
+     * YouranMod 的网站以模组身份注册成 .yr 下的二级域名，委派给 {@link #HOST_SITES_DNS}。都要在其他模组的主机启动之前做好。
+     */
+    private void startDns(Map<String, Ipv6Address> hosts) {
+        NetStack rootStack = hostStacks.get(HOST_ROOT_DNS);
+        NetStack tldStack = hostStacks.get(HOST_YR_DNS);
+        NetStack sitesStack = hostStacks.get(HOST_SITES_DNS);
+        if (rootStack == null || tldStack == null || sitesStack == null) {
+            LOG.error("游戏内网络：DNS 服务器没分到地址（{}、{}、{}），域名都用不了", HOST_ROOT_DNS, HOST_YR_DNS, HOST_SITES_DNS);
+            return;
+        }
+        DnsState.bindRoot(DnsServer.start(rootStack));
+        DnsServer tld = DnsServer.start(tldStack);
+        File dir = new File(new File(worldDirectory, "youranmod"), "dns");
+        List<Ipv6Address> tldServers = Collections.singletonList(tld.address());
+        DefaultRegistrar yr = new DefaultRegistrar(MOD_ID, "yr", tld, new File(dir, "yr.json"));
+        // .com：现实里存在的域名，只收以模组身份注册的（服主 11-17）
+        DefaultRegistrar com = new ComRegistrar(MOD_ID, tld, new File(dir, "com.json"));
+        logRegistration(".yr", DnsRegistry.register("yr", yr, tldServers));
+        logRegistration(".com", DnsRegistry.register("com", com, tldServers));
+        yrRegistrar = yr;
+        comRegistrar = com;
+
+        DnsServer sites = DnsServer.start(sitesStack);
+        sitesDns = sites;
+        Map<String, Ipv6Address> records = new LinkedHashMap<>();
+        for (String n : TEST_NAMES) {
+            records.put(n, hosts.get(HOST_TEST));
+        }
+        records.put(CAPTCHA_NAME, hosts.get(HOST_CAPTCHA));
+        records.put(LOCATION_NAME, hosts.get(HOST_LOCATION));
+        if (pay != null) {
+            records.put(PAY_NAME, hosts.get(HOST_PAY));
+            // pay.yr 的开发者文档站（服主 11-15：长说明挪到单独的站），同一台主机，按 Host 分
+            records.put(moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN, hosts.get(HOST_PAY));
+        }
+        if (nav != null) {
+            for (String n : moe.qingu.youran.server.net.nav.NavServer.NAMES) {
+                records.put(n, hosts.get(moe.qingu.youran.server.net.nav.NavServer.HOST));
+            }
+        }
+        for (Map.Entry<String, Ipv6Address> e : records.entrySet()) {
+            if (e.getValue() == null) {
+                continue;
+            }
+            String zone = secondLevel(e.getKey());
+            if (!sites.zones().contains(zone)) {
+                sites.addZone(zone);
+                logRegistration(zone, yr.register(zone, MOD_ID, Collections.singletonList(sites.address())));
+            }
+            sites.setAddresses(e.getKey(), Collections.singletonList(e.getValue()));
+        }
+    }
+
+    /** {@code a.b.yr} 所在的二级域名 {@code b.yr} */
+    static String secondLevel(String name) {
+        int last = name.lastIndexOf('.');
+        int prev = last <= 0 ? -1 : name.lastIndexOf('.', last - 1);
+        return name.substring(prev + 1);
+    }
+
+    static void logRegistration(String what, Registration r) {
+        switch (r.status()) {
+            case SUCCESS:
+                LOG.debug("游戏内网络：{} 注册好了：{}", what, r);
+                break;
+            case FAILURE:
+                LOG.warn("游戏内网络：{} 注册失败：{}", what, r.reason());
+                break;
+            default:
+                LOG.info("游戏内网络：{} 注册在等注册局处理", what);
+                r.whenDone(x -> LOG.info("游戏内网络：{} 注册有结果了：{}", what, x));
+        }
+    }
+
+    DefaultRegistrar yrRegistrar() {
+        return yrRegistrar;
+    }
+
+    DefaultRegistrar comRegistrar() {
+        return comRegistrar;
+    }
+
+    DnsServer sitesDns() {
+        return sitesDns;
     }
 
     private void scheduleOverflowLog() {
@@ -683,18 +662,21 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             }
         }
         loop = null;
+        DnsState.reset();
+        yrRegistrar = null;
+        comRegistrar = null;
+        sitesDns = null;
         hostStacks.clear();
         router = null;
         nic = null;
         players = null;
-        nameAddresses = Collections.emptyMap();
         devices = null;
         testDevices = null;
         resolver = null;
         book = null;
         server = null;
         leafCache = null;
-        hostNames.clear();
+        worldDirectory = null;
         queued.clear();
     }
 
@@ -988,8 +970,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     }
 
     @Override
-    public Ipv6Address localNameAddress(String asciiName) {
-        return asciiName == null ? null : nameAddresses.get(asciiName);
+    public File worldDirectory() {
+        return worldDirectory;
     }
 
     @Override
@@ -1071,14 +1053,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         return rawHosts;
     }
 
-    List<String> tlds() {
-        return tlds;
-    }
-
-    Map<String, String> names() {
-        return names;
-    }
-
     boolean running() {
         return loop != null;
     }
@@ -1146,16 +1120,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             return stack;
         }
 
-        private TlsServerContext tls;
-        private boolean tlsChecked;
-
         @Override
-        public synchronized TlsServerContext tls() {
-            if (!tlsChecked) {
-                tlsChecked = true;
-                tls = hostTls(key);
-            }
-            return tls;
+        public TlsServerContext tls(Collection<String> names) {
+            return names == null ? null : hostTls(names);
         }
 
         @Override

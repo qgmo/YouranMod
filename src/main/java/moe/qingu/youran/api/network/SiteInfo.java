@@ -4,8 +4,7 @@ import java.util.Locale;
 
 /**
  * 导航信息（服主 11-15）：网站在浏览器主页 {@code 180.yr} 上怎么显示——名字、分类、一句话，要不要进“名站导航”格子。
- * 登记域名时顺带登记（{@link YouranNetworkApi#registerDomainName(String, String, SiteInfo)}），或者给别处登记的域名单独登记
- * （{@link YouranNetworkApi#registerNavigation}）。没登记导航信息的网站不上导航（例如留给玩家自己发现的店）。不可变。
+ * 用 {@link YouranNetworkApi#registerNavigation} 登记（和域名注册分开）。没登记导航信息的网站不上导航（例如留给玩家自己发现的店）。不可变。
  */
 public final class SiteInfo {
     /** 名字最多几个字 */

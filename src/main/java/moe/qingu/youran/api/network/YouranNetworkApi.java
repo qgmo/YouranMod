@@ -19,6 +19,8 @@ import java.util.function.Supplier;
  * <b>运行时</b>（{@link #devices()} 等）：只在服务端、网络运行时有用；客户端上、关服后、YouranMod 客户端包里返回 null。
  * <p>
  * 设备上的协议栈（客户端）见 {@code api.network.stack.NetStack} 与 {@code client.network.ClientNetwork}。
+ * <p>
+ * 域名不在这里登记：网络运行后向注册局注册（见 {@code api.network.dns}），自己跑 DNS（{@code api.network.dns.DnsServer}）。
  */
 public final class YouranNetworkApi {
     /** YouranMod 自己的机房（玩法 /64 里的第 0 号 /96） */
@@ -61,9 +63,10 @@ public final class YouranNetworkApi {
 
     /**
      * 在机房 {@code datacenter} 里登记一个<b>原始主机</b>（{@link RawHost}）：一个 /128，进出的都是完整的 IPv6 包，
-     * 不跑协议栈。地址和普通主机一样按“模组 ID:名字”分，第一次分到以后不变；可以用 {@link #registerDomainName} 给它起名字。
+     * 不跑协议栈。地址和普通主机一样按“模组 ID:名字”分，第一次分到以后不变。
      * 网络启动时在网络线程上调用 {@code service}（每次开服一次）；运行时也可以用 {@link #rawHost} 拿到它。
-     * 原始主机上没有 YouranMod 的协议栈，不能用来跑 {@link #registerTopLevelDomain} 带 {@code zone} 的权威 DNS、也没有 {@link HostContext#tls()}。
+     * 原始主机上没有 YouranMod 的协议栈，跑不了默认 DNS 服务（{@code api.network.dns.DnsServer}），要给它起名字时另登记一台普通主机跑 DNS；
+     * 也没有 {@link HostContext#tls}。
      */
     public static void registerRawHost(String key, String datacenter, RawHostService service) {
         if (service == null) {
@@ -73,48 +76,8 @@ public final class YouranNetworkApi {
     }
 
     /**
-     * 登记一个顶级域，由主机 {@code hostKey} 做它的权威服务器（根服务器把这个顶级域委派给它）。
-     * {@code zone} 不为 null 时，YouranMod 在这台主机的 UDP 53 上替你跑权威 DNS 服务器、按 {@code zone} 回答；
-     * 为 null 时由你自己在这台主机上跑 DNS 服务器。{@code .com}、{@code .yr} 是 YouranMod 的，不能再登记。
-     */
-    public static void registerTopLevelDomain(String tld, String hostKey, DnsZone zone) {
-        String t = tld.trim();
-        if (t.startsWith(".")) {
-            t = t.substring(1);
-        }
-        // 国际化顶级域：先转成 A-label（转不了时抛出 IllegalArgumentException）
-        t = DomainNames.toAscii(t);
-        if (!NetworkRegistry.TLD.matcher(t).matches()) {
-            throw new IllegalArgumentException("顶级域不合法：" + tld);
-        }
-        NetworkRegistry.addTld(t, checkKey(hostKey), zone);
-    }
-
-    /**
-     * 在 YouranMod 的 {@code .yr} 或 {@code .com} 下登记一个名字（如 {@code minebay.yr}、{@code 商店.悠然.yr}），指向主机 {@code hostKey}。
-     * 国际化域名可以直接写 Unicode，登记时转成 A-label（见 {@link DomainNames}）。
-     * {@code .com} 只给少数特殊网站做本地记录（其余 .com 名字回答不存在）。
-     */
-    public static void registerDomainName(String name, String hostKey) {
-        // 国际化域名（如 悠然.yr）先转成 A-label（xn--…），DNS、证书里只用这个形式；转不了时抛出 IllegalArgumentException
-        String n = DomainNames.toAscii(name);
-        if (!(n.endsWith(".yr") || n.endsWith(".com")) || !n.matches("[a-z0-9]([a-z0-9.-]*[a-z0-9])?") || n.contains("..")) {
-            throw new IllegalArgumentException("只能登记 .yr 或 .com 下的名字：" + name);
-        }
-        NetworkRegistry.addName(n, checkKey(hostKey));
-    }
-
-    /**
-     * 同上，并登记这个网站在浏览器主页 {@code 180.yr} 上的导航信息（名字、分类、一句话，见 {@link SiteInfo}）。
-     */
-    public static void registerDomainName(String name, String hostKey, SiteInfo nav) {
-        registerDomainName(name, hostKey);
-        registerNavigation(name, nav);
-    }
-
-    /**
-     * 给一个域名登记导航信息（{@code 180.yr} 上的名字、分类、一句话）。域名可以是别处登记的（例如家具模组用自己的接口登记的 MineBay）；
-     * 开服时这个名字在 YouranMod 的 {@code .yr} / {@code .com} 区里查不到就不显示。同一个名字登记了两次时先登记的算。
+     * 给一个域名登记导航信息（{@code 180.yr} 上的名字、分类、一句话）。和域名注册分开：域名由网站自己向注册局注册；
+     * 显示导航时这个名字解析不到地址（内部解析，见 {@link #addressOfName}）就不显示。同一个名字登记了两次时先登记的算。
      * 模组加载阶段调用。
      */
     public static void registerNavigation(String name, SiteInfo nav) {
@@ -190,16 +153,18 @@ public final class YouranNetworkApi {
     }
 
     /**
-     * 服务端：YouranMod 自己的 {@code .yr} / {@code .com} 区里登记的名字（如 {@code minebay.yr}）的地址，直接查登记表，不走 DNS 报文。
-     * 其他模组顶级域里的名字、不存在的名字、网络没在运行时返回 null。给“按页面里的主机名放行玩家临时地址”这类服务端逻辑用。
+     * 服务端：内部解析 {@code name}（可以写 Unicode）的地址：从根开始顺着委派直接问各台 YouranMod 默认 DNS 服务
+     * （{@code api.network.dns.DnsServer}）现在的数据，不走 DNS 报文、不经解析器的缓存。有几个地址时给第一个。
+     * 不存在、没有地址、委派到的不是默认 DNS 服务、网络没在运行时返回 null。任意线程。
+     * 给“这个网站在不在”“按页面里的主机名放行玩家临时地址”这类服务端逻辑用。
      */
     public static Ipv6Address addressOfName(String name) {
         NetworkBackend b = NetworkHooks.backend();
         if (b == null || name == null) {
             return null;
         }
-        String n = DomainNames.tryToAscii(name);
-        return n == null ? null : b.localNameAddress(n);
+        java.util.List<Ipv6Address> a = moe.qingu.youran.network.DnsState.lookup(name);
+        return a.isEmpty() ? null : a.get(0);
     }
 
     /**

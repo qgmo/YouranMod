@@ -56,8 +56,8 @@ public interface NetworkBackend {
     /** 撤销一个用途的放行；任意线程 */
     void revokePlayer(UUID player, String purpose);
 
-    /** YouranMod 自己的 .yr / .com 区里登记的名字（A-label）的地址；没有为 null。任意线程 */
-    Ipv6Address localNameAddress(String asciiName);
+    /** 世界存档目录（默认注册局存注册信息用） */
+    java.io.File worldDirectory();
 
     /** 这个地址是设备表里一台设备的地址时，它在哪；否则 null。任意线程（不读世界） */
     DeviceLocation deviceLocation(Ipv6Address address);

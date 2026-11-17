@@ -210,10 +210,15 @@ final class PayService {
     private final SourceLimiter apiLimit;
     private final SourceLimiter badKeyLimit = new SourceLimiter(0.2, 10, 8192);
 
+    /** 这台主机的 TLS；没配中间 CA 为 null */
+    final moe.qingu.youran.api.network.tls.TlsServerContext tls;
+
     PayService(PayServer core, HostContext ctx, Ipv6Address resolver, BooleanSupplier idAvailable) {
         this.core = core;
         this.ctx = ctx;
-        this.id = new IdYrClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), PayConfig.idDomain, ctx.tls() != null,
+        // pay.yr 与开发者文档站同一台主机，证书只签这两个名字（主机自己给的，和 DNS 无关）
+        this.tls = ctx.tls(java.util.Arrays.asList(moe.qingu.youran.api.pay.PayApi.DOMAIN, moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN));
+        this.id = new IdYrClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), PayConfig.idDomain, tls != null,
                 moe.qingu.youran.api.pay.PayApi.DOMAIN);
         this.idAvailable = idAvailable;
         this.apiLimit = new SourceLimiter(PayConfig.apiPerMinute / 60.0, Math.max(10, PayConfig.apiPerMinute / 4), 8192);
@@ -223,9 +228,9 @@ final class PayService {
         HttpServer.Options o = new HttpServer.Options().maxBodyBytes(16 * 1024).handlerTimeoutMillis(20_000)
                 .errorPages(s -> HttpResponse.xhtml(s, PayPages.message("出错了", null, null, "err", "HTTP " + s + " " + HttpResponse.reasonPhrase(s), null)));
         HttpServer.listen(ctx.stack(), PORT, null, o, this::handle);
-        PayPages.docsBase = (ctx.tls() != null ? "https://" : "http://") + moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN;
-        if (ctx.tls() != null) {
-            HttpServer.listen(ctx.stack(), TLS_PORT, ctx.tls(), o, this::handle);
+        PayPages.docsBase = (tls != null ? "https://" : "http://") + moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN;
+        if (tls != null) {
+            HttpServer.listen(ctx.stack(), TLS_PORT, tls, o, this::handle);
             core.setHttps(true);
         }
     }

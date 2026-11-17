@@ -54,7 +54,7 @@ final class NetCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/ynet <table|stats|device|identify|confirm|location|ping|dns|get|ntp|sim|stress|flush>";
+        return "/ynet <table|stats|device|identify|confirm|location|ping|dns|whois|name|get|ntp|sim|stress|flush>";
     }
 
     @Override
@@ -78,7 +78,11 @@ final class NetCommand extends CommandBase {
             "§6/ynet confirm <玩家> §f给他弹一个测试用的系统确认框，回应后显示结果",
             "§6/ynet location <x> <y> <z> <网站域名> <随机数> §f给这一格的设备签位置（先问操作者），显示证明",
             "§6/ynet ping <x> <y> <z> <目标> [次数] [字节数] §f目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名",
-            "§6/ynet dns <x> <y> <z> <域名> §f经递归解析器查 AAAA",
+            "§6/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY] §f经递归解析器查（默认 AAAA）",
+            "§6/ynet whois <域名或顶级域> §f注册局、所属模组、DNS 服务器",
+            "§6/ynet name add <域名.yr> <地址|主机登记名> §f以 youranmod 的身份注册（还没注册时）并在 YouranMod 网站的 DNS 上设 AAAA",
+            "§6/ynet name txt <域名.yr> <文字> §f同上，设 TXT",
+            "§6/ynet name remove <域名.yr> §f删掉 YouranMod 网站 DNS 上这个名字的记录（注册还在）",
             "§6/ynet get <x> <y> <z> <网址> §f用 TCP 取网页（如 http://test.yr/）",
             "§6/ynet ntp <x> <y> <z> §f向 NTP 服务器对时",
             "§6/ynet sim <丢包%> <乱序%> | off §f测试开关：路由器按概率丢包、推迟包",
@@ -119,6 +123,12 @@ final class NetCommand extends CommandBase {
                 break;
             case "dns":
                 dns(sender, args);
+                break;
+            case "whois":
+                whois(sender, args);
+                break;
+            case "name":
+                name(sender, args);
                 break;
             case "get":
                 get(sender, args);
@@ -170,10 +180,16 @@ final class NetCommand extends CommandBase {
             tell(sender, "  主机 " + e.getKey() + " → " + addr + (a != null ? "" : " §7（这次没登记，保留）")
                     + (net.rawHosts().containsKey(e.getKey()) ? " §7（原始主机）" : ""));
         }
-        tell(sender, "§6DNS §f根 root.yr；YouranMod 的顶级域 .yr .com" + (net.tlds().isEmpty() ? "" : "；其他模组的 ." + String.join(" .", net.tlds())));
-        for (Map.Entry<String, String> e : net.names().entrySet()) {
-            String shown = moe.qingu.youran.api.network.DomainNames.toDisplay(e.getKey());
-            tell(sender, "  " + e.getKey() + (shown.equals(e.getKey()) ? "" : "（" + shown + "）") + " → " + e.getValue());
+        tell(sender, "§6DNS §f根 " + moe.qingu.youran.network.DnsState.rootServers() + "；顶级域 ."
+                + String.join(" .", moe.qingu.youran.api.network.dns.DnsRegistry.tlds()));
+        for (moe.qingu.youran.api.network.dns.DefaultRegistrar r : Arrays.asList(net.yrRegistrar(), net.comRegistrar())) {
+            if (r == null) {
+                continue;
+            }
+            for (moe.qingu.youran.api.network.dns.Whois w : r.list()) {
+                String shown = moe.qingu.youran.api.network.DomainNames.toDisplay(w.name);
+                tell(sender, "  " + w.name + (shown.equals(w.name) ? "" : "（" + shown + "）") + " → " + w.owner + "，DNS " + w.servers);
+            }
         }
     }
 
@@ -465,7 +481,11 @@ final class NetCommand extends CommandBase {
 
     private void dns(ICommandSender sender, String[] args) throws CommandException {
         if (args.length < 5) {
-            throw new WrongUsageException("/ynet dns <x> <y> <z> <域名>");
+            throw new WrongUsageException("/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY]");
+        }
+        int type = args.length > 5 ? typeOf(args[5]) : DnsMessage.TYPE_AAAA;
+        if (type < 0) {
+            throw new WrongUsageException("/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY]");
         }
         Place p = place(sender, args, 1, false);
         TestDevices.Emulated dev = emulated(sender, p);
@@ -482,17 +502,127 @@ final class NetCommand extends CommandBase {
             }
         }
         long start = System.nanoTime();
-        dev.dns.query(name, DnsMessage.TYPE_AAAA).whenComplete((m, err) -> {
+        dev.dns.query(name, type).whenComplete((m, err) -> {
             if (err != null) {
                 later(sender, "§c查 " + name + " 失败：" + message(err));
                 return;
             }
             long ms = (System.nanoTime() - start) / 1_000_000;
-            later(sender, "§e" + name + " AAAA：响应码 " + rcodeText(m.rcode) + "（问的是 " + dev.dns.server() + "，" + ms + " 毫秒）");
+            later(sender, "§e" + name + " " + typeText(type) + "：响应码 " + rcodeText(m.rcode) + "（问的是 " + dev.dns.server() + "，" + ms + " 毫秒）");
             for (DnsMessage.Record r : m.answers) {
-                later(sender, "  " + r.name + " " + r.ttl + " " + typeText(r.type) + " " + (r.address != null ? r.address : r.target));
+                later(sender, "  " + r.name + " " + r.ttl + " " + typeText(r.type) + " " + (r.address != null ? r.address
+                        : r.target != null ? r.target : r.type == DnsMessage.TYPE_TXT ? "\"" + r.text() + "\"" : r.soa != null ? r.soa.mname + " " + r.soa.serial : ""));
             }
         });
+    }
+
+    static int typeOf(String s) {
+        switch (s.toUpperCase(java.util.Locale.ROOT)) {
+            case "AAAA":
+                return DnsMessage.TYPE_AAAA;
+            case "TXT":
+                return DnsMessage.TYPE_TXT;
+            case "NS":
+                return DnsMessage.TYPE_NS;
+            case "SOA":
+                return DnsMessage.TYPE_SOA;
+            case "ANY":
+                return DnsMessage.TYPE_ANY;
+            default:
+                return -1;
+        }
+    }
+
+    private void whois(ICommandSender sender, String[] args) throws CommandException {
+        if (args.length < 2) {
+            throw new WrongUsageException("/ynet whois <域名或顶级域>");
+        }
+        String n = args[1].startsWith(".") ? args[1].substring(1) : args[1];
+        moe.qingu.youran.api.network.dns.Whois w = moe.qingu.youran.api.network.dns.DnsRegistry.whois(n);
+        if (w == null) {
+            tell(sender, "§c" + args[1] + " 没有注册");
+            return;
+        }
+        tell(sender, "§e" + w.name + (w.name.contains(".") ? "" : "（顶级域）"));
+        tell(sender, "  注册局：" + (w.registrar == null ? "?" : w.registrar.modId()));
+        tell(sender, "  所属模组：" + w.owner + (w.registrarIdentity ? "（注册局身份，可以往下分发）" : "（模组身份）"));
+        tell(sender, "  DNS 服务器：" + w.servers);
+        tell(sender, "  注册时间：" + Instant.ofEpochMilli(w.registeredAt));
+    }
+
+    private void name(ICommandSender sender, String[] args) throws CommandException {
+        String usage = "/ynet name add <域名.yr> <地址|主机登记名> | txt <域名.yr> <文字> | remove <域名.yr>";
+        if (args.length < 3) {
+            throw new WrongUsageException(usage);
+        }
+        moe.qingu.youran.api.network.dns.DnsServer sites = net.sitesDns();
+        moe.qingu.youran.api.network.dns.DefaultRegistrar yr = net.yrRegistrar();
+        if (sites == null || yr == null) {
+            tell(sender, "§cYouranMod 的 DNS 没起来");
+            return;
+        }
+        String n;
+        try {
+            n = moe.qingu.youran.api.network.DomainNames.toAscii(args[2]);
+        } catch (IllegalArgumentException e) {
+            tell(sender, "§c" + e.getMessage());
+            return;
+        }
+        if (!n.endsWith(".yr")) {
+            tell(sender, "§c只能是 .yr 下的名字");
+            return;
+        }
+        try {
+            switch (args[1]) {
+                case "remove":
+                    sites.remove(n);
+                    tell(sender, "§a已删掉 " + n + " 的记录（按缓存时间传开：记录 " + moe.qingu.youran.api.network.dns.DnsServer.TTL_RECORD + " 秒）");
+                    return;
+                case "add":
+                case "txt": {
+                    if (args.length < 4) {
+                        throw new WrongUsageException(usage);
+                    }
+                    Ipv6Address a = null;
+                    if (args[1].equals("add")) {
+                        a = Ipv6Address.tryParse(args[3]);
+                        if (a == null) {
+                            a = net.hostAddress(args[3]);
+                        }
+                        if (a == null) {
+                            tell(sender, "§c" + args[3] + " 不是地址，也不是登记过的主机");
+                            return;
+                        }
+                    }
+                    String zone = NetworkServer.secondLevel(n);
+                    if (!sites.zones().contains(zone)) {
+                        moe.qingu.youran.api.network.dns.Registration r = yr.register(zone, NetworkServer.MOD_ID,
+                                Collections.singletonList(sites.address()));
+                        if (r.status() != moe.qingu.youran.api.network.dns.Registration.Status.SUCCESS) {
+                            tell(sender, "§c注册 " + zone + " " + r);
+                            return;
+                        }
+                        sites.addZone(zone);
+                        tell(sender, "§a以 " + NetworkServer.MOD_ID + " 的身份注册了 " + zone + "，委派给 " + sites.address());
+                    }
+                    if (a != null) {
+                        sites.setAddresses(n, Collections.singletonList(a));
+                        tell(sender, "§a" + n + " AAAA → " + a);
+                    } else {
+                        String text = String.join(" ", Arrays.copyOfRange(args, 3, args.length));
+                        sites.setTexts(n, Collections.singletonList(text));
+                        tell(sender, "§a" + n + " TXT \"" + text + "\"");
+                    }
+                    tell(sender, "§7按缓存时间传开（新名字最多等“查无此名”的 " + moe.qingu.youran.api.network.dns.DnsServer.TTL_NEGATIVE
+                            + " 秒，改记录最多 " + moe.qingu.youran.api.network.dns.DnsServer.TTL_RECORD + " 秒）");
+                    return;
+                }
+                default:
+                    throw new WrongUsageException(usage);
+            }
+        } catch (IllegalArgumentException e) {
+            tell(sender, "§c" + e.getMessage());
+        }
     }
 
     static String rcodeText(int rcode) {
@@ -515,7 +645,8 @@ final class NetCommand extends CommandBase {
     }
 
     static String typeText(int type) {
-        return type == DnsMessage.TYPE_AAAA ? "AAAA" : type == DnsMessage.TYPE_CNAME ? "CNAME" : type == DnsMessage.TYPE_NS ? "NS" : String.valueOf(type);
+        return type == DnsMessage.TYPE_AAAA ? "AAAA" : type == DnsMessage.TYPE_CNAME ? "CNAME" : type == DnsMessage.TYPE_NS ? "NS"
+                : type == DnsMessage.TYPE_TXT ? "TXT" : type == DnsMessage.TYPE_SOA ? "SOA" : type == DnsMessage.TYPE_ANY ? "ANY" : String.valueOf(type);
     }
 
     private void get(ICommandSender sender, String[] args) throws CommandException {
@@ -729,7 +860,10 @@ final class NetCommand extends CommandBase {
     @Override
     public List<String> getTabCompletions(MinecraftServer server, ICommandSender sender, String[] args, @Nullable BlockPos targetPos) {
         if (args.length == 1) {
-            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "ping", "dns", "get", "ntp", "sim", "stress", "flush");
+            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "ping", "dns", "whois", "name", "get", "ntp", "sim", "stress", "flush");
+        }
+        if (args.length == 2 && args[0].equals("name")) {
+            return getListOfStringsMatchingLastWord(args, "add", "txt", "remove");
         }
         if (args.length == 2 && args[0].equals("device")) {
             return getListOfStringsMatchingLastWord(args, "add", "remove", "list", "bind", "unbind", "power");

@@ -1,6 +1,10 @@
 package moe.qingu.youran.server.net.service;
 
 import moe.qingu.youran.api.network.Ipv6Address;
+import moe.qingu.youran.api.network.dns.DefaultRegistrar;
+import moe.qingu.youran.api.network.dns.DnsRegistry;
+import moe.qingu.youran.api.network.dns.DnsServer;
+import moe.qingu.youran.network.DnsState;
 import moe.qingu.youran.api.network.packet.DnsMessage;
 import moe.qingu.youran.api.network.packet.NtpPacket;
 import moe.qingu.youran.api.network.packet.UdpDatagram;
@@ -38,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ServicesTest {
     static final Ipv6Address ROOT = Ipv6Address.parse("fd00::1:53");
     static final Ipv6Address YR = Ipv6Address.parse("fd00::2:53");
+    static final Ipv6Address SITES = Ipv6Address.parse("fd00::3:53");
     static final Ipv6Address MOD = Ipv6Address.parse("fd00:0:0:0:0:1:0:1");
     static final Ipv6Address RESOLVER = Ipv6Address.parse("fd00::53");
     static final Ipv6Address NTP = Ipv6Address.parse("fd00::123");
@@ -46,46 +51,53 @@ class ServicesTest {
     final TestLink link = new TestLink();
     final NetStack client = link.host("fd00::c");
     RecursiveResolver resolver;
+    final DnsServer rootDns;
     final TestPki pki;
     final AtomicInteger upstreamQueries = new AtomicInteger();
 
     ServicesTest() throws Exception {
         pki = new TestPki();
+        DnsState.reset();
+        java.io.File dir = java.nio.file.Files.createTempDirectory("ym-dns").toFile();
         NetStack root = link.host(ROOT.toString());
         NetStack yr = link.host(YR.toString());
+        NetStack sites = link.host(SITES.toString());
         NetStack mod = link.host(MOD.toString());
         NetStack res = link.host(RESOLVER.toString());
         NetStack ntp = link.host(NTP.toString());
         NetStack web = link.host(WEB.toString());
-        Map<String, List<DnsZoneData.NameServer>> deleg = new LinkedHashMap<>();
-        List<DnsZoneData.NameServer> yrNs = Collections.singletonList(new DnsZoneData.NameServer("ns.yr", YR));
-        deleg.put("yr", yrNs);
-        deleg.put("com", yrNs);
-        deleg.put("cfm", Collections.singletonList(new DnsZoneData.NameServer("ns.cfm", MOD)));
-        new AuthoritativeDnsServer(Collections.singletonList(new DnsZoneData("", Collections.singletonList(new DnsZoneData.NameServer("root.yr", ROOT)),
-                deleg, Collections.<String, List<Ipv6Address>>emptyMap(), null, 1))).start(root);
-        Map<String, List<Ipv6Address>> yrRec = new LinkedHashMap<>();
-        yrRec.put("ns.yr", Collections.singletonList(YR));
-        yrRec.put("test.yr", Collections.singletonList(WEB));
-        yrRec.put("xn--0zwm56d.yr", Collections.singletonList(WEB));
-        Map<String, List<Ipv6Address>> comRec = new LinkedHashMap<>();
-        comRec.put("dado.wixsite.com", Collections.singletonList(WEB));
-        new AuthoritativeDnsServer(Arrays.asList(
-                new DnsZoneData("yr", yrNs, Collections.<String, List<DnsZoneData.NameServer>>emptyMap(), yrRec, null, 1),
-                new DnsZoneData("com", yrNs, Collections.<String, List<DnsZoneData.NameServer>>emptyMap(), comRec, null, 1))).start(yr);
-        Map<String, List<Ipv6Address>> modRec = new LinkedHashMap<>();
-        modRec.put("ns.cfm", Collections.singletonList(MOD));
-        new AuthoritativeDnsServer(Collections.singletonList(new DnsZoneData("cfm", Collections.singletonList(new DnsZoneData.NameServer("ns.cfm", MOD)),
-                Collections.<String, List<DnsZoneData.NameServer>>emptyMap(), modRec,
-                name -> name.equals("minebay.cfm") ? Collections.singletonList(WEB) : null, 1))).start(mod);
+        // 同开服时的布置：根跟着顶级域登记处；.yr / .com 用默认注册局；网站以模组身份注册成二级域名，自己的 DNS 回答
+        rootDns = DnsServer.start(root);
+        DnsState.bindRoot(rootDns);
+        DnsServer tld = DnsServer.start(yr);
+        DefaultRegistrar yrReg = new DefaultRegistrar("youranmod", "yr", tld, new java.io.File(dir, "yr.json"));
+        DefaultRegistrar comReg = new DefaultRegistrar("youranmod", "com", tld, new java.io.File(dir, "com.json"));
+        DnsRegistry.register("yr", yrReg, Collections.singletonList(YR));
+        DnsRegistry.register("com", comReg, Collections.singletonList(YR));
+        DnsServer siteDns = DnsServer.start(sites);
+        for (String n : Arrays.asList("test.yr", "xn--0zwm56d.yr")) {
+            siteDns.addZone(n);
+            siteDns.setAddresses(n, Collections.singletonList(WEB));
+            yrReg.register(n, "youranmod", Collections.singletonList(SITES));
+        }
+        // 别的模组：自己的顶级域 .cfm，和以模组身份在 .com 注册的 wixsite.com
+        DnsServer modDns = DnsServer.start(mod);
+        DefaultRegistrar cfm = new DefaultRegistrar("cfm", "cfm", modDns, new java.io.File(dir, "cfm.json"));
+        DnsRegistry.register("cfm", cfm, Collections.singletonList(MOD));
+        modDns.addZone("minebay.cfm");
+        modDns.setAddresses("minebay.cfm", Collections.singletonList(WEB));
+        cfm.register("minebay.cfm", "cfm", Collections.singletonList(MOD));
+        modDns.addZone("wixsite.com");
+        modDns.setAddresses("dado.wixsite.com", Collections.singletonList(WEB));
+        comReg.register("wixsite.com", "youranscp", Collections.singletonList(MOD));
         resolver = new RecursiveResolver(res, Collections.singletonList(ROOT));
         resolver.start();
         new NtpServer(() -> 1_794_355_200_000L).start(ntp);
         TestWebsite.start(web, new IssuingTlsContext(new LeafCache(pki.intermediate(), System::currentTimeMillis), () -> java.util.Arrays.asList("test.yr", "xn--0zwm56d.yr")));
-        // 数一数递归解析器往外问了几次（发往三台权威服务器的包）
+        // 数一数递归解析器往外问了几次（发往四台权威服务器的包）
         link.filter = raw -> {
             Ipv6Address d = Ipv6Packet.destinationOf(raw);
-            if (d.equals(ROOT) || d.equals(YR) || d.equals(MOD)) {
+            if (d.equals(ROOT) || d.equals(YR) || d.equals(SITES) || d.equals(MOD)) {
                 upstreamQueries.incrementAndGet();
             }
             return 0L;
@@ -110,14 +122,14 @@ class ServicesTest {
         assertEquals(DnsMessage.RCODE_OK, r.rcode);
         assertEquals(Collections.singletonList(WEB), r.addresses);
         assertTrue(r.response.recursionAvailable);
-        assertEquals(2, upstreamQueries.get(), "问了根与 .yr 服务器各一次");
+        assertEquals(3, upstreamQueries.get(), "问了根、.yr 服务器、test.yr 自己的 DNS 各一次");
         // 第二次：缓存里有
         DnsResolver.Result again = resolve("TEST.yr");
         assertEquals(Collections.singletonList(WEB), again.addresses);
-        assertEquals(2, upstreamQueries.get());
+        assertEquals(3, upstreamQueries.get());
         // 同一顶级域下的另一个名字：只问 .yr 服务器（委派已缓存）
         assertEquals(DnsMessage.RCODE_NXDOMAIN, resolve("nothing.yr").rcode);
-        assertEquals(3, upstreamQueries.get());
+        assertEquals(4, upstreamQueries.get());
     }
 
     @Test
@@ -159,18 +171,16 @@ class ServicesTest {
 
     @Test
     void rootAnswersReferralsNotRecursion() {
-        AuthoritativeDnsServer root = new AuthoritativeDnsServer(Collections.singletonList(new DnsZoneData("",
-                Collections.singletonList(new DnsZoneData.NameServer("root.yr", ROOT)),
-                Collections.singletonMap("yr", Collections.singletonList(new DnsZoneData.NameServer("ns.yr", YR))),
-                Collections.<String, List<Ipv6Address>>emptyMap(), null, 1)));
-        DnsMessage m = root.handle(DnsMessage.query(5, "test.yr", DnsMessage.TYPE_AAAA, true).encode());
+        link.loop.drain();
+        assertEquals(Collections.singletonList(ROOT), DnsState.rootServers());
+        DnsMessage m = rootDns.answer(DnsMessage.query(5, "test.yr", DnsMessage.TYPE_AAAA, true));
         assertEquals(DnsMessage.RCODE_OK, m.rcode);
         assertTrue(!m.authoritative && !m.recursionAvailable);
         assertEquals(0, m.answers.size());
-        assertEquals("ns.yr", m.authority.get(0).target);
+        assertEquals("ns1.yr", m.authority.get(0).target);
         assertEquals(YR, m.additional.get(0).address);
         // 应答报文不回
-        assertNull(root.handle(m.encode()));
+        assertNull(rootDns.answer(m));
     }
 
     @Test

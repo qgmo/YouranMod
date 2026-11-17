@@ -129,7 +129,7 @@ public final class NavServer implements NavService.Env {
     /**
      * 网络线程：在这台主机上开网页（80，配了中间 CA 时也开 443）。
      *
-     * @param exists 域名（A-label）在 YouranMod 的 DNS 里有没有
+     * @param exists 域名（A-label）现在解析不解析得到（内部解析，每次显示时现查）
      */
     public void startWeb(HostContext ctx, Ipv6Address resolver, BooleanSupplier idAvailable, Predicate<String> exists) {
         List<String> problems = new ArrayList<>();
@@ -138,7 +138,8 @@ public final class NavServer implements NavService.Env {
             NavService.LOG.warn("180.yr：{}", p);
         }
         this.idAvailable = idAvailable;
-        https = ctx.tls() != null;
+        moe.qingu.youran.api.network.tls.TlsServerContext tls = ctx.tls(NAMES);
+        https = tls != null;
         moe.qingu.youran.api.network.idyr.IdYrClient id = new moe.qingu.youran.api.network.idyr.IdYrClient(ctx.stack(),
                 new DnsResolver(ctx.stack(), resolver), NavConfig.idDomain, https, NavService.PLATFORM);
         NavService service = new NavService(book, store, dir, this, id, logo(), NavConfig.sessionIdleMinutes * 60_000L);
@@ -146,10 +147,10 @@ public final class NavServer implements NavService.Env {
                 .errorPages(st -> HttpResponse.xhtml(st, NavPages.frame("出错了", "", null, null, false, "http",
                         "<p class=\"err\">HTTP " + st + " " + HttpResponse.reasonPhrase(st) + "</p>", 0, null)));
         HttpServer.listen(ctx.stack(), 80, null, o, service::handle);
-        if (ctx.tls() != null) {
-            HttpServer.listen(ctx.stack(), 443, ctx.tls(), o, service::handle);
+        if (tls != null) {
+            HttpServer.listen(ctx.stack(), 443, tls, o, service::handle);
         }
-        NavService.LOG.info("180.yr：导航 {} 个网站；网页开在 {}（{}）", dir.all().size(), ctx.address(), https ? "HTTP 与 HTTPS" : "HTTP");
+        NavService.LOG.info("180.yr：导航登记了 {} 个网站（显示时只列解析得到的）；网页开在 {}（{}）", dir.candidateCount(), ctx.address(), https ? "HTTP 与 HTTPS" : "HTTP");
     }
 
     private volatile BooleanSupplier idAvailable = () -> false;

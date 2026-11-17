@@ -99,8 +99,9 @@ public final class PayServer implements PayBackend {
     /** 网络线程：在 pay.yr 这台主机上开网页与接口 */
     public static void startWeb(PayServer s, moe.qingu.youran.api.network.HostContext ctx, moe.qingu.youran.api.network.Ipv6Address resolver,
                                 java.util.function.BooleanSupplier idAvailable) {
-        new PayService(s, ctx, resolver, idAvailable).start();
-        Ledger.LOG.info("pay.yr：网页与接口开在 {}（{}）", ctx.address(), ctx.tls() == null ? "HTTP" : "HTTP 与 HTTPS");
+        PayService service = new PayService(s, ctx, resolver, idAvailable);
+        service.start();
+        Ledger.LOG.info("pay.yr：网页与接口开在 {}（{}）", ctx.address(), service.tls == null ? "HTTP" : "HTTP 与 HTTPS");
     }
 
     public void stop() {

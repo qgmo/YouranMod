@@ -23,6 +23,7 @@ public final class DnsMessage {
     public static final int TYPE_NS = 2;
     public static final int TYPE_CNAME = 5;
     public static final int TYPE_SOA = 6;
+    public static final int TYPE_TXT = 16;
     public static final int TYPE_AAAA = 28;
     public static final int TYPE_ANY = 255;
     public static final int CLASS_IN = 1;
@@ -467,6 +468,45 @@ public final class DnsMessage {
             return new Record(name, TYPE_SOA, CLASS_IN, ttl, null, null, null, soa);
         }
 
+        /**
+         * TXT 记录：一段文字（UTF-8），超过 255 字节时按 255 字节切成几段字符串（RFC 1035 的 character-string），
+         * 读的时候 {@link #text()} 再接起来。
+         */
+        public static Record txt(String name, long ttl, String text) {
+            return new Record(name, TYPE_TXT, CLASS_IN, ttl, null, null, encodeTexts(text), null);
+        }
+
+        /** TXT 记录的文字（各段字符串接起来，按 UTF-8 读）；不是 TXT 或格式不对时为 null */
+        public String text() {
+            if (type != TYPE_TXT || rdata == null) {
+                return null;
+            }
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            int i = 0;
+            while (i < rdata.length) {
+                int len = rdata[i] & 0xFF;
+                if (i + 1 + len > rdata.length) {
+                    return null;
+                }
+                out.write(rdata, i + 1, len);
+                i += 1 + len;
+            }
+            return new String(out.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+
+        static byte[] encodeTexts(String text) {
+            byte[] b = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            int i = 0;
+            do {
+                int len = Math.min(255, b.length - i);
+                out.write(len);
+                out.write(b, i, len);
+                i += len;
+            } while (i < b.length);
+            return out.toByteArray();
+        }
+
         public static Record raw(String name, int type, long ttl, byte[] rdata) {
             return new Record(name, type, CLASS_IN, ttl, null, null, rdata, null);
         }
@@ -478,7 +518,8 @@ public final class DnsMessage {
 
         @Override
         public String toString() {
-            String v = address != null ? address.toString() : target != null ? target : soa != null ? "SOA " + soa.mname : "?";
+            String v = address != null ? address.toString() : target != null ? target : soa != null ? "SOA " + soa.mname
+                    : type == TYPE_TXT ? "\"" + text() + "\"" : "?";
             return name + " " + ttl + " " + type + " " + v;
         }
     }

@@ -87,7 +87,7 @@ public final class HttpServer {
 
     /**
      * 在 {@code stack} 的 TCP {@code port} 上开 HTTP；{@code tls} 不为 null 时这个口是 HTTPS（证书由 {@link TlsServerContext} 给）。
-     * 一般一个网站开两次：80 口不带 TLS，443 口带 {@code HostContext.tls()}（服务器没配中间 CA 时为 null，就不开 443）。
+     * 一般一个网站开两次：80 口不带 TLS，443 口带 {@code HostContext.tls(名字)}（服务器没配中间 CA 时为 null，就不开 443）。
      */
     public static void listen(NetStack stack, int port, TlsServerContext tls, Options options, Handler handler) {
         Options o = options == null ? new Options() : options;
