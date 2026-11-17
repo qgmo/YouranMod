@@ -2,7 +2,10 @@ package moe.qingu.youran.api.network.ca;
 
 import moe.qingu.youran.api.network.Ipv6Address;
 
+import java.security.cert.X509Certificate;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -26,6 +29,15 @@ public interface CertificateAuthority {
 
     /** 服务开着为 null；没开时为原因（如服务器没配中间 CA） */
     String unavailableReason();
+
+    /**
+     * 现在签发用的中间 CA 证书链（中间 CA 在前，不含根），即签出的证书链里叶子后面的部分。
+     * {@link CertificateClient} 用它核对存着的证书是不是这张中间 CA 签的（中间 CA 换了就重新申请）。
+     * 服务没开、或不知道时为空表（这时存着的证书都不用，重新申请）。
+     */
+    default List<X509Certificate> issuerChain() {
+        return Collections.emptyList();
+    }
 
     /**
      * 申请：给 {@code names} 签一张证书。{@code csr} 是证书请求（PKCS#10 的 DER，可以用 {@link CertificateRequest#create} 生成），

@@ -29,6 +29,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Deque;
 import java.util.Iterator;
@@ -107,6 +108,11 @@ public final class CaService implements CertificateAuthority {
 
     public IntermediateCa intermediate() {
         return ca;
+    }
+
+    @Override
+    public List<X509Certificate> issuerChain() {
+        return ca == null ? Collections.<X509Certificate>emptyList() : ca.chain();
     }
 
     // ---- Java 接口 ----

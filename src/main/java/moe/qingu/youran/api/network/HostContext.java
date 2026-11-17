@@ -7,7 +7,8 @@ import java.util.function.Supplier;
 
 /**
  * 机房主机的运行环境（在网络线程上）。要 HTTPS 时自己向证书签发服务申请证书：
- * {@code api.network.ca.CertificateClient.start(stack(), 名字, null).tls()}。
+ * {@code api.network.ca.CertificateClient.start(stack(), 名字, null).tls()}；
+ * 要把证书存下、开服时接着用，多给一个 {@code CertificateStore}（存在哪自己定，如 {@code CertificateStore.directory(目录)}）。
  */
 public interface HostContext {
     /** 登记名（如 {@code youranmod:test}） */

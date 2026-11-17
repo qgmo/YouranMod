@@ -122,6 +122,17 @@ public final class YouranNetworkApi {
         return b == null ? null : b.rawHost(key);
     }
 
+    /**
+     * 服务端：世界存档的目录（主世界存档的根，如 {@code world/}）；网络没在运行时为 null。
+     * 只给出位置：要不要往里存、存在哪个子目录由调用方自己定（例如网站把证书存进自己模组的子目录，
+     * 见 {@link moe.qingu.youran.api.network.ca.CertificateStore#directory}）。
+     */
+    public static java.nio.file.Path worldDirectory() {
+        NetworkBackend b = NetworkHooks.backend();
+        java.io.File f = b == null ? null : b.worldDirectory();
+        return f == null ? null : f.toPath();
+    }
+
     /** 服务器内网前缀的长度（整个服务器是一个 /48） */
     public static final int NETWORK_PREFIX_LENGTH = 48;
 

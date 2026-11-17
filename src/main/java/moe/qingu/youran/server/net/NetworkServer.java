@@ -411,12 +411,26 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
 
     /**
      * 网络线程上：YouranMod 自己的网站向证书服务申请证书（HTTP 认证，网站的 80 口自动回），到期前续。
+     * 证书与私钥存在世界存档的 {@code youranmod/certs/<网站>/}（见 {@link #siteCertificates}），开服时还能用就直接用。
      * 返回给 443 口用的 TLS；证书服务没开时为 null（只开 HTTP）
      */
-    TlsServerContext siteTls(NetStack stack, Collection<String> names) {
-        CertificateClient c = CertificateClient.start(stack, names, null, ca, System::currentTimeMillis);
+    TlsServerContext siteTls(String hostKey, NetStack stack, Collection<String> names) {
+        CertificateClient c = CertificateClient.start(stack, names, null, ca, System::currentTimeMillis, siteCertificates(hostKey));
         certClients.add(c);
         return c.tls();
+    }
+
+    /**
+     * YouranMod 自己的网站（主机 {@code youranmod:<网站>}）的证书存在哪：世界存档的 {@code youranmod/certs/<网站>/}
+     * （如 {@code youranmod:pay} → {@code youranmod/certs/pay/}）。网络没在运行时为 null（不存）
+     */
+    public static moe.qingu.youran.api.network.ca.CertificateStore siteCertificates(String hostKey) {
+        java.nio.file.Path world = moe.qingu.youran.api.network.YouranNetworkApi.worldDirectory();
+        if (world == null) {
+            return null;
+        }
+        String site = hostKey.startsWith(MOD_ID + ":") ? hostKey.substring(MOD_ID.length() + 1) : hostKey;
+        return moe.qingu.youran.api.network.ca.CertificateStore.directory(world.resolve(MOD_ID).resolve("certs").resolve(site));
     }
 
     /** 网络线程上：证书签发服务 ca.yr（80 与 443 口；自己的证书直接签给自己） */
@@ -463,16 +477,16 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         new NtpServer(System::currentTimeMillis).start(hostStacks.get(HOST_NTP));
         startCa(hosts);
         NetStack testStack = hostStacks.get(HOST_TEST);
-        TestWebsite.start(testStack, siteTls(testStack, TEST_NAMES));
+        TestWebsite.start(testStack, siteTls(HOST_TEST, testStack, TEST_NAMES));
         CaptchaService cs = captcha;
         NetStack captchaStack = hostStacks.get(HOST_CAPTCHA);
         if (cs != null && captchaStack != null) {
-            cs.start(captchaStack, siteTls(captchaStack, Collections.singletonList(CAPTCHA_NAME)));
+            cs.start(captchaStack, siteTls(HOST_CAPTCHA, captchaStack, Collections.singletonList(CAPTCHA_NAME)));
         }
         LocationSigner signer = locationSigner;
         NetStack locationStack = hostStacks.get(HOST_LOCATION);
         if (signer != null && locationStack != null) {
-            new LocationService(signer, System::currentTimeMillis).start(locationStack, siteTls(locationStack, Collections.singletonList(LOCATION_NAME)));
+            new LocationService(signer, System::currentTimeMillis).start(locationStack, siteTls(HOST_LOCATION, locationStack, Collections.singletonList(LOCATION_NAME)));
         }
         moe.qingu.youran.server.net.pay.PayServer ps = pay;
         NetStack payStack = hostStacks.get(HOST_PAY);

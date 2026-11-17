@@ -141,8 +141,9 @@ public final class NavServer implements NavService.Env {
         for (String p : problems) {
             NavService.LOG.warn("180.yr：{}", p);
         }
-        // 自己向证书服务申请证书（HTTP 认证，80 口自动回），到期前续
-        moe.qingu.youran.api.network.tls.TlsServerContext tls = moe.qingu.youran.api.network.ca.CertificateClient.start(ctx.stack(), NAMES, null).tls();
+        // 自己向证书服务申请证书（HTTP 认证，80 口自动回），到期前续；存在世界存档的 youranmod/certs/180/
+        moe.qingu.youran.api.network.tls.TlsServerContext tls = moe.qingu.youran.api.network.ca.CertificateClient.start(ctx.stack(), NAMES, null,
+                moe.qingu.youran.server.net.NetworkServer.siteCertificates(ctx.key())).tls();
         https = tls != null;
         moe.qingu.youran.api.network.idyr.IdYrClient id = new moe.qingu.youran.api.network.idyr.IdYrClient(ctx.stack(),
                 new DnsResolver(ctx.stack(), resolver), NavConfig.idDomain, https, NavService.PLATFORM);

@@ -5,6 +5,8 @@ import moe.qingu.youran.api.network.ca.CaException;
 import moe.qingu.youran.api.network.ca.CertificateClient;
 import moe.qingu.youran.api.network.ca.CertificateOrder;
 import moe.qingu.youran.api.network.ca.CertificateRequest;
+import moe.qingu.youran.api.network.ca.CertificateClientAccess;
+import moe.qingu.youran.api.network.ca.CertificateStore;
 import moe.qingu.youran.api.network.ca.Challenge;
 import moe.qingu.youran.api.network.ca.TxtRecords;
 import moe.qingu.youran.api.network.dns.DefaultRegistrar;
@@ -540,6 +542,229 @@ class CaServiceTest {
         X509Certificate first = tls.chain().get(0);
         link.loop.runUntil(first.getNotAfter().getTime() - 30 * DAY + 60_000 - base);
         assertFalse(first.equals(tls.chain().get(0)));
+    }
+
+    // ---- 客户端助手：存起来 ----
+
+    /** 存在内存里的存储（save 可以设成失败） */
+    static final class MemoryStore implements CertificateStore {
+        CertificateStore.Saved saved;
+        int saves;
+        int loads;
+        boolean failSave;
+        java.io.IOException failLoad;
+
+        @Override
+        public CertificateStore.Saved load() throws java.io.IOException {
+            loads++;
+            if (failLoad != null) {
+                throw failLoad;
+            }
+            return saved;
+        }
+
+        @Override
+        public void save(List<X509Certificate> chain, java.security.PrivateKey key) throws java.io.IOException {
+            if (failSave) {
+                throw new java.io.IOException("磁盘满了（测试）");
+            }
+            saves++;
+            saved = new CertificateStore.Saved(chain, key);
+        }
+    }
+
+    static final List<String> SHOP = Arrays.asList("shop.yr", "www.shop.yr");
+
+    /** 第一次开服：申请到证书并存下 */
+    MemoryStore firstStart() throws Exception {
+        MemoryStore store = new MemoryStore();
+        CertificateClient c = CertificateClient.start(web, SHOP, null, ca, clock, store);
+        link.loop.advance(30_000);
+        assertNull(c.lastError(), c.lastError());
+        assertEquals(1, issuedCount());
+        assertEquals(1, store.saves);
+        assertEquals(c.certificate(), store.saved.chain, "存的就是在用的");
+        c.stop();
+        link.loop.drain();
+        return store;
+    }
+
+    @Test
+    void savedCertificateIsUsedWithoutApplying() throws Exception {
+        MemoryStore store = firstStart();
+        X509Certificate saved = store.saved.chain.get(0);
+        // 再开服：马上有证书（不等申请），不发申请
+        CertificateClient c = CertificateClient.start(web, SHOP, null, ca, clock, store);
+        assertEquals(saved, c.certificate().get(0), "start 返回时就放进 TLS 了");
+        HttpServer.listen(web, 443, c.tls(), null, req -> CompletableFuture.completedFuture(HttpResponse.text(200, "secure " + req.secure)));
+        link.loop.advance(60_000);
+        assertEquals(1, issuedCount(), "没有新的签发");
+        assertEquals(1, done(ca.orders()).size(), "没有新订单");
+        assertEquals(1, store.saves, "没重新存");
+        HttpClient.Response r = httpsGet("https://www.shop.yr/");
+        assertEquals("secure true", r.bodyText());
+        assertEquals(saved, r.tls.peerChain.get(0));
+        // 照常到剩 30 天时续，续好了覆盖存下
+        link.loop.runUntil(saved.getNotAfter().getTime() - 30 * DAY + 2 * 60_000 - base);
+        assertEquals(2, issuedCount());
+        assertFalse(saved.equals(c.certificate().get(0)));
+        assertEquals(2, store.saves);
+        assertEquals(c.certificate(), store.saved.chain);
+    }
+
+    @Test
+    void savedCertificateWithLessThanThirtyDaysIsRenewedAtStart() throws Exception {
+        MemoryStore store = firstStart();
+        X509Certificate saved = store.saved.chain.get(0);
+        // 关服很久：开服时只剩 29 天
+        link.loop.runUntil(saved.getNotAfter().getTime() - 29 * DAY - base);
+        CertificateClient c = CertificateClient.start(web, SHOP, null, ca, clock, store);
+        assertEquals(saved, c.certificate().get(0), "还没过期：先用着");
+        link.loop.advance(30_000);
+        assertNull(c.lastError(), c.lastError());
+        assertEquals(2, issuedCount(), "开服后马上续");
+        X509Certificate renewed = c.certificate().get(0);
+        assertFalse(saved.equals(renewed));
+        assertEquals(2, store.saves);
+        assertEquals(renewed, store.saved.chain.get(0), "覆盖存下");
+        assertTrue(CertificateClientAccess.keyMatches(store.saved.key, renewed.getPublicKey()), "存的是新证书的私钥");
+    }
+
+    /** 存着的不能用：开服时重新申请（不先放进 TLS），申请到了覆盖存下 */
+    void reapplies(MemoryStore store, CertificateClient c, int issuedBefore) throws Exception {
+        assertTrue(c.certificate().isEmpty(), "存着的没放进 TLS");
+        link.loop.advance(30_000);
+        assertNull(c.lastError(), c.lastError());
+        assertEquals(issuedBefore + 1, issuedCount());
+        assertEquals(c.certificate(), store.saved.chain, "申请到的覆盖存下");
+    }
+
+    @Test
+    void expiredSavedCertificateIsReplaced() throws Exception {
+        MemoryStore store = firstStart();
+        link.loop.runUntil(store.saved.chain.get(0).getNotAfter().getTime() + 60_000 - base);
+        reapplies(store, CertificateClient.start(web, SHOP, null, ca, clock, store), 1);
+    }
+
+    @Test
+    void savedCertificateForOtherNamesIsReplaced() throws Exception {
+        MemoryStore store = firstStart();
+        // 少了一个名字
+        CertificateClient c = CertificateClient.start(web, Collections.singletonList("shop.yr"), null, ca, clock, store);
+        reapplies(store, c, 1);
+        assertEquals(Collections.singletonList("DNS:shop.yr"), CertificateInfo.of(c.certificate().get(0)).subjectAltNames);
+        c.stop();
+        link.loop.drain();
+        // 多了一个名字（顺序、大小写不算变）
+        c = CertificateClient.start(web, Arrays.asList("WWW.shop.yr", "shop.yr"), null, ca, clock, store);
+        reapplies(store, c, 2);
+        c.stop();
+        link.loop.drain();
+        c = CertificateClient.start(web, Arrays.asList("www.shop.yr", "SHOP.yr"), null, ca, clock, store);
+        link.loop.advance(30_000);
+        assertEquals(3, issuedCount(), "同一组名字：直接用");
+    }
+
+    @Test
+    void savedCertificateFromAnotherIntermediateIsReplaced() throws Exception {
+        MemoryStore store = firstStart();
+        // 服务器换了一张中间 CA
+        TestPki other = new TestPki(base, "测试根 CA 2", "yr");
+        CaService ca2 = new CaService(other.intermediate(), null, link.loop, clock, new Random(2));
+        ca2.setValidator(new NetworkValidator(caStack, RESOLVER));
+        CertificateClient c = CertificateClient.start(web, SHOP, null, ca2, clock, store);
+        assertTrue(c.certificate().isEmpty());
+        link.loop.advance(30_000);
+        assertNull(c.lastError(), c.lastError());
+        assertEquals(1, done(ca2.issued()).size(), "向新的中间 CA 重新申请");
+        assertEquals(other.ca, store.saved.chain.get(1));
+        // 中间 CA 一样、但叶子不是它签的（同名的另一张中间 CA 签的，链尾巴照抄）：也不用
+        TestPki fake = new TestPki(base, "测试根 CA", "yr");
+        List<X509Certificate> forged = new java.util.ArrayList<>();
+        forged.add(fake.intermediate().issue(SHOP, store.saved.chain.get(0).getPublicKey(), new java.util.Date(clock.getAsLong())).get(0));
+        forged.addAll(ca.issuerChain());
+        assertNotNull(CertificateClientAccess.problem(new CertificateStore.Saved(forged, store.saved.key), SHOP, ca.issuerChain(), clock.getAsLong()));
+    }
+
+    @Test
+    void savedKeyThatDoesNotMatchIsReplaced() throws Exception {
+        MemoryStore store = firstStart();
+        store.saved = new CertificateStore.Saved(store.saved.chain, TestPki.ec().getPrivate());
+        reapplies(store, CertificateClient.start(web, SHOP, null, ca, clock, store), 1);
+        // RSA 私钥配 EC 证书
+        store.saved = new CertificateStore.Saved(store.saved.chain, TestPki.rsa().getPrivate());
+        assertTrue(CertificateClientAccess.problem(store.saved, SHOP, ca.issuerChain(), clock.getAsLong()).contains("私钥"));
+    }
+
+    @Test
+    void unreadableStoreIsReplaced() throws Exception {
+        MemoryStore store = firstStart();
+        store.failLoad = new java.io.IOException("读不了（测试）");
+        reapplies(store, CertificateClient.start(web, SHOP, null, ca, clock, store), 1);
+        // 存储里空的（坏文件由存储自己处理，交出来的是 null）
+        MemoryStore empty = new MemoryStore();
+        CertificateClient c = CertificateClient.start(link.host("fd00::84"), SHOP, null, ca, clock, empty);
+        assertEquals(1, empty.loads);
+        assertTrue(c.certificate().isEmpty());
+    }
+
+    @Test
+    void badFilesInDirectoryAreKeptAndReplaced() throws Exception {
+        java.nio.file.Path certs = dir.toPath().resolve("certs").resolve("shop");
+        java.nio.file.Files.createDirectories(certs);
+        java.nio.file.Files.write(certs.resolve("fullchain.pem"), "不是证书".getBytes(StandardCharsets.UTF_8));
+        java.nio.file.Files.write(certs.resolve("privkey.pem"), "也不是私钥".getBytes(StandardCharsets.UTF_8));
+        CertificateStore store = CertificateStore.directory(certs);
+        CertificateClient c = CertificateClient.start(web, SHOP, null, ca, clock, store);
+        link.loop.advance(30_000);
+        assertNull(c.lastError(), c.lastError());
+        assertEquals(1, issuedCount());
+        List<String> names = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<java.nio.file.Path> s = java.nio.file.Files.list(certs)) {
+            s.forEach(p -> names.add(p.getFileName().toString()));
+        }
+        Collections.sort(names);
+        assertEquals(4, names.size(), names.toString());
+        assertEquals("fullchain.pem", names.get(0));
+        assertTrue(names.get(1).startsWith("fullchain.pem.bad-"), names.toString());
+        assertEquals("privkey.pem", names.get(2));
+        assertTrue(names.get(3).startsWith("privkey.pem.bad-"), names.toString());
+        assertEquals("不是证书", new String(java.nio.file.Files.readAllBytes(certs.resolve(names.get(1))), StandardCharsets.UTF_8), "坏文件原样留着");
+        // 再开服：用存着的
+        c.stop();
+        link.loop.drain();
+        CertificateClient again = CertificateClient.start(web, SHOP, null, ca, clock, store);
+        assertEquals(c.certificate(), again.certificate());
+        link.loop.advance(30_000);
+        assertEquals(1, issuedCount());
+    }
+
+    @Test
+    void failedSaveKeepsTheCertificateInMemory() throws Exception {
+        MemoryStore store = new MemoryStore();
+        store.failSave = true;
+        CertificateClient c = CertificateClient.start(web, SHOP, null, ca, clock, store);
+        HttpServer.listen(web, 443, c.tls(), null, req -> CompletableFuture.completedFuture(HttpResponse.text(200, "secure " + req.secure)));
+        link.loop.advance(30_000);
+        assertNull(c.lastError(), c.lastError());
+        assertEquals(1, issuedCount());
+        assertNull(store.saved);
+        assertEquals("secure true", httpsGet("https://shop.yr/").bodyText());
+        // 也照常续
+        X509Certificate first = c.certificate().get(0);
+        link.loop.runUntil(first.getNotAfter().getTime() - 30 * DAY + 2 * 60_000 - base);
+        assertEquals(2, issuedCount());
+        assertFalse(first.equals(c.certificate().get(0)));
+    }
+
+    @Test
+    void storeIsNotReadWhenTheServiceIsOff() throws Exception {
+        MemoryStore store = firstStart();
+        int loads = store.loads;
+        CaService off = new CaService(null, "服务器没配中间 CA", link.loop, clock, new Random(3));
+        CertificateClient c = CertificateClient.start(web, SHOP, null, off, clock, store);
+        assertNull(c.tls(), "证书服务没开：只开 HTTP，存着的也不用");
+        assertEquals(loads, store.loads);
     }
 
     // ---- HTTP 接口 ----

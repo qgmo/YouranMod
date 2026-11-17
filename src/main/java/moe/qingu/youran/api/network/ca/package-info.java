@@ -3,6 +3,8 @@
  * 到期前自己续。用服务器配的中间 CA 签发（没配时服务不开）；和 DNS 注册无关，注册了域名不会自动有证书。
  * <ul>
  * <li>{@link moe.qingu.youran.api.network.ca.CertificateClient}：给模组用的助手，申请、认证、续期都自动做，给出 HTTPS 用的 TLS；</li>
+ * <li>{@link moe.qingu.youran.api.network.ca.CertificateStore}：证书与私钥存在哪（调用方自己定；{@code directory(目录)} 存成 PEM 文件），
+ * 给了它助手就把证书存下、开服时还能用就直接用；</li>
  * <li>{@link moe.qingu.youran.api.network.ca.CertificateAuthority}：Java 接口（异步），由 {@code YouranNetworkApi.certificateAuthority()} 得到；</li>
  * <li>{@link moe.qingu.youran.api.network.ca.CertificateRequest}：证书请求（CSR，PKCS#10）的生成与读取、验签；</li>
  * <li>{@link moe.qingu.youran.api.network.ca.CertificateOrder}、{@link moe.qingu.youran.api.network.ca.Challenge}：订单与认证要求；</li>

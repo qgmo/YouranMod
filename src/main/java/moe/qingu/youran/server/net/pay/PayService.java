@@ -216,9 +216,11 @@ final class PayService {
     PayService(PayServer core, HostContext ctx, Ipv6Address resolver) {
         this.core = core;
         this.ctx = ctx;
-        // pay.yr 与开发者文档站同一台主机，一张证书两个名字：自己向证书服务申请（HTTP 认证，80 口自动回），到期前续
+        // pay.yr 与开发者文档站同一台主机，一张证书两个名字：自己向证书服务申请（HTTP 认证，80 口自动回），到期前续；
+        // 存在世界存档的 youranmod/certs/pay/
         this.tls = moe.qingu.youran.api.network.ca.CertificateClient.start(ctx.stack(),
-                java.util.Arrays.asList(moe.qingu.youran.api.pay.PayApi.DOMAIN, moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN), null).tls();
+                java.util.Arrays.asList(moe.qingu.youran.api.pay.PayApi.DOMAIN, moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN), null,
+                moe.qingu.youran.server.net.NetworkServer.siteCertificates(ctx.key())).tls();
         this.id = new IdYrClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), PayConfig.idDomain, tls != null,
                 moe.qingu.youran.api.pay.PayApi.DOMAIN);
         // id.yr 开没开：经递归解析器查（按 TTL 缓存）；先问一次

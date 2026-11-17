@@ -10,16 +10,24 @@ import moe.qingu.youran.network.NetworkHooks;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
 import java.security.spec.ECGenParameterSpec;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.function.LongSupplier;
 
@@ -41,7 +49,20 @@ import java.util.function.LongSupplier;
  * }
  * }</pre>
  * 证书还没拿到时 443 口的握手失败（一般开服后几秒内就拿到）；申请失败时记日志，过一会儿再试（6 分钟起，每次加倍，最多 6 小时），
- * 手里有旧证书时继续用旧的。证书、私钥只在内存里，开服时重新申请。私钥每次申请都新生成（EC P-256），用它签一份证书请求（CSR）交上去。
+ * 手里有旧证书时继续用旧的。私钥每次申请都新生成（EC P-256），用它签一份证书请求（CSR）交上去。
+ *
+ * <h2>存起来</h2>
+ * 给了 {@link CertificateStore}（存在哪由调用方定，如 {@code CertificateStore.directory(目录)}）时，拿到证书（含续期）就存下；
+ * 开服时先读存着的，下面几条全满足就直接用、不再申请：
+ * <ul>
+ * <li>没过期（也已经生效）；</li>
+ * <li>证书里的名字（subjectAltName 的 DNS 名字）正好是这次要的这组名字；</li>
+ * <li>链是现在的中间 CA（{@link CertificateAuthority#issuerChain()}）签的：叶子后面正好是它，叶子的签名对得上（中间 CA 换了就重新申请）；</li>
+ * <li>私钥和证书里的公钥对得上。</li>
+ * </ul>
+ * 用存着的证书时照常到剩 {@value #RENEW_BEFORE_DAYS} 天续（已经不到 30 天的开服后马上续），续好了覆盖存下。
+ * 不满足的记一行日志、重新申请，申请到了覆盖存下。存不下时记日志，照用内存里的证书。
+ * 不给 {@link CertificateStore}（{@code null}）就只在内存里，每次开服重新申请。证书服务没开（没配中间 CA）时存着的也不用，只开 HTTP。
  */
 public final class CertificateClient {
     static final Logger LOG = LogManager.getLogger("YouranMod");
@@ -57,6 +78,7 @@ public final class CertificateClient {
     private final TxtRecords dns;
     private final CertificateAuthority ca;
     private final LongSupplier clock;
+    private final CertificateStore store;
     private final CertificateTlsContext tls;
     private final String unavailable;
     private EventLoop.Timer timer;
@@ -65,8 +87,9 @@ public final class CertificateClient {
     private volatile boolean stopped;
     private volatile String lastError;
 
-    private CertificateClient(NetStack stack, List<String> names, TxtRecords dns, CertificateAuthority ca, LongSupplier clock) {
+    private CertificateClient(NetStack stack, List<String> names, TxtRecords dns, CertificateAuthority ca, LongSupplier clock, CertificateStore store) {
         this.stack = stack;
+        this.store = store;
         this.loop = stack.loop();
         this.names = names;
         this.dns = dns;
@@ -85,12 +108,27 @@ public final class CertificateClient {
      * @param dns   能加删 TXT 记录的办法：给了就用 DNS 认证；null 用 HTTP 认证
      */
     public static CertificateClient start(NetStack stack, Collection<String> names, TxtRecords dns) {
-        NetworkBackend b = NetworkHooks.backend();
-        return start(stack, names, dns, b == null ? null : b.certificateAuthority(), System::currentTimeMillis);
+        return start(stack, names, dns, (CertificateStore) null);
     }
 
-    /** 同上，指定证书服务和时钟（测试、或者用别的证书服务时用） */
+    /**
+     * 同上，证书和私钥存进 {@code store}，开服时先用存着的（见类说明的“存起来”）。
+     *
+     * @param store 存在哪（如 {@code CertificateStore.directory(目录)}）；null 不存，每次开服重新申请
+     */
+    public static CertificateClient start(NetStack stack, Collection<String> names, TxtRecords dns, CertificateStore store) {
+        NetworkBackend b = NetworkHooks.backend();
+        return start(stack, names, dns, b == null ? null : b.certificateAuthority(), System::currentTimeMillis, store);
+    }
+
+    /** 指定证书服务和时钟，不存（测试、或者用别的证书服务时用） */
     public static CertificateClient start(NetStack stack, Collection<String> names, TxtRecords dns, CertificateAuthority ca, LongSupplier clock) {
+        return start(stack, names, dns, ca, clock, null);
+    }
+
+    /** 指定证书服务、时钟和存储（{@code store} 为 null 时不存） */
+    public static CertificateClient start(NetStack stack, Collection<String> names, TxtRecords dns, CertificateAuthority ca, LongSupplier clock,
+                                          CertificateStore store) {
         if (stack == null || names == null || clock == null) {
             throw new IllegalArgumentException("stack、names、clock 不能为 null");
         }
@@ -101,13 +139,117 @@ public final class CertificateClient {
         if (set.isEmpty()) {
             throw new IllegalArgumentException("至少要一个名字");
         }
-        CertificateClient c = new CertificateClient(stack, Collections.unmodifiableList(new ArrayList<>(set)), dns, ca, clock);
+        CertificateClient c = new CertificateClient(stack, Collections.unmodifiableList(new ArrayList<>(set)), dns, ca, clock, store);
         if (c.unavailable != null) {
             LOG.info("游戏内网络：{} 拿不到证书，只开 HTTP（证书服务没开：{}）", c.names, c.unavailable);
-        } else {
+        } else if (!c.useSaved()) {
             c.loop.execute(c::attempt);
         }
         return c;
+    }
+
+    /** 有存着的、能用的证书时放进 TLS、排好续期，返回 true；没有或不能用时返回 false（记日志） */
+    private boolean useSaved() {
+        if (store == null) {
+            return false;
+        }
+        CertificateStore.Saved saved;
+        try {
+            saved = store.load();
+        } catch (Exception e) {
+            LOG.warn("游戏内网络：{} 读不了存着的证书，重新申请：{}", names, e.toString());
+            return false;
+        }
+        if (saved == null) {
+            return false;
+        }
+        String why = problem(saved, names, ca.issuerChain(), clock.getAsLong());
+        if (why != null) {
+            LOG.info("游戏内网络：{} 存着的证书不能用（{}），重新申请", names, why);
+            return false;
+        }
+        tls.set(saved.key, saved.chain);
+        loop.execute(() -> scheduleRenewal(saved.chain.get(0), "用存着的证书"));
+        return true;
+    }
+
+    /** 存着的证书哪里不能用；能用返回 null */
+    static String problem(CertificateStore.Saved saved, List<String> names, List<X509Certificate> issuer, long now) {
+        if (saved.chain.isEmpty() || saved.key == null) {
+            return "没有证书或私钥";
+        }
+        X509Certificate leaf = saved.chain.get(0);
+        if (now >= leaf.getNotAfter().getTime()) {
+            return "已经过期（" + leaf.getNotAfter().toInstant() + "）";
+        }
+        if (now < leaf.getNotBefore().getTime()) {
+            return "还没生效（" + leaf.getNotBefore().toInstant() + "）";
+        }
+        Set<String> want = new HashSet<>();
+        for (String n : names) {
+            want.add(n.toLowerCase(Locale.ROOT));
+        }
+        Set<String> have = dnsNames(leaf);
+        if (!have.equals(want)) {
+            return "名字是 " + have + "，现在要 " + want;
+        }
+        if (issuer == null || issuer.isEmpty()) {
+            return "证书服务没给出现在的中间 CA，核对不了";
+        }
+        if (!saved.chain.subList(1, saved.chain.size()).equals(issuer)) {
+            return "链上不是现在的中间 CA";
+        }
+        try {
+            leaf.verify(issuer.get(0).getPublicKey());
+        } catch (GeneralSecurityException | RuntimeException e) {
+            return "不是现在的中间 CA 签的";
+        }
+        if (!keyMatches(saved.key, leaf.getPublicKey())) {
+            return "私钥和证书的公钥对不上";
+        }
+        return null;
+    }
+
+    private static Set<String> dnsNames(X509Certificate leaf) {
+        Set<String> out = new HashSet<>();
+        try {
+            Collection<List<?>> sans = leaf.getSubjectAlternativeNames();
+            if (sans != null) {
+                for (List<?> e : sans) {
+                    if (e.size() >= 2 && Integer.valueOf(2).equals(e.get(0)) && e.get(1) instanceof String) {
+                        out.add(((String) e.get(1)).toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        } catch (CertificateParsingException e) {
+            // 读不了当作没有名字
+        }
+        return out;
+    }
+
+    /** 用私钥签一段固定的字、拿证书的公钥验 */
+    static boolean keyMatches(PrivateKey key, PublicKey pub) {
+        String alg = key.getAlgorithm();
+        if (!alg.equals(pub.getAlgorithm())) {
+            return false;
+        }
+        String sigAlg = alg.equals("EC") ? "SHA256withECDSA" : alg.equals("RSA") ? "SHA256withRSA" : null;
+        if (sigAlg == null) {
+            return false;
+        }
+        try {
+            byte[] data = "YouranMod certificate key check".getBytes(StandardCharsets.US_ASCII);
+            Signature s = Signature.getInstance(sigAlg);
+            s.initSign(key);
+            s.update(data);
+            byte[] sig = s.sign();
+            Signature v = Signature.getInstance(sigAlg);
+            v.initVerify(pub);
+            v.update(data);
+            return v.verify(sig);
+        } catch (GeneralSecurityException | RuntimeException e) {
+            return false;
+        }
     }
 
     /** 给 HTTPS 服务器用的 TLS；证书服务没开（服务器没配中间 CA 等）时为 null，这时只开 HTTP */
@@ -215,11 +357,21 @@ public final class CertificateClient {
         tls.set(kp.getPrivate(), chain);
         lastError = null;
         retryDelay = RETRY_FIRST_MS;
-        X509Certificate leaf = chain.get(0);
+        scheduleRenewal(chain.get(0), "拿到了证书");
+        if (store != null) {
+            try {
+                store.save(chain, kp.getPrivate());
+            } catch (Exception e) {
+                LOG.warn("游戏内网络：{} 的证书存不下，照用内存里的（下次开服重新申请）：{}", names, e.toString());
+            }
+        }
+    }
+
+    private void scheduleRenewal(X509Certificate leaf, String what) {
         long notBefore = leaf.getNotBefore().getTime();
         long notAfter = leaf.getNotAfter().getTime();
         long renewAt = notAfter - Math.min(RENEW_BEFORE_DAYS * DAY_MS, (notAfter - notBefore) / 3);
-        LOG.info("游戏内网络：{} 拿到了证书（序列号 {}，有效到 {}），{} 天后续", names, leaf.getSerialNumber().toString(16), leaf.getNotAfter(),
+        LOG.info("游戏内网络：{} {}（序列号 {}，有效到 {}），{} 天后续", names, what, leaf.getSerialNumber().toString(16), leaf.getNotAfter(),
                 Math.max(0, Math.round((renewAt - clock.getAsLong()) / (double) DAY_MS)));
         schedule(renewAt - clock.getAsLong());
     }
