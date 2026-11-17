@@ -218,7 +218,7 @@ public final class CertificateClient {
         long notAfter = leaf.getNotAfter().getTime();
         long renewAt = notAfter - Math.min(RENEW_BEFORE_DAYS * DAY_MS, (notAfter - notBefore) / 3);
         LOG.info("游戏内网络：{} 拿到了证书（序列号 {}，有效到 {}），{} 天后续", names, leaf.getSerialNumber().toString(16), leaf.getNotAfter(),
-                Math.max(0, (renewAt - clock.getAsLong()) / DAY_MS));
+                Math.max(0, Math.round((renewAt - clock.getAsLong()) / (double) DAY_MS)));
         schedule(renewAt - clock.getAsLong());
     }
 
