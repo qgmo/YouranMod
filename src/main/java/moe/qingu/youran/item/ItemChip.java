@@ -75,6 +75,12 @@ public class ItemChip extends ItemModelled {
             lines.add(I18n.format("youranmod.chip.heat", tag.getInteger(ChipNbt.HEAT), Math.round(tag.getInteger(ChipNbt.HEAT) / 60.0)));
             lines.add(I18n.format("youranmod.chip.lifetime", tag.getLong(ChipNbt.LIFETIME) / 3600));
         }
+        // 装进电脑开过机的（服主 11-17：寿命是开机时长）：用了多少、还剩多少
+        long used = tag.getLong(moe.qingu.youran.api.chip.CpuChip.USED);
+        if (used > 0 && !tag.getBoolean(ChipNbt.SCRAPPED)) {
+            lines.add(I18n.format("youranmod.chip.used", String.format(java.util.Locale.ROOT, "%.1f", used / 3600.0),
+                    String.format(java.util.Locale.ROOT, "%.1f", Math.max(0, tag.getLong(ChipNbt.LIFETIME) - used) / 3600.0)));
+        }
         ChipModel kindOf = model;
         if (kindOf != null && !kindOf.isCpu()) {
             lines.add(I18n.format("youranmod.chip.rated_access", ChipModel.accessNs(kindOf.ratedKHz), mhz(kindOf.ratedKHz)));

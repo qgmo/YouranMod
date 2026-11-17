@@ -6,6 +6,8 @@ IC2 流体/固体装罐机的富集模式加了“流体 + 物品 → 流体 + �
 
 服务端翻译（`moe.qingu.youran.api.lang.ServerLang`）：服务端读语言目录（`config/youranmod.cfg` 的 `lang.dir`，默认与 YouranAPI 共用 `config/youranapi/lang`）与各模组 jar 里所有语言的语言文件（语言目录里直接放的 .lang 由文件名定语言，如 zh_cn.lang、zh_tw.lang、zh_cn-覆盖.lang），给其他模组查只在服务端用的中文名（家具的 MineBay、YouranSCP 的 SCP-294 在用）。
 
+芯片品质接进电脑（`moe.qingu.youran.api.chip`）：CPU 温度与最近 1 分钟温度积分、调频的档与实际频率、运行错误率、寿命与过热的后果，YouranSCP 的普通电脑、个人电脑与家具电脑共用；数在 `config/youranmod.cfg` 的 `chip_runtime`。
+
 电脑外设（`moe.qingu.youran.api.peripheral`）：外设物品的接口与基类、给电脑模组用的查询（某台电脑装了哪些外设、有没有某项能力），其他模组的电脑也能接入；本模组注册 5.25 英寸软驱、汉卡两种外设（先不加合成配方）。软盘（360 KB）堆叠数 1，NBT 只存盘号与标签名，内容存在 SCP 电脑那边的服务里。
 
 芯片线“硅”：电弧炉出硅锭、打粉机与粉碎机出硅粉、装罐机与搅拌机出三氯氢硅（纯度记在流体 NBT 里），IC2 太阳能蒸馏机与沉浸原油精馏塔提纯，都用 Mixin 接进各机器；有 JEI 时显示这些配方。
