@@ -563,7 +563,9 @@ final class NetCommand extends CommandBase {
         }
         String n;
         try {
-            n = moe.qingu.youran.api.network.DomainNames.toAscii(args[2]);
+            // 记录名可以带下划线（如 _acme-challenge）：ASCII 的照写（由 DNS 服务检查），只有非 ASCII 的按国际化域名转
+            n = moe.qingu.youran.api.network.DomainNames.isAscii(args[2]) ? args[2].trim().toLowerCase(java.util.Locale.ROOT)
+                    : moe.qingu.youran.api.network.DomainNames.toAscii(args[2]);
         } catch (IllegalArgumentException e) {
             tell(sender, "§c" + e.getMessage());
             return;
