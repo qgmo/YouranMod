@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -146,27 +147,31 @@ class ServerLangTest {
     void backgroundLoadAndOnlyLatestWins() throws InterruptedException {
         CountDownLatch slowStarted = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(2);
-        ServerLang.onLoaded(done::countDown);
+        AtomicReference<Thread> slowThread = new AtomicReference<>();
+        AtomicInteger done = new AtomicInteger();
+        ServerLang.onLoaded(done::incrementAndGet);
         ServerLang.start(() -> {
+            slowThread.set(Thread.currentThread());
             slowStarted.countDown();
             try {
-                release.await(10, TimeUnit.SECONDS);
+                release.await();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
             return table("zh_cn", "k", "慢的旧表");
         }, true);
+        // 等的都是明确的信号（超时只防卡死，不影响结果）
         assertTrue(slowStarted.await(10, TimeUnit.SECONDS));
         assertFalse(ServerLang.isLoaded(), "加载完成前");
-        ServerLang.start(() -> table("zh_cn", "k", "新表"), true);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (!ServerLang.isLoaded() && System.nanoTime() < deadline) {
-            Thread.yield();
-        }
+        // 后开始的那次在当前线程上加载完
+        ServerLang.start(() -> table("zh_cn", "k", "新表"), false);
         assertEquals("新表", ServerLang.get("zh_cn", "k"));
+        assertEquals(1, done.get());
+        // 放慢的那次走完（加载线程结束 = 它的 finish 已经执行完）
         release.countDown();
-        assertFalse(done.await(500, TimeUnit.MILLISECONDS), "旧的那次加载完成后丢掉，不再回调");
+        slowThread.get().join(10_000);
+        assertFalse(slowThread.get().isAlive());
+        assertEquals(1, done.get(), "旧的那次加载完成后丢掉，不再回调");
         assertEquals("新表", ServerLang.get("zh_cn", "k"));
         assertEquals(1, ServerLang.version());
     }
