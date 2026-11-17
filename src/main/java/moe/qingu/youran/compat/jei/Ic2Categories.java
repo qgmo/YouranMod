@@ -127,6 +127,12 @@ final class Ic2Categories {
                     return ic2.getHeight() + FluidItemRecipe.NOTES_GAP + FluidItemRecipe.NOTE_LINES * FluidItemRecipe.NOTE_LINE_HEIGHT;
                 }
 
+                // IC2 的背景画在不带偏移的 draw(Minecraft) 里（带偏移的那个是空的），两个都要转过去
+                @Override
+                public void draw(Minecraft minecraft) {
+                    ic2.draw(minecraft);
+                }
+
                 @Override
                 public void draw(Minecraft minecraft, int xOffset, int yOffset) {
                     ic2.draw(minecraft, xOffset, yOffset);
