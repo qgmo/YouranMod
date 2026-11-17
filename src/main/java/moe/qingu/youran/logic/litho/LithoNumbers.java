@@ -132,8 +132,9 @@ public final class LithoNumbers {
     public static final double SCRAP_LAMP = 0.25;
     public static final double SCRAP_MASK = 0.2;
     public static final double SCRAP_ALIGN = 0.2;
-    /** 芯片寿命的基准（开机小时） */
-    public static final int LIFETIME_BASE_HOURS = 300;
+    /** 芯片寿命（开机小时）：没报废的最差 {@value #LIFETIME_MIN_HOURS}，最好再加 {@value #LIFETIME_SPAN_HOURS}（服主 11-17：至少几千小时，好的上万） */
+    public static final int LIFETIME_MIN_HOURS = 3000;
+    public static final int LIFETIME_SPAN_HOURS = 12000;
     /** 耐热性：一分钟平均温度的基准（K）、外壳加成、对准加成 */
     public static final double HEAT_BASE_K = 335;
     public static final double HEAT_PACKAGE_K = 25;

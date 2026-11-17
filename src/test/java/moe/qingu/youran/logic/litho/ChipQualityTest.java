@@ -1,5 +1,6 @@
 package moe.qingu.youran.logic.litho;
 
+import moe.qingu.youran.logic.purity.Purity;
 import moe.qingu.youran.logic.purity.WaferMold;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,33 @@ class ChipQualityTest {
         in.lampResolutionUm = LithoNumbers.QUARTZ_LAMP_RESOLUTION_UM;
         in.pack = ChipPackage.GOLD;
         return in;
+    }
+
+    /** 寿命（服主 11-17）：没报废的最差也有几千小时，好的上万 */
+    @Test
+    void lifetimeThousandsToTensOfThousandsOfHours() {
+        java.util.Random still = new java.util.Random() {
+            @Override
+            public double nextDouble() {
+                return 0;
+            }
+
+            @Override
+            public double nextGaussian() {
+                return 0;
+            }
+        };
+        ChipQuality.Inputs worst = good();
+        worst.solvent = 0;
+        worst.waferNines = Purity.WAFER_GRADE_NINES;
+        worst.alignPermille = LithoNumbers.ALIGN_MIN_PERMILLE;
+        assertEquals(LithoNumbers.LIFETIME_MIN_HOURS * 3600L, ChipQuality.evaluate(worst, still).lifetimeSeconds);
+        ChipQuality.Inputs best = good();
+        best.solvent = 1;
+        best.waferNines = Purity.WAFER_GRADE_NINES + 10;
+        best.alignPermille = 1000;
+        assertEquals((LithoNumbers.LIFETIME_MIN_HOURS + LithoNumbers.LIFETIME_SPAN_HOURS) * 3600L, ChipQuality.evaluate(best, still).lifetimeSeconds);
+        assertTrue(ChipQuality.evaluate(good(), still).lifetimeSeconds >= 10000 * 3600L, "好的上万小时");
     }
 
     /** 负胶 2.5 μm 做不了 1 μm 以下（以后的现代芯片）；Z80（4 μm）、8088（3 μm）都做得了 */
@@ -106,7 +134,7 @@ class ChipQualityTest {
                 ok++;
                 assertTrue(res.maxKHz > ChipModel.Z80.ratedKHz * 0.6 && res.maxKHz < ChipModel.Z80.ratedKHz * 1.8);
                 assertTrue(res.heatToleranceKs > 18000 && res.heatToleranceKs < 25000);
-                assertTrue(res.lifetimeSeconds > 50 * 3600L);
+                assertTrue(res.lifetimeSeconds > 2800 * 3600L && res.lifetimeSeconds < 16000 * 3600L, "寿命几千到上万小时：" + res.lifetimeSeconds / 3600);
             }
         }
         double rate = ok / 2000.0;

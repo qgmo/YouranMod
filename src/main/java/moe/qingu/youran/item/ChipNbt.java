@@ -11,7 +11,7 @@ import net.minecraft.nbt.NBTTagCompound;
  * {Model:"z80", Serial:"Z80-3F2A9C1E", Scrapped:0b,
  *  HeatTolerance:22100,   // 耐热性 K·s（最近 1 分钟温度对时间积分的上限）
  *  MaxFreq:4870,          // 最大频率 kHz
- *  Lifetime:1080000L,     // 寿命：开机秒数
+ *  Lifetime:39600000L,    // 寿命：开机秒数（几千到上万小时）
  *  StdFreq:4000, MinFreq:2500, MaxAdjFreq:6000,  // 这型 CPU 自带的标准频率与可调范围 kHz
  *  Made:{Nines:9, Mold:"gold", Resist:"negative", Solvent:900, Align:930, Lamp:780, Package:"gold", MaskWear:12}}
  * </pre>
