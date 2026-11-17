@@ -266,8 +266,9 @@ public final class AlchemistryCompat {
                 Object r = it.next();
                 net.minecraftforge.fluids.FluidStack in = (net.minecraftforge.fluids.FluidStack) r.getClass().getMethod("getInput").invoke(r);
                 ItemStack out = (ItemStack) r.getClass().getMethod("getOutput").invoke(r);
+                // 只认炼金化学自动加的那种：流体注册名就是产物元素的名字（我们自己定的 144 mB 配方，如四氯化锡 16 个 ⇄ 144 mB，是化合物、不同名，不动）
                 if (in != null && in.getFluid() != null && out != null && moe.qingu.youran.logic.alchemy.ElementFluidRule.replaceIngotPair(in.amount, out.getCount(),
-                        in.getFluid().getTemperature(in), in.getFluid().isGaseous(in))) {
+                        in.getFluid().getTemperature(in), in.getFluid().isGaseous(in)) && isSameNamedElement(out, in.getFluid().getName())) {
                     it.remove();
                     replaced.put(in.getFluid().getName(), out.copy());
                 }
@@ -297,6 +298,17 @@ public final class AlchemistryCompat {
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
             YouranMod.LOG.error("换炼金化学气体的 144 mB 配方失败", e);
         }
+    }
+
+    /** {@code stack} 是不是叫 {@code name} 的那个元素（不是化合物、不是别的元素） */
+    private static boolean isSameNamedElement(ItemStack stack, String name) throws ReflectiveOperationException {
+        Class<?> elements = Class.forName("al132.alchemistry.chemistry.ElementRegistry");
+        Object element = elements.getMethod("get", String.class).invoke(elements.getField("INSTANCE").get(null), name);
+        if (element == null) {
+            return false;
+        }
+        ItemStack expected = (ItemStack) element.getClass().getMethod("toItemStack", int.class).invoke(element, 1);
+        return ItemStack.areItemsEqual(expected, stack);
     }
 
     private static boolean hasAtomizer(List<Object> atomizers, net.minecraftforge.fluids.Fluid fluid, int mb) throws ReflectiveOperationException {
