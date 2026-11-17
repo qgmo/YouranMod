@@ -94,10 +94,7 @@ final class Ic2Categories {
             return uid;
         }
 
-        @Override
-        public String getTitle() {
-            return I18n.format(bottling ? "youranmod.jei.canner_bottling" : "youranmod.jei.canner_reaction");
-        }
+        // 标题用 IC2 自己装罐机页的（机器名），不另起名字（服主 11-17）
 
         @Override
         public String getModName() {
