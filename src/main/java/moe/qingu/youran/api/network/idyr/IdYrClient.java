@@ -199,16 +199,25 @@ public class IdYrClient {
         this.domain = idDomain == null ? DEFAULT_DOMAIN : idDomain.trim().toLowerCase(Locale.ROOT);
         this.tls = tls;
         this.self = self;
+        this.names = stack == null || resolver == null ? null : new moe.qingu.youran.api.network.stack.NameCache(resolver, stack.loop());
     }
+
+    /** id.yr 解析得到没有（{@link #available}） */
+    private final moe.qingu.youran.api.network.stack.NameCache names;
 
     /** 用游戏内网络的递归解析器 */
     public static IdYrClient of(NetStack stack, String idDomain, boolean tls, String self) {
         return new IdYrClient(stack, stack == null ? null : new DnsResolver(stack, YouranNetworkApi.resolverAddress()), idDomain, tls, self);
     }
 
-    /** 这个服务器开着 id.yr（装了 YouranAuth 并开了 ingame-id；服务端用） */
-    public static boolean available(String idDomain) {
-        return YouranNetworkApi.addressOfName(idDomain == null ? DEFAULT_DOMAIN : idDomain) != null;
+    /**
+     * 这个服务器开着 id.yr（装了 YouranAuth 并开了 ingame-id）：id.yr 的名字经递归解析器解析得到地址。按 TTL 缓存上一次的回答
+     * （{@link moe.qingu.youran.api.network.stack.NameCache}），到期在后台再问；第一次调用时还没有回答，给 false 并开始问，
+     * 所以网站开起来时先调用一次。没有协议栈时为 false。任意线程
+     */
+    public boolean available() {
+        moe.qingu.youran.api.network.stack.NameCache n = names;
+        return n != null && n.resolves(domain);
     }
 
     public String domain() {

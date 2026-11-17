@@ -5,7 +5,6 @@ import moe.qingu.youran.api.network.dns.DnsServer;
 import moe.qingu.youran.api.network.dns.Registrar;
 import moe.qingu.youran.api.network.dns.Registration;
 import moe.qingu.youran.api.network.dns.Whois;
-import moe.qingu.youran.api.network.packet.DnsMessage;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -14,19 +13,16 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.LongSupplier;
 import java.util.regex.Pattern;
 
 /**
  * DNS 的全局状态（YouranMod 内部用；给别的模组的入口是 {@code api.network.dns.DnsRegistry}）：
- * 顶级域登记表、根区由哪台 {@link DnsServer} 回答、各地址上的默认 DNS 服务（内部解析用）。关服（网络停）时清空。
+ * 顶级域登记表、根区由哪台 {@link DnsServer} 回答。关服（网络停）时清空。
  */
 public final class DnsState {
     /** 顶级域：字母、数字、连字符，不以连字符开头或结尾（国际化顶级域是 A-label） */
     public static final Pattern TLD = Pattern.compile("[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?");
-    /** 内部解析最多跟几次委派 */
-    static final int MAX_REFERRALS = 16;
 
     private static final class Tld {
         final Registrar registrar;
@@ -41,7 +37,6 @@ public final class DnsState {
     }
 
     private static final Map<String, Tld> tlds = new TreeMap<>();
-    private static final Map<Ipv6Address, DnsServer> servers = new ConcurrentHashMap<>();
     private static DnsServer root;
     private static volatile List<Ipv6Address> rootServers = Collections.emptyList();
     static LongSupplier clock = System::currentTimeMillis;
@@ -130,62 +125,9 @@ public final class DnsState {
         return rootServers;
     }
 
-    // ---- 内部解析 ----
-
-    /** 默认 DNS 服务开起来时登记自己（内部解析按地址找它） */
-    public static void addServer(Ipv6Address address, DnsServer server) {
-        servers.put(address, server);
-    }
-
-    /**
-     * 内部解析：从根开始顺着委派直接问各地址上的默认 DNS 服务（不走报文、不经解析器的缓存），返回 {@code name} 的 AAAA 地址。
-     * 名字不存在、没有地址、委派到的地址上不是默认 DNS 服务（问不了）时返回空表。任意线程
-     */
-    public static List<Ipv6Address> lookup(String name) {
-        String n;
-        try {
-            n = DnsMessage.canonical(moe.qingu.youran.api.network.DomainNames.toAscii(name));
-        } catch (IllegalArgumentException e) {
-            return Collections.emptyList();
-        }
-        DnsMessage q = DnsMessage.query(0, n, DnsMessage.TYPE_AAAA, false);
-        List<Ipv6Address> next = rootServers;
-        for (int step = 0; step < MAX_REFERRALS && !next.isEmpty(); step++) {
-            DnsMessage m = null;
-            for (Ipv6Address a : next) {
-                DnsServer s = servers.get(a);
-                if (s != null) {
-                    m = s.answer(q);
-                    break;
-                }
-            }
-            if (m == null || m.rcode != DnsMessage.RCODE_OK) {
-                // 问不到（不是默认 DNS 服务）、查无此名、拒绝
-                return Collections.emptyList();
-            }
-            List<Ipv6Address> out = new ArrayList<>();
-            for (DnsMessage.Record r : m.answers) {
-                if (r.type == DnsMessage.TYPE_AAAA && r.address != null && DnsMessage.canonical(r.name).equals(n)) {
-                    out.add(r.address);
-                }
-            }
-            if (!out.isEmpty() || m.authoritative) {
-                return out;
-            }
-            next = new ArrayList<>();
-            for (DnsMessage.Record r : m.additional) {
-                if (r.type == DnsMessage.TYPE_AAAA && r.address != null) {
-                    next.add(r.address);
-                }
-            }
-        }
-        return Collections.emptyList();
-    }
-
     /** 网络停了：全部清空 */
     public static synchronized void reset() {
         tlds.clear();
-        servers.clear();
         root = null;
         rootServers = Collections.emptyList();
     }

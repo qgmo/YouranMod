@@ -8,6 +8,7 @@ import moe.qingu.youran.api.network.dns.Registration;
 import moe.qingu.youran.api.network.packet.DnsMessage;
 import moe.qingu.youran.api.network.packet.Ipv6Packet;
 import moe.qingu.youran.api.network.stack.DnsResolver;
+import moe.qingu.youran.api.network.stack.NameCache;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.TestLink;
 import moe.qingu.youran.network.DnsState;
@@ -25,7 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 分层委派：根 → 顶级域 → 二级域名自己的 DNS → 记录，经递归解析器（假时钟）；运行中注册、删除按 TTL 传开；内部解析。
+ * 分层委派：根 → 顶级域 → 二级域名自己的 DNS → 记录，经递归解析器（假时钟）；运行中注册、删除按 TTL 传开；
+ * 服务端网站用的名字缓存（{@link NameCache}，真的 DNS 查询、按 TTL 刷新）。
  */
 class DnsDelegationTest {
     static final Ipv6Address ROOT = Ipv6Address.parse("fd00::1:53");
@@ -157,19 +159,58 @@ class DnsDelegationTest {
         assertEquals(Collections.singletonList(WEB), aaaa("www.game.cfm"));
     }
 
+    NameCache cache() {
+        return new NameCache(new DnsResolver(client, RESOLVER), link.loop);
+    }
+
     @Test
-    void internalLookupSeesCurrentDataWithoutCache() {
-        assertTrue(DnsState.lookup("www.shop.yr").isEmpty());
+    void nameCacheAsksTheResolverAndHonorsTtl() throws Exception {
+        NameCache names = cache();
+        // 从没问过：先给“没有”，开始问（真的 DNS 查询，经递归解析器）
+        assertTrue(names.addresses("www.shop.yr").isEmpty());
+        link.loop.advance(5_000);
+        assertTrue(names.addresses("www.shop.yr").isEmpty(), "查无此名");
         registerShop();
-        link.loop.drain();
-        assertEquals(Collections.singletonList(WEB), DnsState.lookup("WWW.Shop.yr"));
+        // 否定回答 60 秒内不再问
+        int before = asked.size();
+        link.loop.advance(NameCache.NEGATIVE_RETRY_MS - 10_000);
+        assertTrue(names.addresses("www.shop.yr").isEmpty());
+        link.loop.advance(1_000);
+        assertEquals(before, asked.size(), "没到时间不问");
+        link.loop.advance(10_000);
+        // 到期：先给上一次的，在后台问；回答来了换上
+        assertTrue(names.addresses("www.shop.yr").isEmpty());
+        link.loop.advance(5_000);
+        assertEquals(Collections.singletonList(WEB), names.addresses("www.shop.yr"));
+        // 改了地址：TTL（300 秒）内还是旧的，过了以后换成新的
+        shopDns.setAddresses("www.shop.yr", Collections.singletonList(WEB2));
+        link.loop.advance(DnsServer.TTL_RECORD * 1000 - 20_000);
+        assertEquals(Collections.singletonList(WEB), names.addresses("www.shop.yr"));
+        link.loop.advance(20_000);
+        names.addresses("www.shop.yr");
+        link.loop.advance(5_000);
+        assertEquals(Collections.singletonList(WEB2), names.addresses("www.shop.yr"));
+        // 删掉：过了 TTL 查不到
         shopDns.remove("www.shop.yr");
-        link.loop.drain();
-        assertTrue(DnsState.lookup("www.shop.yr").isEmpty());
-        // 委派到不是默认 DNS 服务的地址：问不了，当作没有
+        link.loop.advance(DnsServer.TTL_RECORD * 1000);
+        names.addresses("www.shop.yr");
+        link.loop.advance(5_000);
+        assertTrue(names.addresses("www.shop.yr").isEmpty());
+    }
+
+    @Test
+    void nameCacheRefreshFuture() throws Exception {
+        registerShop();
+        NameCache names = cache();
+        CompletableFuture<List<Ipv6Address>> f = names.refresh("www.shop.yr");
+        assertTrue(f == names.refresh("WWW.shop.yr"), "同一个名字同时只问一次");
+        link.loop.advance(5_000);
+        assertEquals(Collections.singletonList(WEB), f.get());
+        // 委派到不回答的地址：查询失败，当作没有
         yr.register("custom.yr", "m", Collections.singletonList(Ipv6Address.parse("fd00::99")));
-        link.loop.drain();
-        assertTrue(DnsState.lookup("custom.yr").isEmpty());
-        assertTrue(DnsState.lookup("bad..name").isEmpty());
+        CompletableFuture<List<Ipv6Address>> g = names.refresh("custom.yr");
+        link.loop.advance(30_000);
+        assertTrue(g.isDone());
+        assertTrue(g.get().isEmpty());
     }
 }

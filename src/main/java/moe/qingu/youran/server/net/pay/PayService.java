@@ -213,14 +213,16 @@ final class PayService {
     /** 这台主机的 TLS；没配中间 CA 为 null */
     final moe.qingu.youran.api.network.tls.TlsServerContext tls;
 
-    PayService(PayServer core, HostContext ctx, Ipv6Address resolver, BooleanSupplier idAvailable) {
+    PayService(PayServer core, HostContext ctx, Ipv6Address resolver) {
         this.core = core;
         this.ctx = ctx;
         // pay.yr 与开发者文档站同一台主机，证书只签这两个名字（主机自己给的，和 DNS 无关）
         this.tls = ctx.tls(java.util.Arrays.asList(moe.qingu.youran.api.pay.PayApi.DOMAIN, moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN));
         this.id = new IdYrClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), PayConfig.idDomain, tls != null,
                 moe.qingu.youran.api.pay.PayApi.DOMAIN);
-        this.idAvailable = idAvailable;
+        // id.yr 开没开：经递归解析器查（按 TTL 缓存）；先问一次
+        this.idAvailable = id::available;
+        id.available();
         this.apiLimit = new SourceLimiter(PayConfig.apiPerMinute / 60.0, Math.max(10, PayConfig.apiPerMinute / 4), 8192);
     }
 

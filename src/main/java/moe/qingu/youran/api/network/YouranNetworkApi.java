@@ -77,7 +77,7 @@ public final class YouranNetworkApi {
 
     /**
      * 给一个域名登记导航信息（{@code 180.yr} 上的名字、分类、一句话）。和域名注册分开：域名由网站自己向注册局注册；
-     * 显示导航时这个名字解析不到地址（内部解析，见 {@link #addressOfName}）就不显示。同一个名字登记了两次时先登记的算。
+     * 显示导航时这个名字解析不到地址（180.yr 经递归解析器查，按 TTL 缓存）就不显示。同一个名字登记了两次时先登记的算。
      * 模组加载阶段调用。
      */
     public static void registerNavigation(String name, SiteInfo nav) {
@@ -150,21 +150,6 @@ public final class YouranNetworkApi {
     public static TlsServerContext serverTls(Supplier<? extends Collection<String>> names) {
         NetworkBackend b = NetworkHooks.backend();
         return b == null ? null : b.serverTls(names);
-    }
-
-    /**
-     * 服务端：内部解析 {@code name}（可以写 Unicode）的地址：从根开始顺着委派直接问各台 YouranMod 默认 DNS 服务
-     * （{@code api.network.dns.DnsServer}）现在的数据，不走 DNS 报文、不经解析器的缓存。有几个地址时给第一个。
-     * 不存在、没有地址、委派到的不是默认 DNS 服务、网络没在运行时返回 null。任意线程。
-     * 给“这个网站在不在”“按页面里的主机名放行玩家临时地址”这类服务端逻辑用。
-     */
-    public static Ipv6Address addressOfName(String name) {
-        NetworkBackend b = NetworkHooks.backend();
-        if (b == null || name == null) {
-            return null;
-        }
-        java.util.List<Ipv6Address> a = moe.qingu.youran.network.DnsState.lookup(name);
-        return a.isEmpty() ? null : a.get(0);
     }
 
     /**

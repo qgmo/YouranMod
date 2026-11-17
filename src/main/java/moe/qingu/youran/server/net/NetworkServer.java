@@ -458,17 +458,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         moe.qingu.youran.server.net.pay.PayServer ps = pay;
         NetStack payStack = hostStacks.get(HOST_PAY);
         if (ps != null && payStack != null) {
-            String idName = DomainNames.tryToAscii(moe.qingu.youran.server.net.pay.PayConfig.idDomain.trim().toLowerCase(java.util.Locale.ROOT));
-            moe.qingu.youran.server.net.pay.PayServer.startWeb(ps, new Context(HOST_PAY, hosts.get(HOST_PAY), payStack), resolverAddress,
-                    () -> idName != null && !DnsState.lookup(idName).isEmpty());
+            moe.qingu.youran.server.net.pay.PayServer.startWeb(ps, new Context(HOST_PAY, hosts.get(HOST_PAY), payStack), resolverAddress);
         }
 
         moe.qingu.youran.server.net.nav.NavServer ns = nav;
         NetStack navStack = hostStacks.get(moe.qingu.youran.server.net.nav.NavServer.HOST);
         if (ns != null && navStack != null) {
-            String idName = DomainNames.tryToAscii(moe.qingu.youran.server.net.nav.NavConfig.idDomain.trim().toLowerCase(java.util.Locale.ROOT));
             ns.startWeb(new Context(moe.qingu.youran.server.net.nav.NavServer.HOST, hosts.get(moe.qingu.youran.server.net.nav.NavServer.HOST), navStack),
-                    resolverAddress, () -> idName != null && !DnsState.lookup(idName).isEmpty(), n -> !DnsState.lookup(n).isEmpty());
+                    resolverAddress);
         }
 
         // 其他模组的服务

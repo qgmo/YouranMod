@@ -129,19 +129,26 @@ public final class NavServer implements NavService.Env {
     /**
      * 网络线程：在这台主机上开网页（80，配了中间 CA 时也开 443）。
      *
-     * @param exists 域名（A-label）现在解析不解析得到（内部解析，每次显示时现查）
+     * 导航只列现在解析得到的网站：经递归解析器查（这台主机的协议栈，{@link moe.qingu.youran.api.network.stack.NameCache} 按 TTL 缓存），
+     * 显示时用上一次的回答。id.yr 开没开也这样查。
      */
-    public void startWeb(HostContext ctx, Ipv6Address resolver, BooleanSupplier idAvailable, Predicate<String> exists) {
+    public void startWeb(HostContext ctx, Ipv6Address resolver) {
         List<String> problems = new ArrayList<>();
+        moe.qingu.youran.api.network.stack.NameCache names = new moe.qingu.youran.api.network.stack.NameCache(
+                new DnsResolver(ctx.stack(), resolver), ctx.stack().loop());
+        Predicate<String> exists = names::resolves;
         NavDirectory dir = NavDirectory.build(decls(), NavConfig.extraSites, NavConfig.hiddenSites, exists, problems);
         for (String p : problems) {
             NavService.LOG.warn("180.yr：{}", p);
         }
-        this.idAvailable = idAvailable;
         moe.qingu.youran.api.network.tls.TlsServerContext tls = ctx.tls(NAMES);
         https = tls != null;
         moe.qingu.youran.api.network.idyr.IdYrClient id = new moe.qingu.youran.api.network.idyr.IdYrClient(ctx.stack(),
                 new DnsResolver(ctx.stack(), resolver), NavConfig.idDomain, https, NavService.PLATFORM);
+        this.idAvailable = id::available;
+        // 先把导航上的名字和 id.yr 都问一遍
+        dir.all();
+        id.available();
         NavService service = new NavService(book, store, dir, this, id, logo(), NavConfig.sessionIdleMinutes * 60_000L);
         HttpServer.Options o = new HttpServer.Options().maxBodyBytes(NavService.MAX_BODY).handlerTimeoutMillis(20_000)
                 .errorPages(st -> HttpResponse.xhtml(st, NavPages.frame("出错了", "", null, null, false, "http",

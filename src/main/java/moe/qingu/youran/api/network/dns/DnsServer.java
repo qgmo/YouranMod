@@ -6,7 +6,6 @@ import moe.qingu.youran.api.network.packet.DnsMessage;
 import moe.qingu.youran.api.network.packet.MalformedPacketException;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.UdpSocket;
-import moe.qingu.youran.network.DnsState;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -56,7 +55,6 @@ public final class DnsServer implements UdpSocket.Handler {
     public static DnsServer start(NetStack stack) {
         DnsServer s = new DnsServer(stack);
         stack.openUdp(null, DnsMessage.PORT, s);
-        DnsState.addServer(s.self, s);
         return s;
     }
 
