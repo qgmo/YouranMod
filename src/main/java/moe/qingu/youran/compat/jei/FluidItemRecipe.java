@@ -20,7 +20,7 @@ final class FluidItemRecipe implements IRecipeWrapper {
     /** 说明文字的颜色（JEI 里常用的深灰） */
     private static final int TEXT_COLOR = 0x404040;
     /** 各分类的背景底下都留这么多行给说明 */
-    static final int NOTE_LINES = 4;
+    static final int NOTE_LINES = 5;
     /** 说明与上面的图之间留的空 */
     static final int NOTES_GAP = 4;
     /** 一行说明占的高度（字体高 9 + 行距 1） */
