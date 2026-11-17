@@ -8,13 +8,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
-import java.security.SecureRandom;
+import java.security.PublicKey;
 import java.security.Signature;
 import java.security.cert.X509Certificate;
-import java.security.spec.ECGenParameterSpec;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,19 +19,18 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * 服务器上的中间 CA（由 QinguMoe CA 签，私钥在服务端配置里）：给游戏内网站现场签叶子证书。
- * 叶子证书：EC P-256 新密钥、主题 CN 与 SAN 都是网站的域名、用途 serverAuth、有效期 {@value #LEAF_DAYS} 天
- * （生效时间往前拨 1 小时，容忍客户端的钟慢一点）。
+ * 服务器上的中间 CA（由 QinguMoe CA 签，私钥在服务端配置里）：证书签发服务（{@code server.net.ca.CaService}）用它
+ * 给通过认证的网站签证书。叶子证书：公钥是申请者的、主题 CN 是第一个名字、SAN 是全部名字、用途 serverAuth、
+ * 有效期 {@value #LEAF_DAYS} 天（生效时间往前拨 1 小时，容忍客户端的钟慢一点）。
  */
 public final class IntermediateCa {
-    static final int LEAF_DAYS = 90;
-    static final long DAY_MS = 24L * 3600 * 1000;
+    public static final int LEAF_DAYS = 90;
+    public static final long DAY_MS = 24L * 3600 * 1000;
     static final long BACKDATE_MS = 3600L * 1000;
 
     /** 中间 CA 自己的证书，及配置文件里跟在它后面的上级证书（不含根）：握手时跟在叶子后面发出去 */
     final List<X509Certificate> chain;
     final PrivateKey key;
-    private final SecureRandom random = new SecureRandom();
 
     public IntermediateCa(List<X509Certificate> chain, PrivateKey key) throws GeneralSecurityException {
         if (chain.isEmpty()) {
@@ -111,46 +107,38 @@ public final class IntermediateCa {
         return chain.get(0);
     }
 
-    /** 签一张给 {@code name} 用的叶子证书 */
-    public Issued issue(String name, Date now) throws GeneralSecurityException {
-        KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
-        g.initialize(new ECGenParameterSpec("secp256r1"), random);
-        KeyPair kp = g.generateKeyPair();
+    /** 中间 CA 自己的证书及跟在后面的上级证书（不含根），握手时跟在叶子后面发出去 */
+    public List<X509Certificate> chain() {
+        return chain;
+    }
+
+    /**
+     * 给 {@code names}（A-label，至少一个）签一张网站证书，公钥是申请者给的 {@code key}（EC 或 RSA）。主题 CN 是第一个名字，
+     * SAN 是全部名字；有效期 {@value #LEAF_DAYS} 天（生效时间往前拨 1 小时），不超过中间 CA 自己的有效期。
+     *
+     * @return 叶子在前，后面是 {@link #chain()}
+     */
+    public List<X509Certificate> issue(List<String> names, PublicKey key, Date now) throws GeneralSecurityException {
+        if (names.isEmpty()) {
+            throw new IllegalArgumentException("没有名字");
+        }
         Date from = new Date(now.getTime() - BACKDATE_MS);
         Date to = new Date(now.getTime() + LEAF_DAYS * DAY_MS);
-        // 不超过中间 CA 自己的有效期
         if (to.after(certificate().getNotAfter())) {
             to = certificate().getNotAfter();
         }
-        X509Certificate leaf = new CertificateBuilder()
-                .subject(name)
-                .publicKey(kp.getPublic())
-                .issuer(certificate(), key)
+        CertificateBuilder b = new CertificateBuilder()
+                .subject(names.get(0))
+                .publicKey(key)
+                .issuer(certificate(), this.key)
                 .validity(from, to)
-                .dnsName(name)
-                .serverAuth()
-                .build();
+                .serverAuth();
+        for (String n : names) {
+            b.dnsName(n);
+        }
         List<X509Certificate> full = new ArrayList<>();
-        full.add(leaf);
+        full.add(b.build());
         full.addAll(chain);
-        return new Issued(name, kp.getPrivate(), full);
-    }
-
-    /** 签好的一张叶子证书（连同发给客户端的链） */
-    public static final class Issued {
-        public final String name;
-        public final PrivateKey key;
-        /** 叶子在前，后面是中间 CA（不含根） */
-        public final List<X509Certificate> chain;
-
-        Issued(String name, PrivateKey key, List<X509Certificate> chain) {
-            this.name = name;
-            this.key = key;
-            this.chain = Collections.unmodifiableList(chain);
-        }
-
-        public X509Certificate leaf() {
-            return chain.get(0);
-        }
+        return Collections.unmodifiableList(full);
     }
 }

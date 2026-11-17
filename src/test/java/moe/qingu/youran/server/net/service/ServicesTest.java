@@ -15,8 +15,6 @@ import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NtpClient;
 import moe.qingu.youran.api.network.stack.TestLink;
 import moe.qingu.youran.api.network.packet.TcpSegment;
-import moe.qingu.youran.server.net.tls.IssuingTlsContext;
-import moe.qingu.youran.server.net.tls.LeafCache;
 import moe.qingu.youran.server.net.tls.TestPki;
 import moe.qingu.youran.api.network.stack.NetworkException;
 import moe.qingu.youran.api.network.tls.CertificateProblem;
@@ -93,7 +91,7 @@ class ServicesTest {
         resolver = new RecursiveResolver(res, Collections.singletonList(ROOT));
         resolver.start();
         new NtpServer(() -> 1_794_355_200_000L).start(ntp);
-        TestWebsite.start(web, new IssuingTlsContext(new LeafCache(pki.intermediate(), System::currentTimeMillis), () -> java.util.Arrays.asList("test.yr", "xn--0zwm56d.yr")));
+        TestWebsite.start(web, pki.tls(System.currentTimeMillis(), "test.yr", "xn--0zwm56d.yr"));
         // 数一数递归解析器往外问了几次（发往四台权威服务器的包）
         link.filter = raw -> {
             Ipv6Address d = Ipv6Packet.destinationOf(raw);
@@ -247,7 +245,8 @@ class ServicesTest {
         link.loop.advance(10_000);
         HttpClient.Response resp = done(f);
         assertEquals(200, resp.status);
-        assertEquals(Collections.singletonList("DNS:xn--0zwm56d.yr"),
+        // 测试网站一张证书两个名字（test.yr 与它的国际化别名），别名在 SAN 里是 A-label
+        assertEquals(Arrays.asList("DNS:test.yr", "DNS:xn--0zwm56d.yr"),
                 moe.qingu.youran.api.network.tls.CertificateInfo.of(resp.tls.peerChain.get(0)).subjectAltNames);
     }
 

@@ -1,5 +1,7 @@
 package moe.qingu.youran.server.net.tls;
 
+import moe.qingu.youran.api.network.tls.CertificateTlsContext;
+
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.cert.X509Certificate;
@@ -21,7 +23,11 @@ public final class TestPki {
     }
 
     public TestPki(String rootName, String... permitted) throws Exception {
-        long now = System.currentTimeMillis();
+        this(System.currentTimeMillis(), rootName, permitted);
+    }
+
+    /** 以 {@code now} 为现在：根前后 10 年、中间 CA 从前一天起一年（假时钟的测试用） */
+    public TestPki(long now, String rootName, String... permitted) throws Exception {
         rootKey = rsa();
         root = new CertificateBuilder().subject(rootName).publicKey(rootKey.getPublic()).selfSigned(rootKey.getPrivate())
                 .validity(new Date(now - DAY), new Date(now + 3650 * DAY)).ca(-1).build();
@@ -38,13 +44,21 @@ public final class TestPki {
         return new IntermediateCa(Arrays.asList(ca, root), caKey.getPrivate());
     }
 
-    static KeyPair rsa() throws Exception {
+    /** 中间 CA 在 {@code now} 给 {@code names} 签一张证书（新的 EC 密钥），放进一个网站用的 TLS */
+    public CertificateTlsContext tls(long now, String... names) throws Exception {
+        KeyPair kp = ec();
+        CertificateTlsContext ctx = new CertificateTlsContext();
+        ctx.set(kp.getPrivate(), intermediate().issue(Arrays.asList(names), kp.getPublic(), new Date(now)));
+        return ctx;
+    }
+
+    public static KeyPair rsa() throws Exception {
         KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
         g.initialize(2048);
         return g.generateKeyPair();
     }
 
-    static KeyPair ec() throws Exception {
+    public static KeyPair ec() throws Exception {
         KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
         g.initialize(new ECGenParameterSpec("secp256r1"));
         return g.generateKeyPair();

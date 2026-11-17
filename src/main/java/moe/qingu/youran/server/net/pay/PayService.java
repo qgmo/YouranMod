@@ -210,14 +210,15 @@ final class PayService {
     private final SourceLimiter apiLimit;
     private final SourceLimiter badKeyLimit = new SourceLimiter(0.2, 10, 8192);
 
-    /** 这台主机的 TLS；没配中间 CA 为 null */
+    /** 这台主机的 TLS；证书服务没开（没配中间 CA）为 null */
     final moe.qingu.youran.api.network.tls.TlsServerContext tls;
 
     PayService(PayServer core, HostContext ctx, Ipv6Address resolver) {
         this.core = core;
         this.ctx = ctx;
-        // pay.yr 与开发者文档站同一台主机，证书只签这两个名字（主机自己给的，和 DNS 无关）
-        this.tls = ctx.tls(java.util.Arrays.asList(moe.qingu.youran.api.pay.PayApi.DOMAIN, moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN));
+        // pay.yr 与开发者文档站同一台主机，一张证书两个名字：自己向证书服务申请（HTTP 认证，80 口自动回），到期前续
+        this.tls = moe.qingu.youran.api.network.ca.CertificateClient.start(ctx.stack(),
+                java.util.Arrays.asList(moe.qingu.youran.api.pay.PayApi.DOMAIN, moe.qingu.youran.api.pay.PayApi.DOCS_DOMAIN), null).tls();
         this.id = new IdYrClient(ctx.stack(), new DnsResolver(ctx.stack(), resolver), PayConfig.idDomain, tls != null,
                 moe.qingu.youran.api.pay.PayApi.DOMAIN);
         // id.yr 开没开：经递归解析器查（按 TTL 缓存）；先问一次

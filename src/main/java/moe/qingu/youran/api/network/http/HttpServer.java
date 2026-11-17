@@ -1,6 +1,7 @@
 package moe.qingu.youran.api.network.http;
 
 import moe.qingu.youran.api.network.Ipv6Address;
+import moe.qingu.youran.api.network.ca.HttpChallenges;
 import moe.qingu.youran.api.network.stack.EventLoop;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NetworkException;
@@ -87,13 +88,18 @@ public final class HttpServer {
 
     /**
      * 在 {@code stack} 的 TCP {@code port} 上开 HTTP；{@code tls} 不为 null 时这个口是 HTTPS（证书由 {@link TlsServerContext} 给）。
-     * 一般一个网站开两次：80 口不带 TLS，443 口带 {@code HostContext.tls(名字)}（服务器没配中间 CA 时为 null，就不开 443）。
+     * 一般一个网站开两次：80 口不带 TLS，443 口带自己申请的证书（{@code api.network.ca.CertificateClient#tls()}，
+     * 证书服务没开时为 null，就不开 443）。
+     * <p>
+     * 不带 TLS 的口自动回证书服务的 HTTP 认证（{@code /.well-known/acme-challenge/…}，见 {@link HttpChallenges}）：
+     * 这台主机正在等的令牌由这里回，别的照常交给 {@code handler}。
      */
     public static void listen(NetStack stack, int port, TlsServerContext tls, Options options, Handler handler) {
         Options o = options == null ? new Options() : options;
         if (tls == null) {
+            Handler h = withChallenges(stack, handler);
             stack.listen(null, port, c -> {
-                Session s = new Session(stack.loop(), o, handler, c.remoteAddress(), c.remotePort(), c.localAddress(), c.localPort(), false, new Out() {
+                Session s = new Session(stack.loop(), o, h, c.remoteAddress(), c.remotePort(), c.localAddress(), c.localPort(), false, new Out() {
                     @Override
                     public void write(byte[] d) {
                         c.write(d);
@@ -165,6 +171,18 @@ public final class HttpServer {
             });
             s.start();
         });
+    }
+
+    /** 先看是不是这台主机正在等的 HTTP 认证（GET / HEAD），是就回认证内容，不是交给网站 */
+    static Handler withChallenges(NetStack stack, Handler site) {
+        return req -> {
+            String content = (req.method.equals("GET") || req.method.equals("HEAD")) ? HttpChallenges.answer(stack, req.path) : null;
+            if (content != null) {
+                return CompletableFuture.completedFuture(HttpResponse.of(200, "text/plain; charset=utf-8",
+                        content.getBytes(StandardCharsets.UTF_8)));
+            }
+            return site.handle(req);
+        };
     }
 
     /** 默认的错误页：一行状态码的 XHTML */

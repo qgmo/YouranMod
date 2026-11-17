@@ -5,6 +5,7 @@ import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NetworkException;
 import moe.qingu.youran.api.network.stack.TestLink;
 import moe.qingu.youran.api.network.tls.CertificateInfo;
+import moe.qingu.youran.api.network.tls.CertificateTlsContext;
 import moe.qingu.youran.api.network.tls.CertificateProblem;
 import moe.qingu.youran.api.network.tls.Pem;
 import moe.qingu.youran.api.network.tls.TlsConnection;
@@ -16,6 +17,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.KeyPair;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** TLS：握手、证书链校验（主机名、过期、不是测试根签的、域名约束）、按 SNI 现签、丢包乱序 */
+/** TLS：握手、证书链校验（主机名、过期、不是测试根签的、域名约束）、一张证书多个名字、换证书、丢包乱序 */
 class TlsTest {
     static final Ipv6Address SERVER = Ipv6Address.parse("fd00::1:2");
 
@@ -41,10 +43,25 @@ class TlsTest {
     final NetStack client = link.host("fd00::c");
     final NetStack server = link.host(SERVER.toString());
 
+    /** 中间 CA 在 {@code now} 给 {@code names} 签一张证书（新的 EC 密钥），放进一个 TLS */
+    static CertificateTlsContext issued(IntermediateCa ca, long now, String... names) throws Exception {
+        KeyPair kp = TestPki.ec();
+        CertificateTlsContext ctx = new CertificateTlsContext();
+        ctx.set(kp.getPrivate(), ca.issue(Arrays.asList(names), kp.getPublic(), new Date(now)));
+        return ctx;
+    }
+
+    /** 签一张证书，返回链 */
+    static List<X509Certificate> chainFor(IntermediateCa ca, String name, Date now) throws Exception {
+        return ca.issue(Collections.singletonList(name), TestPki.ec().getPublic(), now);
+    }
+
+    void echoServer(IntermediateCa ca, String... names) throws Exception {
+        echoServer(issued(ca, System.currentTimeMillis(), names));
+    }
+
     /** 服务端：收到什么回什么，对方发完就关 */
-    void echoServer(LeafCache cache, String... names) throws Exception {
-        List<String> owned = Arrays.asList(names);
-        IssuingTlsContext ctx = new IssuingTlsContext(cache, () -> owned);
+    void echoServer(CertificateTlsContext ctx) {
         server.listen(null, 443, c -> TlsConnection.accept(c, ctx, new TlsConnection.Listener() {
             @Override
             public void onData(TlsConnection connection, byte[] data) {
@@ -90,8 +107,7 @@ class TlsTest {
     @Test
     void handshakeAndEcho() throws Exception {
         TestPki pki = new TestPki();
-        LeafCache cache = new LeafCache(pki.intermediate(), System::currentTimeMillis);
-        echoServer(cache, "minebay.yr");
+        echoServer(pki.intermediate(), "minebay.yr");
         Collect col = new Collect();
         CompletableFuture<TlsConnection> f = TlsConnection.connect(client, SERVER, 443, "minebay.yr", TlsTrust.of(pki.root), col);
         link.loop.advance(5000);
@@ -117,13 +133,12 @@ class TlsTest {
         assertTrue(col.ended);
         assertTrue(col.closed);
         assertNull(col.closedWith);
-        assertEquals(1, cache.issuedCount());
     }
 
     @Test
     void tls12ClientStillWorks() throws Exception {
         TestPki pki = new TestPki();
-        echoServer(new LeafCache(pki.intermediate(), System::currentTimeMillis), "minebay.yr");
+        echoServer(pki.intermediate(), "minebay.yr");
         TlsTrustAccess.onlyProtocols(Collections.singletonList("TLSv1.2"));
         try {
             Collect col = new Collect();
@@ -143,7 +158,7 @@ class TlsTest {
     @Test
     void hostnameMismatch() throws Exception {
         TestPki pki = new TestPki();
-        echoServer(new LeafCache(pki.intermediate(), System::currentTimeMillis), "minebay.yr");
+        echoServer(pki.intermediate(), "minebay.yr");
         // 名字不归这个网站：服务端给默认名字的证书，客户端核对主机名不过
         CompletableFuture<TlsConnection> f = TlsConnection.connect(client, SERVER, 443, "other.yr", TlsTrust.of(pki.root), new Collect());
         link.loop.advance(5000);
@@ -161,9 +176,7 @@ class TlsTest {
         TestPki pki = new TestPki();
         // 叶子在 100 天前签（90 天有效），现在已过期；中间 CA 本身有效
         long past = System.currentTimeMillis() - 100 * TestPki.DAY;
-        // LeafCache 的钟停在过去：签出来的叶子现在已过期，它自己又觉得不用续
-        LeafCache cache = new LeafCache(pki.intermediate(), () -> past);
-        echoServer(cache, "minebay.yr");
+        echoServer(issued(pki.intermediate(), past, "minebay.yr"));
         CompletableFuture<TlsConnection> f = TlsConnection.connect(client, SERVER, 443, "minebay.yr", TlsTrust.of(pki.root), new Collect());
         link.loop.advance(5000);
         NetworkException e = failure(f);
@@ -173,7 +186,7 @@ class TlsTest {
     @Test
     void notSignedByTrustedRoot() throws Exception {
         TestPki pki = new TestPki();
-        echoServer(new LeafCache(pki.intermediate(), System::currentTimeMillis), "minebay.yr");
+        echoServer(pki.intermediate(), "minebay.yr");
         // 另一张根（名字都一样，密钥不同），以及名字不同的根
         TestPki sameName = new TestPki("测试根 CA", "yr");
         TestPki other = new TestPki("别人的根", "yr");
@@ -192,10 +205,10 @@ class TlsTest {
         IntermediateCa ca = pki.intermediate();
         Date now = new Date();
         TlsTrust trust = TlsTrust.of(pki.root);
-        assertNull(trust.check(ca.issue("minebay.yr", now).chain, "minebay.yr", now));
-        assertNull(trust.check(ca.issue("a.b.yr", now).chain, "A.B.YR.", now), "不分大小写、结尾点");
-        assertEquals(CertificateProblem.NAME_NOT_PERMITTED, trust.check(ca.issue("dado.wixsite.com", now).chain, "dado.wixsite.com", now));
-        assertEquals(CertificateProblem.NAME_NOT_PERMITTED, trust.check(ca.issue("notyr", now).chain, "notyr", now));
+        assertNull(trust.check(chainFor(ca, "minebay.yr", now), "minebay.yr", now));
+        assertNull(trust.check(chainFor(ca, "a.b.yr", now), "A.B.YR.", now), "不分大小写、结尾点");
+        assertEquals(CertificateProblem.NAME_NOT_PERMITTED, trust.check(chainFor(ca, "dado.wixsite.com", now), "dado.wixsite.com", now));
+        assertEquals(CertificateProblem.NAME_NOT_PERMITTED, trust.check(chainFor(ca, "notyr", now), "notyr", now));
     }
 
     @Test
@@ -207,14 +220,13 @@ class TlsTest {
         IntermediateCa ca = pki.intermediate();
         Date now = new Date();
         TlsTrust trust = TlsTrust.of(pki.root);
-        List<X509Certificate> chain = ca.issue(alabel, now).chain;
+        List<X509Certificate> chain = chainFor(ca, alabel, now);
         assertEquals(Collections.singletonList("DNS:" + alabel), CertificateInfo.of(chain.get(0)).subjectAltNames, "SAN 里是 A-label");
         assertNull(trust.check(chain, alabel, now));
         assertNull(trust.check(chain, "测试.yr", now), "要连的名字写成 Unicode 也按 A-label 比");
         assertEquals(CertificateProblem.HOSTNAME_MISMATCH, trust.check(chain, "测验.yr", now));
-        // 握手：SNI 用 A-label，按名字现签
-        LeafCache cache = new LeafCache(ca, System::currentTimeMillis);
-        echoServer(cache, alabel);
+        // 握手：SNI 用 A-label
+        echoServer(ca, alabel);
         CompletableFuture<TlsConnection> f = TlsConnection.connect(client, SERVER, 443, alabel, trust, new Collect());
         link.loop.advance(5000);
         TlsConnection c = f.get();
@@ -229,7 +241,7 @@ class TlsTest {
         IntermediateCa ca = pki.intermediate();
         Date now = new Date();
         TlsTrust trust = TlsTrust.of(pki.root);
-        List<X509Certificate> chain = ca.issue("minebay.yr", now).chain;
+        List<X509Certificate> chain = chainFor(ca, "minebay.yr", now);
         assertEquals(CertificateProblem.NOT_YET_VALID, trust.check(chain, "minebay.yr", new Date(now.getTime() - 2 * TestPki.DAY)));
         assertEquals(CertificateProblem.EXPIRED, trust.check(chain, "minebay.yr", new Date(now.getTime() + 100 * TestPki.DAY)));
         // 链不完整（缺中间 CA）
@@ -244,39 +256,49 @@ class TlsTest {
     }
 
     @Test
-    void certificatesAreIssuedPerSniAndCached() throws Exception {
+    void oneCertificateForSeveralNames() throws Exception {
         TestPki pki = new TestPki();
-        LeafCache cache = new LeafCache(pki.intermediate(), System::currentTimeMillis);
-        echoServer(cache, "minebay.yr", "shop.yr");
-        for (String host : new String[]{"minebay.yr", "shop.yr", "minebay.yr"}) {
+        echoServer(pki.intermediate(), "minebay.yr", "shop.yr");
+        for (String host : new String[]{"minebay.yr", "shop.yr"}) {
             CompletableFuture<TlsConnection> f = TlsConnection.connect(client, SERVER, 443, host, TlsTrust.of(pki.root), new Collect());
             link.loop.advance(5000);
             TlsConnection c = f.get();
-            assertEquals(Collections.singletonList("DNS:" + host), CertificateInfo.of(c.info().peerChain.get(0)).subjectAltNames);
+            assertEquals(Arrays.asList("DNS:minebay.yr", "DNS:shop.yr"), CertificateInfo.of(c.info().peerChain.get(0)).subjectAltNames);
             c.close();
             link.loop.advance(1000);
         }
-        assertEquals(2, cache.issuedCount(), "同一个名字只签一次");
     }
 
     @Test
-    void renewsBeforeExpiry() throws Exception {
+    void certificateCanBeReplaced() throws Exception {
         TestPki pki = new TestPki();
-        long[] now = {System.currentTimeMillis()};
-        LeafCache cache = new LeafCache(pki.intermediate(), () -> now[0]);
-        IntermediateCa.Issued a = cache.get("minebay.yr");
-        now[0] += 59 * TestPki.DAY;
-        assertTrue(a == cache.get("minebay.yr"), "还剩 31 天：不续");
-        now[0] += 2 * TestPki.DAY;
-        IntermediateCa.Issued b = cache.get("minebay.yr");
-        assertFalse(a == b, "不到 30 天：续签");
-        assertTrue(b.leaf().getNotAfter().after(a.leaf().getNotAfter()));
+        CertificateTlsContext ctx = new CertificateTlsContext();
+        echoServer(ctx);
+        // 还没放证书：握手失败
+        CompletableFuture<TlsConnection> none = TlsConnection.connect(client, SERVER, 443, "minebay.yr", TlsTrust.of(pki.root), new Collect());
+        link.loop.advance(5000);
+        assertTrue(none.isCompletedExceptionally());
+        X509Certificate before = null;
+        for (int i = 0; i < 2; i++) {
+            KeyPair kp = TestPki.ec();
+            ctx.set(kp.getPrivate(), pki.intermediate().issue(Collections.singletonList("minebay.yr"), kp.getPublic(), new Date()));
+            CompletableFuture<TlsConnection> f = TlsConnection.connect(client, SERVER, 443, "minebay.yr", TlsTrust.of(pki.root), new Collect());
+            link.loop.advance(5000);
+            X509Certificate got = f.get().info().peerChain.get(0);
+            assertEquals(ctx.chain().get(0), got, "握手用的是现在放着的证书");
+            if (before != null) {
+                assertFalse(before.equals(got), "换了证书");
+            }
+            before = got;
+            f.get().close();
+            link.loop.advance(1000);
+        }
     }
 
     @Test
     void lossAndReorderingStillWork() throws Exception {
         TestPki pki = new TestPki();
-        echoServer(new LeafCache(pki.intermediate(), System::currentTimeMillis), "minebay.yr");
+        echoServer(pki.intermediate(), "minebay.yr");
         Random rnd = new Random(42);
         // 丢 15%，另有 30% 推迟 20–80 毫秒（乱序），同 /ynet sim
         link.filter = raw -> {
@@ -307,7 +329,7 @@ class TlsTest {
         Files.write(cert, (Pem.encode("CERTIFICATE", pki.ca.getEncoded()) + Pem.encode("CERTIFICATE", pki.root.getEncoded())).getBytes(StandardCharsets.US_ASCII));
         Files.write(key, Pem.encode("PRIVATE KEY", pki.caKey.getPrivate().getEncoded()).getBytes(StandardCharsets.US_ASCII));
         IntermediateCa ca = IntermediateCa.load(cert, key);
-        assertEquals(1, ca.chain.size(), "根证书不发");
+        assertEquals(1, ca.chain().size(), "根证书不发");
         // 私钥对不上
         Files.write(key, Pem.encode("PRIVATE KEY", TestPki.ec().getPrivate().getEncoded()).getBytes(StandardCharsets.US_ASCII));
         assertThrows(java.security.GeneralSecurityException.class, () -> IntermediateCa.load(cert, key));
@@ -315,8 +337,9 @@ class TlsTest {
         Files.write(key, Pem.encode("ENCRYPTED PRIVATE KEY", new byte[]{1, 2, 3}).getBytes(StandardCharsets.US_ASCII));
         assertTrue(assertThrows(java.security.GeneralSecurityException.class, () -> IntermediateCa.load(cert, key)).getMessage().contains("pkcs8"));
         // 不是 CA
-        IntermediateCa.Issued leaf = ca.issue("minebay.yr", new Date());
-        assertThrows(java.security.GeneralSecurityException.class, () -> new IntermediateCa(leaf.chain.subList(0, 1), leaf.key));
+        KeyPair kp = TestPki.ec();
+        List<X509Certificate> leaf = ca.issue(Collections.singletonList("minebay.yr"), kp.getPublic(), new Date());
+        assertThrows(java.security.GeneralSecurityException.class, () -> new IntermediateCa(leaf.subList(0, 1), kp.getPrivate()));
     }
 
     @Test

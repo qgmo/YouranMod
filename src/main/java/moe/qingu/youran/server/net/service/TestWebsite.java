@@ -1,5 +1,6 @@
 package moe.qingu.youran.server.net.service;
 
+import moe.qingu.youran.api.network.ca.HttpChallenges;
 import moe.qingu.youran.api.network.stack.EventLoop;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NetworkException;
@@ -50,7 +51,7 @@ public final class TestWebsite {
     /** 80 口 HTTP；{@code tls} 不为 null 时 443 口再开 HTTPS（同一页） */
     public static void start(NetStack stack, TlsServerContext tls) {
         stack.listen(null, PORT, c -> {
-            Session s = new Session(stack.loop(), new Out() {
+            Session s = new Session(stack.loop(), stack, new Out() {
                 @Override
                 public void write(byte[] d) {
                     c.write(d);
@@ -87,7 +88,7 @@ public final class TestWebsite {
         if (tls != null) {
             stack.listen(null, TLS_PORT, c -> {
                 TlsConnection[] holder = new TlsConnection[1];
-                Session s = new Session(stack.loop(), new Out() {
+                Session s = new Session(stack.loop(), null, new Out() {
                     @Override
                     public void write(byte[] d) {
                         holder[0].write(d);
@@ -135,13 +136,16 @@ public final class TestWebsite {
 
     private static final class Session {
         private final EventLoop loop;
+        /** 回证书服务的 HTTP 认证用（只在不加密的 80 口上；443 口为 null） */
+        private final NetStack challenges;
         private final Out connection;
         private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
         private EventLoop.Timer idle;
         private boolean answered;
 
-        Session(EventLoop loop, Out connection) {
+        Session(EventLoop loop, NetStack challenges, Out connection) {
             this.loop = loop;
+            this.challenges = challenges;
             this.connection = connection;
         }
 
@@ -163,7 +167,10 @@ public final class TestWebsite {
                 return;
             }
             String head = new String(b, 0, end, StandardCharsets.ISO_8859_1);
-            byte[] response = responseFor(head, ZonedDateTime.now(ZoneOffset.UTC));
+            byte[] response = challenges == null ? null : challengeResponse(challenges, head, ZonedDateTime.now(ZoneOffset.UTC));
+            if (response == null) {
+                response = responseFor(head, ZonedDateTime.now(ZoneOffset.UTC));
+            }
             answered = true;
             idle.cancel();
             connection.write(response);
@@ -200,6 +207,35 @@ public final class TestWebsite {
             }
         }
         return -1;
+    }
+
+    /** 是这台主机正在等的证书服务 HTTP 认证（GET / HEAD {@code /.well-known/acme-challenge/令牌}）时回认证内容，否则 null */
+    static byte[] challengeResponse(NetStack stack, String head, ZonedDateTime now) {
+        String[] parts = head.split("\r\n", 2)[0].split(" ", -1);
+        if (parts.length != 3 || !(parts[0].equals("GET") || parts[0].equals("HEAD"))) {
+            return null;
+        }
+        String path = parts[1];
+        int q = path.indexOf('?');
+        String content = HttpChallenges.answer(stack, q < 0 ? path : path.substring(0, q));
+        if (content == null) {
+            return null;
+        }
+        byte[] body = content.getBytes(StandardCharsets.UTF_8);
+        String h = "HTTP/1.1 200 OK\r\n"
+                + "Date: " + HTTP_DATE.format(now) + "\r\n"
+                + "Server: YouranMod\r\n"
+                + "Content-Type: text/plain; charset=utf-8\r\n"
+                + "Content-Length: " + body.length + "\r\n"
+                + "Connection: close\r\n\r\n";
+        byte[] hb = h.getBytes(StandardCharsets.ISO_8859_1);
+        if (parts[0].equals("HEAD")) {
+            return hb;
+        }
+        byte[] out = new byte[hb.length + body.length];
+        System.arraycopy(hb, 0, out, 0, hb.length);
+        System.arraycopy(body, 0, out, hb.length, body.length);
+        return out;
     }
 
     /** 由请求首部（到空行之前）算响应（纯逻辑，测试用） */

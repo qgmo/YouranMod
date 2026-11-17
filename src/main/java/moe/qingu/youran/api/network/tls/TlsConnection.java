@@ -37,7 +37,7 @@ import java.util.concurrent.CompletableFuture;
  * <ul>
  * <li>客户端（{@link #connect}）：只信任给定的根（默认 QinguMoe CA，见 {@link TlsTrust}），校验证书链与主机名；
  * 不对时握手失败，future 以 {@link NetworkException.Reason#CERTIFICATE} 结束、带上具体问题，没有“继续访问”。</li>
- * <li>服务端（{@link #accept}）：用 {@link TlsServerContext} 的引擎（证书按 SNI 现签）。</li>
+ * <li>服务端（{@link #accept}）：用 {@link TlsServerContext} 的引擎（网站自己向证书签发服务申请的证书）。</li>
  * </ul>
  * 和 {@link TcpConnection} 一样：方法可以从任意线程调用，回调都在协议栈的事件循环线程上（握手里的计算也在那里做）。
  */

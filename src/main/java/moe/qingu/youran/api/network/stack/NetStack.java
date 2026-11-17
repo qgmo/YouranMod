@@ -432,6 +432,16 @@ public final class NetStack {
         run(() -> tcpListeners.remove(udpKey(local, port)));
     }
 
+    /** 有没有在监听 TCP {@code port}（本机任何一个地址上）。在事件循环线程上调用 */
+    public boolean isListening(int port) {
+        for (PortKey k : tcpListeners.keySet()) {
+            if (k.port == port) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 主动连接。握手完成时 future 给出连接；对方拒绝、不可达、超时时以 {@link NetworkException} 异常结束。
      *

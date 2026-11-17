@@ -3,10 +3,8 @@ package moe.qingu.youran.api.network;
 import moe.qingu.youran.network.NetworkBackend;
 import moe.qingu.youran.network.NetworkHooks;
 import moe.qingu.youran.network.NetworkRegistry;
-import moe.qingu.youran.api.network.tls.TlsServerContext;
+import moe.qingu.youran.api.network.ca.CertificateAuthority;
 
-import java.util.Collection;
-import java.util.function.Supplier;
 
 
 /**
@@ -66,7 +64,7 @@ public final class YouranNetworkApi {
      * 不跑协议栈。地址和普通主机一样按“模组 ID:名字”分，第一次分到以后不变。
      * 网络启动时在网络线程上调用 {@code service}（每次开服一次）；运行时也可以用 {@link #rawHost} 拿到它。
      * 原始主机上没有 YouranMod 的协议栈，跑不了默认 DNS 服务（{@code api.network.dns.DnsServer}），要给它起名字时另登记一台普通主机跑 DNS；
-     * 也没有 {@link HostContext#tls}。
+     * 要 HTTPS 时也要在普通主机上自己申请证书（{@code api.network.ca.CertificateClient}）。
      */
     public static void registerRawHost(String key, String datacenter, RawHostService service) {
         if (service == null) {
@@ -143,13 +141,13 @@ public final class YouranNetworkApi {
     }
 
     /**
-     * 服务端：给一个网站做 TLS（443）。证书由服务器配置的中间 CA 按客户端要访问的名字（SNI）现签，
-     * 只签 {@code names} 当前给出的名字（每次握手都重新取，名字可以在运行时增删）。
-     * 不限于机房主机：挂在任意一台设备地址上的服务端协议栈也能用。服务器没配中间 CA、网络没在运行时返回 null。
+     * 服务端：证书签发服务（{@code ca.yr}）的 Java 接口。网站要 HTTPS 时自己申请证书，一般用
+     * {@link moe.qingu.youran.api.network.ca.CertificateClient}（它自己找这个服务）。服务器没配中间 CA 时也返回它（申请都失败，
+     * {@link CertificateAuthority#unavailableReason()} 说明原因）；网络没在运行时返回 null。
      */
-    public static TlsServerContext serverTls(Supplier<? extends Collection<String>> names) {
+    public static CertificateAuthority certificateAuthority() {
         NetworkBackend b = NetworkHooks.backend();
-        return b == null ? null : b.serverTls(names);
+        return b == null ? null : b.certificateAuthority();
     }
 
     /**

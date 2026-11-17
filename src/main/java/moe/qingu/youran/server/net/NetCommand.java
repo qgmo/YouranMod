@@ -54,7 +54,7 @@ final class NetCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/ynet <table|stats|device|identify|confirm|location|ping|dns|whois|name|get|ntp|sim|stress|flush>";
+        return "/ynet <table|stats|device|identify|confirm|location|ping|dns|whois|name|get|post|ca|ntp|sim|stress|flush>";
     }
 
     @Override
@@ -84,6 +84,8 @@ final class NetCommand extends CommandBase {
             "§6/ynet name txt <域名.yr> <文字> §f同上，设 TXT",
             "§6/ynet name remove <域名.yr> §f删掉 YouranMod 网站 DNS 上这个名字的记录（注册还在）",
             "§6/ynet get <x> <y> <z> <网址> §f用 TCP 取网页（如 http://test.yr/）",
+            "§6/ynet post <x> <y> <z> <网址> <JSON> §f发 POST（正文是 JSON，如向 ca.yr 申请证书）",
+            "§6/ynet ca [订单号] §f证书签发服务：订单、最近签出去的证书；带订单号（前几位也行）时看这张订单的认证要求",
             "§6/ynet ntp <x> <y> <z> §f向 NTP 服务器对时",
             "§6/ynet sim <丢包%> <乱序%> | off §f测试开关：路由器按概率丢包、推迟包",
             "§6/ynet stress <秒> <每秒包数> §f在网络线程上压包（机房里两台主机互相 ping）",
@@ -132,6 +134,12 @@ final class NetCommand extends CommandBase {
                 break;
             case "get":
                 get(sender, args);
+                break;
+            case "post":
+                post(sender, args);
+                break;
+            case "ca":
+                ca(sender, args);
                 break;
             case "ntp":
                 ntp(sender, args);
@@ -682,6 +690,106 @@ final class NetCommand extends CommandBase {
         });
     }
 
+    private void post(ICommandSender sender, String[] args) throws CommandException {
+        if (args.length < 6) {
+            throw new WrongUsageException("/ynet post <x> <y> <z> <网址> <JSON>");
+        }
+        Place p = place(sender, args, 1, false);
+        TestDevices.Emulated dev = emulated(sender, p);
+        if (dev == null) {
+            return;
+        }
+        String url = args[4];
+        HttpClient.Url u = HttpClient.Url.parse(url);
+        if (u == null) {
+            tell(sender, "§c不认识的网址：" + url);
+            return;
+        }
+        String body = String.join(" ", Arrays.asList(args).subList(5, args.length));
+        Map<String, String> headers = Collections.singletonMap("Content-Type", "application/json");
+        HttpClient.send(dev.stack, dev.dns, u, "POST", headers, body.getBytes(java.nio.charset.StandardCharsets.UTF_8), HTTP_TIMEOUT_MS, null)
+                .whenComplete((r, err) -> {
+                    if (err != null) {
+                        later(sender, "§c POST " + url + " 失败：" + message(err));
+                        return;
+                    }
+                    later(sender, "§eHTTP " + r.status + " " + r.reason + "，" + r.body.length + " 字节，" + r.header("Content-Type"));
+                    for (String line : r.bodyText().split("\n")) {
+                        if (!line.trim().isEmpty()) {
+                            later(sender, "§7" + line);
+                        }
+                    }
+                });
+    }
+
+    private void ca(ICommandSender sender, String[] args) {
+        moe.qingu.youran.server.net.ca.CaService ca = net.caService();
+        if (ca == null) {
+            tell(sender, "§c证书签发服务没在运行");
+            return;
+        }
+        String reason = ca.unavailableReason();
+        if (args.length >= 2) {
+            String prefix = args[1];
+            ca.orders().whenComplete((list, err) -> {
+                if (err != null) {
+                    later(sender, "§c" + message(err));
+                    return;
+                }
+                int n = 0;
+                for (moe.qingu.youran.server.net.ca.CaService.OrderInfo i : list) {
+                    if (!i.order.id.startsWith(prefix)) {
+                        continue;
+                    }
+                    n++;
+                    moe.qingu.youran.api.network.ca.CertificateOrder o = i.order;
+                    later(sender, "§e订单 " + o.id + "：" + o.status.id + "，来源 " + i.requester + "，申请于 " + Instant.ofEpochMilli(i.created)
+                            + "，过期 " + Instant.ofEpochMilli(o.expires) + (o.method == null ? "" : "，认证 " + o.method.id));
+                    if (o.error != null) {
+                        later(sender, "§c  " + o.error);
+                    }
+                    for (moe.qingu.youran.api.network.ca.Challenge c : o.challenges) {
+                        later(sender, "§6  " + c.name + " §fHTTP " + c.httpUrl + " 内容 " + c.httpContent);
+                        later(sender, "§f    DNS " + c.dnsName + " TXT " + c.dnsValue);
+                    }
+                    if (!o.certificate.isEmpty()) {
+                        java.security.cert.X509Certificate leaf = o.certificate.get(0);
+                        later(sender, "§a  证书序列号 " + leaf.getSerialNumber().toString(16) + "，有效到 " + leaf.getNotAfter().toInstant());
+                    }
+                }
+                if (n == 0) {
+                    later(sender, "§c没有订单号以 " + prefix + " 开头的订单（订单 1 小时后过期）");
+                }
+            });
+            return;
+        }
+        if (reason != null) {
+            tell(sender, "§c证书签发服务没开：" + reason);
+        } else {
+            tell(sender, "§e证书签发服务 ca.yr：中间 CA " + ca.intermediate().certificate().getSubjectX500Principal().getName()
+                    + "（有效到 " + ca.intermediate().certificate().getNotAfter().toInstant() + "），能签 " + ca.constraintsText()
+                    + "；开服以来签了 " + ca.issuedTotal() + " 张");
+        }
+        ca.orders().thenCombine(ca.issued(), (orders, issued) -> {
+            later(sender, "§6订单（内存里 " + orders.size() + " 张，1 小时后过期）");
+            int from = Math.max(0, orders.size() - 15);
+            for (moe.qingu.youran.server.net.ca.CaService.OrderInfo i : orders.subList(from, orders.size())) {
+                moe.qingu.youran.api.network.ca.CertificateOrder o = i.order;
+                later(sender, "  " + moe.qingu.youran.server.net.ca.CaService.shortId(o.id) + " " + o.status.id + " " + o.names + " 来源 " + i.requester
+                        + (o.method == null ? "" : " " + o.method.id) + (o.error == null ? "" : " §c" + o.error));
+            }
+            later(sender, "§6最近签出去的证书（" + issued.size() + " 张）");
+            for (moe.qingu.youran.server.net.ca.CaService.Issued c : issued.subList(0, Math.min(15, issued.size()))) {
+                later(sender, "  " + c.names + " 序列号 " + c.serial + " 到 " + Instant.ofEpochMilli(c.notAfter) + " 来源 " + c.requester
+                        + " 认证 " + c.method + " §7（" + Instant.ofEpochMilli(c.at) + "）");
+            }
+            return null;
+        }).exceptionally(err -> {
+            later(sender, "§c" + message(err));
+            return null;
+        });
+    }
+
     private void ntp(ICommandSender sender, String[] args) throws CommandException {
         if (args.length < 4) {
             throw new WrongUsageException("/ynet ntp <x> <y> <z>");
@@ -862,7 +970,7 @@ final class NetCommand extends CommandBase {
     @Override
     public List<String> getTabCompletions(MinecraftServer server, ICommandSender sender, String[] args, @Nullable BlockPos targetPos) {
         if (args.length == 1) {
-            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "ping", "dns", "whois", "name", "get", "ntp", "sim", "stress", "flush");
+            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "ping", "dns", "whois", "name", "get", "post", "ca", "ntp", "sim", "stress", "flush");
         }
         if (args.length == 2 && args[0].equals("name")) {
             return getListOfStringsMatchingLastWord(args, "add", "txt", "remove");

@@ -40,8 +40,12 @@ import moe.qingu.youran.server.net.service.captcha.CaptchaLocalServer;
 import moe.qingu.youran.server.net.service.captcha.CaptchaService;
 import moe.qingu.youran.server.net.service.captcha.CaptchaStore;
 import moe.qingu.youran.server.net.tls.IntermediateCa;
-import moe.qingu.youran.server.net.tls.IssuingTlsContext;
-import moe.qingu.youran.server.net.tls.LeafCache;
+import moe.qingu.youran.server.net.ca.CaHttp;
+import moe.qingu.youran.server.net.ca.CaService;
+import moe.qingu.youran.server.net.ca.NetworkValidator;
+import moe.qingu.youran.api.network.ca.CertificateAuthority;
+import moe.qingu.youran.api.network.ca.CertificateClient;
+import moe.qingu.youran.api.network.tls.CertificateTlsContext;
 import moe.qingu.youran.api.network.tls.TlsServerContext;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
@@ -97,6 +101,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     /** 聚合付款服务（pay.yr，服主 11-15） */
     static final String HOST_PAY = "youranmod:pay";
     static final String PAY_NAME = moe.qingu.youran.api.pay.PayApi.DOMAIN;
+    /** 证书签发服务（ca.yr，服主 11-17） */
+    static final String HOST_CA = "youranmod:ca";
+    static final String CA_NAME = CertificateAuthority.DOMAIN;
     /** 测试网站的国际化域名别名 */
     static final String TEST_IDN_NAME = "测试.yr";
     static final long PART_ROUTER = 0x1;
@@ -147,8 +154,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private final Set<CompletableFuture<?>> mainThreadTasks = ConcurrentHashMap.newKeySet();
     private final Map<UUID, AtomicInteger> queued = new ConcurrentHashMap<>();
     private final AtomicLong overflowDrops = new AtomicLong();
-    /** 中间 CA 签好的叶子证书；没配中间 CA 时为 null（只有 HTTP） */
-    private LeafCache leafCache;
+    /** 证书签发服务；没配中间 CA 时也有（申请都失败，说明原因） */
+    private volatile CaService ca;
+    /** YouranMod 自己网站的证书申请（关服时停） */
+    private final List<CertificateClient> certClients = new java.util.concurrent.CopyOnWriteArrayList<>();
     private Ipv6Address routerAddress;
     private Ipv6Address resolverAddress;
     private Ipv6Address ntpAddress;
@@ -206,6 +215,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_TEST, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_CAPTCHA, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_LOCATION, -1, dc));
+        hostRequests.add(new AllocationTable.Request(HOST_CA, -1, dc));
         if (moe.qingu.youran.server.net.pay.PayConfig.enabled) {
             hostRequests.add(new AllocationTable.Request(HOST_PAY, -1, dc));
         }
@@ -236,10 +246,12 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         resolverAddress = hostAddresses.get(HOST_RESOLVER);
         ntpAddress = hostAddresses.get(HOST_NTP);
 
-        leafCache = loadCa(server);
+        String[] caProblem = new String[1];
+        IntermediateCa intermediate = loadCa(server, caProblem);
 
         // 运行时
         loop = new ExecutorEventLoop(THREAD_NAME);
+        ca = new CaService(intermediate, caProblem[0], loop, System::currentTimeMillis, new SecureRandom());
         rejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
         devices = new DeviceTable(book, new Bridge());
         router = new Router(loop, book, devices, routerAddress);
@@ -366,12 +378,13 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
     }
 
-    /** 读配置里的中间 CA；没配或读不了时返回 null（只有 HTTP） */
-    private static LeafCache loadCa(MinecraftServer server) {
+    /** 读配置里的中间 CA；没配、读不了或已过期时返回 null，原因写进 {@code problem[0]}（证书服务不开，网站只有 HTTP） */
+    private static IntermediateCa loadCa(MinecraftServer server, String[] problem) {
         String cert = NetworkConfig.tlsCaCertificate == null ? "" : NetworkConfig.tlsCaCertificate.trim();
         String key = NetworkConfig.tlsCaKey == null ? "" : NetworkConfig.tlsCaKey.trim();
         if (cert.isEmpty() || key.isEmpty()) {
-            LOG.info("游戏内网络：没有配中间 CA（network.tlsCaCertificate / tlsCaKey），网站只开 HTTP，不开 HTTPS");
+            problem[0] = "服务器没配中间 CA（network.tlsCaCertificate / tlsCaKey）";
+            LOG.info("游戏内网络：没有配中间 CA（network.tlsCaCertificate / tlsCaKey），证书签发服务不开，网站只有 HTTP");
             return null;
         }
         File certFile = server.getFile(cert);
@@ -380,45 +393,49 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             IntermediateCa ca = IntermediateCa.load(certFile.toPath(), keyFile.toPath());
             long left = ca.certificate().getNotAfter().getTime() - System.currentTimeMillis();
             if (left <= 0) {
-                LOG.error("游戏内网络：中间 CA {} 已经过期，网站只开 HTTP", ca.certificate().getSubjectX500Principal());
+                problem[0] = "中间 CA 已经过期";
+                LOG.error("游戏内网络：中间 CA {} 已经过期，证书签发服务不开，网站只有 HTTP", ca.certificate().getSubjectX500Principal());
                 return null;
             }
             if (left < 30L * 24 * 3600 * 1000) {
                 LOG.warn("游戏内网络：中间 CA 不到 30 天就过期了（{}），请换新的", ca.certificate().getNotAfter());
             }
-            LOG.info("游戏内网络：HTTPS 已开，中间 CA {}（有效期到 {}）", ca.certificate().getSubjectX500Principal(), ca.certificate().getNotAfter());
-            return new LeafCache(ca, System::currentTimeMillis);
+            LOG.info("游戏内网络：证书签发服务（ca.yr）已开，中间 CA {}（有效期到 {}）", ca.certificate().getSubjectX500Principal(), ca.certificate().getNotAfter());
+            return ca;
         } catch (Exception e) {
-            LOG.error("游戏内网络：读不了中间 CA（{}、{}），网站只开 HTTP：{}", certFile, keyFile, e.toString());
+            problem[0] = "服务器的中间 CA 读不了";
+            LOG.error("游戏内网络：读不了中间 CA（{}、{}），证书签发服务不开，网站只有 HTTP：{}", certFile, keyFile, e.toString());
             return null;
         }
     }
 
-    /** 机房主机的 TLS，只签主机自己给的这些名字（与 DNS 无关）；没配中间 CA、或没有名字时为 null */
-    TlsServerContext hostTls(Collection<String> names) {
-        List<String> fixed = new ArrayList<>();
-        for (String n : names) {
-            fixed.add(DomainNames.toAscii(n));
-        }
-        if (fixed.isEmpty()) {
-            return null;
-        }
-        List<String> list = Collections.unmodifiableList(fixed);
-        return serverTls(() -> list);
+    /**
+     * 网络线程上：YouranMod 自己的网站向证书服务申请证书（HTTP 认证，网站的 80 口自动回），到期前续。
+     * 返回给 443 口用的 TLS；证书服务没开时为 null（只开 HTTP）
+     */
+    TlsServerContext siteTls(NetStack stack, Collection<String> names) {
+        CertificateClient c = CertificateClient.start(stack, names, null, ca, System::currentTimeMillis);
+        certClients.add(c);
+        return c.tls();
     }
 
-    @Override
-    public TlsServerContext serverTls(java.util.function.Supplier<? extends Collection<String>> names) {
-        LeafCache c = leafCache;
-        if (c == null) {
-            return null;
+    /** 网络线程上：证书签发服务 ca.yr（80 与 443 口；自己的证书直接签给自己） */
+    private void startCa(Map<String, Ipv6Address> hosts) {
+        CaService service = ca;
+        NetStack stack = hostStacks.get(HOST_CA);
+        if (service == null || stack == null) {
+            LOG.error("游戏内网络：证书签发服务的主机 {} 没分到地址，ca.yr 不开", HOST_CA);
+            return;
         }
-        try {
-            return new IssuingTlsContext(c, names);
-        } catch (Exception e) {
-            LOG.error("游戏内网络：TLS 初始化失败", e);
-            return null;
+        service.setValidator(new NetworkValidator(stack, resolverAddress));
+        CertificateTlsContext tls = null;
+        if (service.unavailableReason() == null) {
+            tls = new CertificateTlsContext();
+            service.selfCertificate(Collections.singletonList(CA_NAME), tls);
         }
+        new CaHttp(service, System::currentTimeMillis).listen(stack, tls);
+        LOG.info("游戏内网络：证书签发服务 ca.yr 开在 {}（{}）", hosts.get(HOST_CA),
+                tls == null ? "HTTP；没开：" + service.unavailableReason() : "HTTP 与 HTTPS；能签的名字：" + service.constraintsText());
     }
 
     /** 网络线程上：给每台主机建协议栈、挂到路由器上、启动服务 */
@@ -444,16 +461,18 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         resolver = new RecursiveResolver(hostStacks.get(HOST_RESOLVER), DnsState.rootServers());
         resolver.start();
         new NtpServer(System::currentTimeMillis).start(hostStacks.get(HOST_NTP));
-        TestWebsite.start(hostStacks.get(HOST_TEST), hostTls(TEST_NAMES));
+        startCa(hosts);
+        NetStack testStack = hostStacks.get(HOST_TEST);
+        TestWebsite.start(testStack, siteTls(testStack, TEST_NAMES));
         CaptchaService cs = captcha;
         NetStack captchaStack = hostStacks.get(HOST_CAPTCHA);
         if (cs != null && captchaStack != null) {
-            cs.start(captchaStack, hostTls(Collections.singletonList(CAPTCHA_NAME)));
+            cs.start(captchaStack, siteTls(captchaStack, Collections.singletonList(CAPTCHA_NAME)));
         }
         LocationSigner signer = locationSigner;
         NetStack locationStack = hostStacks.get(HOST_LOCATION);
         if (signer != null && locationStack != null) {
-            new LocationService(signer, System::currentTimeMillis).start(locationStack, hostTls(Collections.singletonList(LOCATION_NAME)));
+            new LocationService(signer, System::currentTimeMillis).start(locationStack, siteTls(locationStack, Collections.singletonList(LOCATION_NAME)));
         }
         moe.qingu.youran.server.net.pay.PayServer ps = pay;
         NetStack payStack = hostStacks.get(HOST_PAY);
@@ -527,6 +546,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         records.put(CAPTCHA_NAME, hosts.get(HOST_CAPTCHA));
         records.put(LOCATION_NAME, hosts.get(HOST_LOCATION));
+        records.put(CA_NAME, hosts.get(HOST_CA));
         if (pay != null) {
             records.put(PAY_NAME, hosts.get(HOST_PAY));
             // pay.yr 的开发者文档站（服主 11-15：长说明挪到单独的站），同一台主机，按 Host 分
@@ -644,6 +664,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             f.completeExceptionally(new IllegalStateException("服务器正在关"));
         }
         mainThreadTasks.clear();
+        for (CertificateClient c : certClients) {
+            c.stop();
+        }
         ExecutorEventLoop l = loop;
         if (l != null) {
             l.execute(() -> {
@@ -659,6 +682,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             }
         }
         loop = null;
+        certClients.clear();
+        ca = null;
         DnsState.reset();
         yrRegistrar = null;
         comRegistrar = null;
@@ -672,7 +697,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         resolver = null;
         book = null;
         server = null;
-        leafCache = null;
         worldDirectory = null;
         queued.clear();
     }
@@ -709,6 +733,16 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     @Override
     public Ipv6Address ntpAddress() {
         return ntpAddress;
+    }
+
+    @Override
+    public CertificateAuthority certificateAuthority() {
+        return ca;
+    }
+
+    /** 证书签发服务（{@code /ynet ca} 用）；网络没在运行时为 null */
+    CaService caService() {
+        return ca;
     }
 
     @Override
@@ -1115,11 +1149,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         @Override
         public NetStack stack() {
             return stack;
-        }
-
-        @Override
-        public TlsServerContext tls(Collection<String> names) {
-            return names == null ? null : hostTls(names);
         }
 
         @Override
