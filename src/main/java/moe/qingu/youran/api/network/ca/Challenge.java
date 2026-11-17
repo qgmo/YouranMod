@@ -8,7 +8,7 @@ package moe.qingu.youran.api.network.ca;
  * <li>DNS 认证：给 {@link #dnsName}（{@code _acme-challenge.<名字>}）加一条 TXT 记录，值为 {@link #dnsValue}，
  * 证书服务经递归解析器查这个名字的 TXT，有一条一样就算通过。</li>
  * </ul>
- * 令牌与内容每张订单都不一样；内容里带着申请的公钥的指纹，换了公钥要重新申请。
+ * 令牌与内容每张订单都不一样；内容里带着证书请求里公钥的指纹（认证绑在这把密钥上），换了密钥要重新申请。
  */
 public final class Challenge {
     /** 认证方式 */

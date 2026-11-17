@@ -9,8 +9,10 @@ public final class CaException extends Exception {
         BAD_REQUEST("badRequest", 400),
         /** 名字不在中间 CA 的域名约束之内，签了浏览器也不认；HTTP 403 */
         REJECTED_NAME("rejectedName", 403),
-        /** 公钥不对（不是 SubjectPublicKeyInfo、类型或长度不收）；HTTP 400 */
+        /** 证书请求里的公钥不收（类型、曲线、长度）；HTTP 400 */
         BAD_KEY("badKey", 400),
+        /** 证书请求（CSR）不对：读不了、太长、签名不对、签名算法不收、里面的名字与申请的不一致；HTTP 400 */
+        BAD_CSR("badCsr", 400),
         /** 这个来源申请得太频繁，或订单太多；HTTP 429 */
         RATE_LIMITED("rateLimited", 429),
         /** 没有这张订单（订单号不对或已过期）；HTTP 404 */

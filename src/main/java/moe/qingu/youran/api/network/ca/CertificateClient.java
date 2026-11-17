@@ -41,7 +41,7 @@ import java.util.function.LongSupplier;
  * }
  * }</pre>
  * 证书还没拿到时 443 口的握手失败（一般开服后几秒内就拿到）；申请失败时记日志，过一会儿再试（6 分钟起，每次加倍，最多 6 小时），
- * 手里有旧证书时继续用旧的。证书、私钥只在内存里，开服时重新申请。私钥每次申请都新生成（EC P-256）。
+ * 手里有旧证书时继续用旧的。证书、私钥只在内存里，开服时重新申请。私钥每次申请都新生成（EC P-256），用它签一份证书请求（CSR）交上去。
  */
 public final class CertificateClient {
     static final Logger LOG = LogManager.getLogger("YouranMod");
@@ -154,16 +154,18 @@ public final class CertificateClient {
             return;
         }
         KeyPair kp;
+        byte[] csr;
         try {
             KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
             g.initialize(new ECGenParameterSpec("secp256r1"));
             kp = g.generateKeyPair();
+            csr = CertificateRequest.create(kp, names);
         } catch (GeneralSecurityException e) {
-            fail("生成密钥失败：" + e);
+            fail("生成密钥或证书请求失败：" + e);
             return;
         }
         busy = true;
-        ca.newOrder(stack.primaryAddress(), names, kp.getPublic()).whenComplete((order, err) -> loop.execute(() -> {
+        ca.newOrder(stack.primaryAddress(), names, csr).whenComplete((order, err) -> loop.execute(() -> {
             if (err != null) {
                 busy = false;
                 fail(message(err));

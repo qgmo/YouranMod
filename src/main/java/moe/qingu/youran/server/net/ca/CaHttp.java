@@ -8,6 +8,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import moe.qingu.youran.api.network.ca.CaException;
 import moe.qingu.youran.api.network.ca.CertificateOrder;
+import moe.qingu.youran.api.network.ca.CertificateRequest;
 import moe.qingu.youran.api.network.ca.Challenge;
 import moe.qingu.youran.api.network.http.HttpRequest;
 import moe.qingu.youran.api.network.http.HttpResponse;
@@ -19,13 +20,9 @@ import moe.qingu.youran.server.net.service.captcha.SourceLimiter;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
-import java.security.PublicKey;
 import java.security.cert.X509Certificate;
-import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -97,7 +94,7 @@ public final class CaHttp {
     private CompletableFuture<HttpResponse> newOrder(HttpRequest req) {
         JsonObject body;
         List<String> names = new ArrayList<>();
-        PublicKey key;
+        byte[] csr;
         try {
             body = parse(req);
             JsonElement n = body.get("names");
@@ -110,15 +107,15 @@ public final class CaHttp {
                 }
                 names.add(e.getAsString());
             }
-            JsonElement k = body.get("publicKey");
+            JsonElement k = body.get("csr");
             if (k == null || !k.isJsonPrimitive() || !k.getAsJsonPrimitive().isString()) {
-                throw new CaException(CaException.Code.BAD_REQUEST, "要有 publicKey（PEM 或 base64 的 SubjectPublicKeyInfo）");
+                throw new CaException(CaException.Code.BAD_REQUEST, "要有 csr（证书请求，PEM 或 DER 的 base64）");
             }
-            key = parsePublicKey(k.getAsString());
+            csr = CertificateRequest.decode(k.getAsString());
         } catch (CaException e) {
             return done(error(e));
         }
-        return reply(service.newOrder(req.remoteAddress, names, key), 201);
+        return reply(service.newOrder(req.remoteAddress, names, csr), 201);
     }
 
     private CompletableFuture<HttpResponse> ready(String id, HttpRequest req) {
@@ -217,45 +214,13 @@ public final class CaHttp {
         }
     }
 
-    /** PEM（{@code -----BEGIN PUBLIC KEY-----}）或 base64 的 DER（SubjectPublicKeyInfo） */
-    static PublicKey parsePublicKey(String text) throws CaException {
-        byte[] der = null;
-        if (text.contains("-----BEGIN")) {
-            for (Pem.Block b : Pem.parse(text)) {
-                if (b.label.equals("PUBLIC KEY")) {
-                    der = b.der;
-                    break;
-                }
-            }
-            if (der == null) {
-                throw new CaException(CaException.Code.BAD_KEY, "PEM 里没有 -----BEGIN PUBLIC KEY-----（要的是公钥，不是证书请求或私钥）");
-            }
-        } else {
-            String s = text.replaceAll("\\s", "");
-            try {
-                der = s.contains("-") || s.contains("_") ? Base64.getUrlDecoder().decode(s) : Base64.getDecoder().decode(s);
-            } catch (IllegalArgumentException e) {
-                throw new CaException(CaException.Code.BAD_KEY, "publicKey 不是 PEM，也不是 base64");
-            }
-        }
-        X509EncodedKeySpec spec = new X509EncodedKeySpec(der);
-        for (String alg : new String[]{"EC", "RSA"}) {
-            try {
-                return KeyFactory.getInstance(alg).generatePublic(spec);
-            } catch (GeneralSecurityException ignored) {
-                // 试下一种
-            }
-        }
-        throw new CaException(CaException.Code.BAD_KEY, "读不了公钥（要 EC 或 RSA 的 SubjectPublicKeyInfo）");
-    }
-
     private HttpResponse home() {
         String reason = service.unavailableReason();
         String state = reason == null ? "服务开着。能签的名字：" + esc(service.constraintsText()) + "。" : "服务没开：" + esc(reason) + "。";
         String page = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                 + "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"zh-CN\"><head><title>ca.yr</title></head><body>\n"
                 + "<h1>ca.yr</h1>\n<p>游戏内网站的证书签发服务。" + state + "</p>\n"
-                + "<p>接口：POST /orders、GET /orders/{订单号}、POST /orders/{订单号}/ready、GET /orders/{订单号}/certificate。</p>\n"
+                + "<p>申请交证书请求（CSR，PKCS#10）。接口：POST /orders、GET /orders/{订单号}、POST /orders/{订单号}/ready、GET /orders/{订单号}/certificate。</p>\n"
                 + "</body></html>\n";
         return HttpResponse.xhtml(200, page);
     }

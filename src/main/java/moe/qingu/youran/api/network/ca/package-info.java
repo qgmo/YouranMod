@@ -4,6 +4,7 @@
  * <ul>
  * <li>{@link moe.qingu.youran.api.network.ca.CertificateClient}：给模组用的助手，申请、认证、续期都自动做，给出 HTTPS 用的 TLS；</li>
  * <li>{@link moe.qingu.youran.api.network.ca.CertificateAuthority}：Java 接口（异步），由 {@code YouranNetworkApi.certificateAuthority()} 得到；</li>
+ * <li>{@link moe.qingu.youran.api.network.ca.CertificateRequest}：证书请求（CSR，PKCS#10）的生成与读取、验签；</li>
  * <li>{@link moe.qingu.youran.api.network.ca.CertificateOrder}、{@link moe.qingu.youran.api.network.ca.Challenge}：订单与认证要求；</li>
  * <li>{@link moe.qingu.youran.api.network.ca.HttpChallenges}：HTTP 认证要回的内容（网站的 80 口回）；
  * {@link moe.qingu.youran.api.network.ca.TxtRecords}：DNS 认证加删 TXT 的办法。</li>
@@ -26,11 +27,23 @@
  * <b>1. 申请</b>：{@code POST /orders}
  * <pre>{@code
  * {"names": ["qing.yr", "www.qing.yr"],
- *  "publicKey": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n"}
+ *  "csr": "-----BEGIN CERTIFICATE REQUEST-----\n...\n-----END CERTIFICATE REQUEST-----\n"}
  * }</pre>
  * {@code names}：1–10 个名字，可以写 Unicode（转成 A-label），不能有通配符，要在中间 CA 的域名约束之内（现在只许 {@code .yr}）。
- * {@code publicKey}：证书里要放的公钥，SubjectPublicKeyInfo 的 PEM（{@code openssl pkey -pubout} 的输出），或它的 DER 的 base64；
- * 收 EC P-256、P-384 与 RSA 2048–4096 位。回 {@code 201} 和订单（见下）。
+ * {@code csr}：证书请求（PKCS#10），PEM（{@code openssl req -new} 的输出）或它的 DER 的 base64，DER 最多 8 KiB。
+ * 用要放进证书的那把私钥签名（证明握着私钥），签出的证书只用里面的公钥，名字以 {@code names} 为准。要求：
+ * <ul>
+ * <li>签名要对；签名算法收 SHA256/384withECDSA（公钥 EC P-256、P-384）与 SHA256/384/512withRSA（RSA 2048–4096 位），
+ * 不收 SHA-1；</li>
+ * <li>subjectAltName 的 DNS 名字（转成 A-label、不分大小写）要和 {@code names} 正好是同一组（只收 DNS 名字，不收 IP 等）；</li>
+ * <li>主题里有 CN 时，CN 要是其中一个名字（可以不写 CN）。</li>
+ * </ul>
+ * 例：
+ * <pre>{@code
+ * openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out qing.key
+ * openssl req -new -key qing.key -subj "/CN=qing.yr" -addext "subjectAltName=DNS:qing.yr,DNS:www.qing.yr" -out qing.csr
+ * }</pre>
+ * 回 {@code 201} 和订单（见下）。
  * <p>
  * <b>2. 取认证要求</b>（也用来查状态）：{@code GET /orders/{id}}，回 {@code 200} 和订单：
  * <pre>{@code
@@ -65,7 +78,8 @@
  * （建议每次换新密钥）。
  * <p>
  * <b>出错</b>：回 4xx / 5xx 和 {@code {"error": "代码", "message": "给人看的原因"}}。代码：
- * {@code badRequest}（400，请求写得不对）、{@code badKey}（400，公钥不对）、{@code rejectedName}（403，名字在域名约束之外）、
+ * {@code badRequest}（400，请求写得不对）、{@code badCsr}（400，证书请求读不了、签名不对、算法不收、名字与 {@code names} 不一致）、
+ * {@code badKey}（400，证书请求里的公钥不收）、{@code rejectedName}（403，名字在域名约束之外）、
  * {@code notFound}（404，没有这张订单或这个接口）、{@code wrongState}（409，已经通知过就绪、证书还没签好）、
  * {@code rateLimited}（429，太频繁）、{@code unavailable}（503，服务没开：服务器没配中间 CA）、{@code httpError}（其他 HTTP 错误）。
  */

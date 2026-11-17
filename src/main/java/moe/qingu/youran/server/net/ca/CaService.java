@@ -4,6 +4,7 @@ import moe.qingu.youran.api.network.DomainNames;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.ca.CaException;
 import moe.qingu.youran.api.network.ca.CertificateAuthority;
+import moe.qingu.youran.api.network.ca.CertificateRequest;
 import moe.qingu.youran.api.network.ca.CertificateOrder;
 import moe.qingu.youran.api.network.ca.Challenge;
 import moe.qingu.youran.api.network.stack.EventLoop;
@@ -111,8 +112,8 @@ public final class CaService implements CertificateAuthority {
     // ---- Java 接口 ----
 
     @Override
-    public CompletableFuture<CertificateOrder> newOrder(Ipv6Address requester, Collection<String> names, PublicKey key) {
-        return onLoop(() -> create(requester, names, key).snapshot());
+    public CompletableFuture<CertificateOrder> newOrder(Ipv6Address requester, Collection<String> names, byte[] csr) {
+        return onLoop(() -> create(requester, names, csr).snapshot());
     }
 
     @Override
@@ -146,7 +147,7 @@ public final class CaService implements CertificateAuthority {
 
     // ---- 订单 ----
 
-    private Order create(Ipv6Address requester, Collection<String> rawNames, PublicKey key) throws CaException {
+    private Order create(Ipv6Address requester, Collection<String> rawNames, byte[] csr) throws CaException {
         if (unavailable != null) {
             throw new CaException(CaException.Code.UNAVAILABLE, "证书服务没开：" + unavailable);
         }
@@ -177,6 +178,9 @@ public final class CaService implements CertificateAuthority {
                 throw new CaException(CaException.Code.REJECTED_NAME, n + " 不在中间 CA 的域名约束之内（" + constraints.describe() + "），签了浏览器也不认");
             }
         }
+        CertificateRequest req = CertificateRequest.parse(csr);
+        checkNames(req, set);
+        PublicKey key = req.publicKey;
         checkKey(key);
         long now = clock.getAsLong();
         String source = String.valueOf(requester);
@@ -187,7 +191,7 @@ public final class CaService implements CertificateAuthority {
         if (orders.size() >= MAX_ORDERS) {
             throw new CaException(CaException.Code.RATE_LIMITED, "证书服务手上的订单太多，过一会儿再来");
         }
-        String thumb = b64(sha256(key.getEncoded()));
+        String thumb = b64(sha256(req.subjectPublicKeyInfo()));
         List<String> names = new ArrayList<>(set);
         List<Challenge> challenges = new ArrayList<>();
         for (String n : names) {
@@ -203,6 +207,34 @@ public final class CaService implements CertificateAuthority {
         orders.put(id, o);
         LOG.info("证书服务：新订单 {}，{}，来源 {}", shortId(id), names, source);
         return o;
+    }
+
+    /** 证书请求里的名字（SAN 的 DNS 名字）要和申请的 {@code names} 正好是同一组；有 CN 时 CN 要是其中一个 */
+    static void checkNames(CertificateRequest req, Collection<String> names) throws CaException {
+        LinkedHashSet<String> inCsr = req.names();
+        if (inCsr.isEmpty()) {
+            throw new CaException(CaException.Code.BAD_CSR, "证书请求里没有 subjectAltName 的 DNS 名字（要和 names 一致）");
+        }
+        if (!inCsr.equals(new LinkedHashSet<>(names))) {
+            List<String> missing = new ArrayList<>();
+            for (String n : names) {
+                if (!inCsr.contains(n)) {
+                    missing.add(n);
+                }
+            }
+            List<String> extra = new ArrayList<>();
+            for (String n : inCsr) {
+                if (!names.contains(n)) {
+                    extra.add(n);
+                }
+            }
+            throw new CaException(CaException.Code.BAD_CSR, "证书请求里的名字和 names 不一致"
+                    + (missing.isEmpty() ? "" : "，请求里少了 " + missing) + (extra.isEmpty() ? "" : "，请求里多了 " + extra));
+        }
+        String cn = req.commonNameAscii();
+        if (cn != null && !inCsr.contains(cn)) {
+            throw new CaException(CaException.Code.BAD_CSR, "证书请求的 CN（" + req.commonName + "）不是要签的名字之一");
+        }
     }
 
     static void checkKey(PublicKey key) throws CaException {

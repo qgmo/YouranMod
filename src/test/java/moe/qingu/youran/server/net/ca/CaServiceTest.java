@@ -4,6 +4,7 @@ import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.ca.CaException;
 import moe.qingu.youran.api.network.ca.CertificateClient;
 import moe.qingu.youran.api.network.ca.CertificateOrder;
+import moe.qingu.youran.api.network.ca.CertificateRequest;
 import moe.qingu.youran.api.network.ca.Challenge;
 import moe.qingu.youran.api.network.ca.TxtRecords;
 import moe.qingu.youran.api.network.dns.DefaultRegistrar;
@@ -120,8 +121,31 @@ class CaServiceTest {
         return (CaException) e.getCause();
     }
 
+    /** 新密钥（EC P-256）给这些名字的证书请求 */
+    static byte[] csr(String... names) throws Exception {
+        return CertificateRequest.create(TestPki.ec(), Arrays.asList(names));
+    }
+
+    /** 测试资源里 OpenSSL 生成的证书请求、公钥（PEM 文字） */
+    static String resource(String name) throws Exception {
+        try (java.io.InputStream in = CaServiceTest.class.getResourceAsStream("/csr/" + name)) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+            return new String(out.toByteArray(), StandardCharsets.US_ASCII);
+        }
+    }
+
+    static java.security.PublicKey resourceKey(String name) throws Exception {
+        byte[] spki = moe.qingu.youran.api.network.tls.Pem.parse(resource(name)).get(0).der;
+        return java.security.KeyFactory.getInstance("EC").generatePublic(new java.security.spec.X509EncodedKeySpec(spki));
+    }
+
     CertificateOrder order(String... names) throws Exception {
-        CompletableFuture<CertificateOrder> f = ca.newOrder(WEB, Arrays.asList(names), TestPki.ec().getPublic());
+        CompletableFuture<CertificateOrder> f = ca.newOrder(WEB, Arrays.asList(names), csr(names));
         link.loop.drain();
         return done(f);
     }
@@ -250,35 +274,78 @@ class CaServiceTest {
 
     @Test
     void namesOutsideTheConstraintsAreRejected() throws Exception {
-        CaException e = failure(ca.newOrder(WEB, Collections.singletonList("dado.wixsite.com"), TestPki.ec().getPublic()));
+        CaException e = failure(ca.newOrder(WEB, Collections.singletonList("dado.wixsite.com"), csr("dado.wixsite.com")));
         assertEquals(CaException.Code.REJECTED_NAME, e.code);
         assertTrue(e.getMessage().contains("只许 yr"), e.getMessage());
         // 有一个在约束外整张都拒
         assertEquals(CaException.Code.REJECTED_NAME,
-                failure(ca.newOrder(WEB, Arrays.asList("shop.yr", "example.com"), TestPki.ec().getPublic())).code);
-        assertEquals(CaException.Code.BAD_REQUEST, failure(ca.newOrder(WEB, Collections.singletonList("*.shop.yr"), TestPki.ec().getPublic())).code);
-        assertEquals(CaException.Code.BAD_REQUEST, failure(ca.newOrder(WEB, Collections.<String>emptyList(), TestPki.ec().getPublic())).code);
+                failure(ca.newOrder(WEB, Arrays.asList("shop.yr", "example.com"), csr("shop.yr", "example.com"))).code);
+        assertEquals(CaException.Code.BAD_REQUEST, failure(ca.newOrder(WEB, Collections.singletonList("*.shop.yr"), csr("shop.yr"))).code);
+        assertEquals(CaException.Code.BAD_REQUEST, failure(ca.newOrder(WEB, Collections.<String>emptyList(), csr("shop.yr"))).code);
         assertTrue(done(ca.orders()).isEmpty(), "拒绝的不留订单");
         // 以点开头的约束只管下级
         TestPki dotted = new TestPki(base, "测试根 CA", ".yr");
         CaService d = new CaService(dotted.intermediate(), null, link.loop, clock, new Random(2));
-        assertEquals(CaException.Code.REJECTED_NAME, failure(d.newOrder(WEB, Collections.singletonList("yr.shop"), TestPki.ec().getPublic())).code);
-        assertEquals(CertificateOrder.Status.PENDING, done(d.newOrder(WEB, Collections.singletonList("a.yr"), TestPki.ec().getPublic())).status);
+        assertEquals(CaException.Code.REJECTED_NAME, failure(d.newOrder(WEB, Collections.singletonList("yr.shop"), csr("yr.shop"))).code);
+        assertEquals(CertificateOrder.Status.PENDING, done(d.newOrder(WEB, Collections.singletonList("a.yr"), csr("a.yr"))).status);
     }
 
     @Test
     void weakOrUnknownKeysAreRejected() throws Exception {
         java.security.KeyPairGenerator g = java.security.KeyPairGenerator.getInstance("RSA");
         g.initialize(1024, new java.security.SecureRandom(new byte[]{1}));
-        assertEquals(CaException.Code.BAD_KEY, failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), g.generateKeyPair().getPublic())).code);
-        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Collections.singletonList("shop.yr"), TestPki.rsa().getPublic())).status);
+        assertEquals(CaException.Code.BAD_KEY, failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), CertificateRequest.create(g.generateKeyPair(), Collections.singletonList("shop.yr")))).code);
+        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Collections.singletonList("shop.yr"), CertificateRequest.create(TestPki.rsa(), Collections.singletonList("shop.yr")))).status);
+    }
+
+    @Test
+    void csrMustMatchTheNames() throws Exception {
+        byte[] p256 = CertificateRequest.decode(resource("ec-p256.csr"));
+        // SAN 是 shop.yr、www.shop.yr：少一个、多一个都不行
+        CaException fewer = failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), p256));
+        assertEquals(CaException.Code.BAD_CSR, fewer.code);
+        assertTrue(fewer.getMessage().contains("多了 [www.shop.yr]"), fewer.getMessage());
+        CaException more = failure(ca.newOrder(WEB, Arrays.asList("shop.yr", "www.shop.yr", "empty.yr"), p256));
+        assertTrue(more.getMessage().contains("少了 [empty.yr]"), more.getMessage());
+        // 不分顺序、大小写；Unicode 名字按 A-label 比
+        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Arrays.asList("WWW.shop.yr", "Shop.yr"), p256)).status);
+        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Arrays.asList("shop.yr", "www.shop.yr", "测试.yr"),
+                CertificateRequest.decode(resource("ec-p384.csr")))).status);
+        // CN 不在名字里、没有 SAN
+        CaException cn = failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), CertificateRequest.decode(resource("cn-not-in-san.csr"))));
+        assertEquals(CaException.Code.BAD_CSR, cn.code);
+        assertTrue(cn.getMessage().contains("CN（other.yr）"), cn.getMessage());
+        assertEquals(CaException.Code.BAD_CSR,
+                failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), CertificateRequest.decode(resource("no-san.csr")))).code);
+        // 没有 CN 可以
+        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Collections.singletonList("shop.yr"),
+                CertificateRequest.decode(resource("rsa-2048-sha512-no-cn.csr")))).status);
+        // 签名改坏、算法不收、弱钥、截断
+        byte[] broken = p256.clone();
+        broken[broken.length - 1] ^= 1;
+        assertEquals(CaException.Code.BAD_CSR, failure(ca.newOrder(WEB, Arrays.asList("shop.yr", "www.shop.yr"), broken)).code);
+        assertEquals(CaException.Code.BAD_CSR,
+                failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), CertificateRequest.decode(resource("rsa-2048-sha1.csr")))).code);
+        assertEquals(CaException.Code.BAD_KEY,
+                failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), CertificateRequest.decode(resource("rsa-1024.csr")))).code);
+        assertEquals(CaException.Code.BAD_CSR, failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), Arrays.copyOf(p256, 100))).code);
+        assertEquals(3, done(ca.orders()).size(), "拒绝的不留订单");
+    }
+
+    @Test
+    void challengeIsBoundToTheCsrKey() throws Exception {
+        CertificateOrder o = done(ca.newOrder(WEB, Arrays.asList("shop.yr", "www.shop.yr"), CertificateRequest.decode(resource("ec-p256.csr"))));
+        String thumb = CaService.b64(CaService.sha256(resourceKey("ec-p256.pub.pem").getEncoded()));
+        for (Challenge c : o.challenges) {
+            assertEquals(c.token + "." + thumb, c.httpContent);
+        }
     }
 
     @Test
     void withoutIntermediateCaTheServiceIsOff() throws Exception {
         CaService off = new CaService(null, "服务器没配中间 CA（network.tlsCaCertificate / tlsCaKey）", link.loop, clock, new Random(3));
         assertNotNull(off.unavailableReason());
-        CaException e = failure(off.newOrder(WEB, Collections.singletonList("shop.yr"), TestPki.ec().getPublic()));
+        CaException e = failure(off.newOrder(WEB, Collections.singletonList("shop.yr"), csr("shop.yr")));
         assertEquals(CaException.Code.UNAVAILABLE, e.code);
         assertTrue(e.getMessage().contains("没配中间 CA"), e.getMessage());
         // 客户端助手：没有 TLS，只开 HTTP，也不去申请
@@ -292,15 +359,15 @@ class CaServiceTest {
     void newOrdersAreRateLimitedPerSource() throws Exception {
         Ipv6Address other = Ipv6Address.parse("fd00::99");
         for (int i = 0; i < CaService.NEW_ORDER_BURST; i++) {
-            assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Collections.singletonList("shop.yr"), TestPki.ec().getPublic())).status);
+            assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Collections.singletonList("shop.yr"), csr("shop.yr"))).status);
         }
-        assertEquals(CaException.Code.RATE_LIMITED, failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), TestPki.ec().getPublic())).code);
+        assertEquals(CaException.Code.RATE_LIMITED, failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), csr("shop.yr"))).code);
         // 别的来源不受影响
-        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(other, Collections.singletonList("shop.yr"), TestPki.ec().getPublic())).status);
+        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(other, Collections.singletonList("shop.yr"), csr("shop.yr"))).status);
         // 6 分钟后补一张
         link.loop.advance(CaService.NEW_ORDER_EVERY_SECONDS * 1000L);
-        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Collections.singletonList("shop.yr"), TestPki.ec().getPublic())).status);
-        assertEquals(CaException.Code.RATE_LIMITED, failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), TestPki.ec().getPublic())).code);
+        assertEquals(CertificateOrder.Status.PENDING, done(ca.newOrder(WEB, Collections.singletonList("shop.yr"), csr("shop.yr"))).status);
+        assertEquals(CaException.Code.RATE_LIMITED, failure(ca.newOrder(WEB, Collections.singletonList("shop.yr"), csr("shop.yr"))).code);
     }
 
     @Test
@@ -321,7 +388,7 @@ class CaServiceTest {
     void tokensFollowTheSeed() throws Exception {
         CertificateOrder a = order("shop.yr");
         CaService again = new CaService(pki.intermediate(), null, link.loop, clock, new Random(1));
-        CertificateOrder b = done(again.newOrder(WEB, Collections.singletonList("shop.yr"), TestPki.ec().getPublic()));
+        CertificateOrder b = done(again.newOrder(WEB, Collections.singletonList("shop.yr"), csr("shop.yr")));
         assertEquals(a.id, b.id, "同一个种子：同样的订单号");
         assertEquals(a.challenges.get(0).token, b.challenges.get(0).token);
         assertFalse(a.challenges.get(0).httpContent.equals(b.challenges.get(0).httpContent), "内容带着公钥指纹");
@@ -492,10 +559,10 @@ class CaServiceTest {
     @Test
     void httpApiWalkthroughWithDnsChallenge() throws Exception {
         new CaHttp(ca, clock).listen(caStack, null);
-        KeyPair kp = TestPki.ec();
-        String pem = moe.qingu.youran.api.network.tls.Pem.encode("PUBLIC KEY", kp.getPublic().getEncoded()).replace("\n", "\\n");
+        // OpenSSL 生成的证书请求（两个名字）
+        String pem = resource("ec-p256.csr").replace("\n", "\\n");
         // 1. 申请
-        HttpClient.Response r = api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"publicKey\": \"" + pem + "\"}");
+        HttpClient.Response r = api("POST", "/orders", "{\"names\": [\"shop.yr\", \"www.shop.yr\"], \"csr\": \"" + pem + "\"}");
         assertEquals(201, r.status, r.bodyText());
         assertTrue(r.header("Content-Type").startsWith("application/json"));
         com.google.gson.JsonObject o = json(r);
@@ -503,10 +570,13 @@ class CaServiceTest {
         assertEquals("pending", o.get("status").getAsString());
         // 2. 取认证要求
         com.google.gson.JsonObject got = json(api("GET", "/orders/" + id, null));
-        com.google.gson.JsonObject dns = got.getAsJsonArray("challenges").get(0).getAsJsonObject().getAsJsonObject("dns");
-        assertEquals("_acme-challenge.shop.yr", dns.get("name").getAsString());
+        assertEquals(2, got.getAsJsonArray("challenges").size());
+        assertEquals("_acme-challenge.shop.yr", got.getAsJsonArray("challenges").get(0).getAsJsonObject().getAsJsonObject("dns").get("name").getAsString());
         assertEquals(409, api("GET", "/orders/" + id + "/certificate", null).status, "还没签好");
-        siteDns.setTexts(dns.get("name").getAsString(), Collections.singletonList(dns.get("value").getAsString()));
+        for (com.google.gson.JsonElement c : got.getAsJsonArray("challenges")) {
+            com.google.gson.JsonObject dns = c.getAsJsonObject().getAsJsonObject("dns");
+            siteDns.setTexts(dns.get("name").getAsString(), Collections.singletonList(dns.get("value").getAsString()));
+        }
         // 3. 通知已就绪
         HttpClient.Response ready = api("POST", "/orders/" + id + "/ready", "{\"method\": \"dns\"}");
         assertEquals(202, ready.status, ready.bodyText());
@@ -519,36 +589,47 @@ class CaServiceTest {
         com.google.gson.JsonObject cert = json(api("GET", "/orders/" + id + "/certificate", null));
         List<X509Certificate> chain = moe.qingu.youran.api.network.tls.Pem.certificates(cert.get("certificate").getAsString());
         assertEquals(2, chain.size());
-        assertEquals(kp.getPublic(), chain.get(0).getPublicKey(), "证书里是申请时给的公钥");
+        assertEquals(resourceKey("ec-p256.pub.pem"), chain.get(0).getPublicKey(), "证书里是证书请求里的公钥");
         assertNull(TlsTrust.of(pki.root).check(chain, "shop.yr", new java.util.Date(clock.getAsLong())));
+        assertNull(TlsTrust.of(pki.root).check(chain, "www.shop.yr", new java.util.Date(clock.getAsLong())));
         assertEquals(chain.get(0).getSerialNumber().toString(16), cert.get("serial").getAsString());
     }
 
     @Test
     void httpApiErrors() throws Exception {
         new CaHttp(ca, clock).listen(caStack, null);
-        String key = java.util.Base64.getEncoder().encodeToString(TestPki.ec().getPublic().getEncoded());
+        String key = java.util.Base64.getEncoder().encodeToString(csr("shop.yr"));
         assertError(api("POST", "/orders", "不是 JSON"), 400, "badRequest");
         assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"]}"), 400, "badRequest");
-        assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"publicKey\": \"AAAA\"}"), 400, "badKey");
-        assertError(api("POST", "/orders", "{\"names\": [\"dado.wixsite.com\"], \"publicKey\": \"" + key + "\"}"), 403, "rejectedName");
+        assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"csr\": \"AAAA\"}"), 400, "badCsr");
+        // 交公钥（旧写法）不收
+        String pub = moe.qingu.youran.api.network.tls.Pem.encode("PUBLIC KEY", TestPki.ec().getPublic().getEncoded()).replace("\n", "\\n");
+        assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"publicKey\": \"" + pub + "\"}"), 400, "badRequest");
+        assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"csr\": \"" + pub + "\"}"), 400, "badCsr");
+        // 名字不一致、签名改坏
+        assertError(api("POST", "/orders", "{\"names\": [\"www.shop.yr\"], \"csr\": \"" + key + "\"}"), 400, "badCsr");
+        byte[] broken = csr("shop.yr");
+        broken[broken.length - 1] ^= 1;
+        assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"csr\": \"" + java.util.Base64.getEncoder().encodeToString(broken) + "\"}"),
+                400, "badCsr");
+        assertError(api("POST", "/orders", "{\"names\": [\"dado.wixsite.com\"], \"csr\": \"" + key + "\"}"), 403, "rejectedName");
         assertError(api("GET", "/orders/nope", null), 404, "notFound");
         assertError(api("GET", "/orders", null), 405, "httpError");
-        HttpClient.Response ok = api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"publicKey\": \"" + key + "\"}");
+        HttpClient.Response ok = api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"csr\": \"" + key + "\"}");
         assertEquals(201, ok.status, ok.bodyText());
         String id = json(ok).get("id").getAsString();
         assertError(api("POST", "/orders/" + id + "/ready", "{\"method\": \"ftp\"}"), 400, "badRequest");
         // 同一个来源申请太多：429
         for (int i = 1; i < CaService.NEW_ORDER_BURST; i++) {
-            assertEquals(201, api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"publicKey\": \"" + key + "\"}").status);
+            assertEquals(201, api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"csr\": \"" + key + "\"}").status);
         }
-        assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"publicKey\": \"" + key + "\"}"), 429, "rateLimited");
+        assertError(api("POST", "/orders", "{\"names\": [\"shop.yr\"], \"csr\": \"" + key + "\"}"), 429, "rateLimited");
         // 服务没开：503
         CaService off = new CaService(null, "服务器没配中间 CA", link.loop, clock, new Random(4));
         NetStack offStack = link.host("fd00::cb");
         new CaHttp(off, clock).listen(offStack, null);
         CompletableFuture<HttpClient.Response> f = HttpClient.send(client, new DnsResolver(client, RESOLVER), HttpClient.Url.parse("http://[fd00::cb]/orders"),
-                "POST", null, ("{\"names\": [\"shop.yr\"], \"publicKey\": \"" + key + "\"}").getBytes(StandardCharsets.UTF_8), 15_000, null);
+                "POST", null, ("{\"names\": [\"shop.yr\"], \"csr\": \"" + key + "\"}").getBytes(StandardCharsets.UTF_8), 15_000, null);
         link.loop.advance(20_000);
         HttpClient.Response r = done(f);
         assertError(r, 503, "unavailable");
