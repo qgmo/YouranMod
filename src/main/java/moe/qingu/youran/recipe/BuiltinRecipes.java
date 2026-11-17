@@ -35,5 +35,6 @@ public final class BuiltinRecipes {
         PcbRecipes.registerCrafting(event.getRegistry());
         PositiveResistRecipes.registerCrafting(event.getRegistry());
         PeripheralRecipes.register(event.getRegistry());
+        TvRemoteRecipes.register(event.getRegistry());
     }
 }
