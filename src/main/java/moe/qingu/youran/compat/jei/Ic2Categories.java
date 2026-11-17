@@ -62,6 +62,8 @@ final class Ic2Categories {
         private static final int OUT_ITEM_X = 78;
         private static final int OUT_ITEM_Y = 0;
 
+        /** 页面宽（同洗矿机页、精馏塔页） */
+        private static final int PAGE_WIDTH = 160;
         /** “装罐”（BottleLiquid）模式图标在界面贴图里的位置：四个模式图标每个 14 高，富集 60、固体装罐 18，按模式顺序往下排 */
         private static final int BOTTLE_LIQUID_ICON_V = 46;
 
@@ -105,6 +107,31 @@ final class Ic2Categories {
         @Override
         public IDrawable getIcon() {
             return icon;
+        }
+
+        /**
+         * IC2 的背景底下接一块放说明（同洗矿机页、精馏塔页）：说明从 IC2 那张图的下沿往下写，页面宽 160，不压在机器图上
+         * （服主 11-17：改良正胶页的说明压在装罐机上）
+         */
+        @Override
+        public IDrawable getBackground() {
+            IDrawable ic2 = super.getBackground();
+            return new IDrawable() {
+                @Override
+                public int getWidth() {
+                    return Math.max(PAGE_WIDTH, ic2.getWidth());
+                }
+
+                @Override
+                public int getHeight() {
+                    return ic2.getHeight() + FluidItemRecipe.NOTES_GAP + FluidItemRecipe.NOTE_LINES * FluidItemRecipe.NOTE_LINE_HEIGHT;
+                }
+
+                @Override
+                public void draw(Minecraft minecraft, int xOffset, int yOffset) {
+                    ic2.draw(minecraft, xOffset, yOffset);
+                }
+            };
         }
 
         @Override
