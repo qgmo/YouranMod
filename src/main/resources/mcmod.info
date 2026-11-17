@@ -12,7 +12,7 @@
     "authorList": [
       "QiguaiAAAA"
     ],
-    "dependencies": [],
+    "dependencies": ["alchemistry"],
     "dependants": [],
     "requiredMods": [],
     "useDependencyInformation": "true"

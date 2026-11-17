@@ -93,6 +93,11 @@ public final class YouranMod {
     @Mod.EventHandler
     public void postInit(FMLPostInitializationEvent event) {
         CompatRecipes.postInit();
+        // 气体、低温液体（液氩、液氙，别的模组的氖、氦……）只留 500 mB ⇄ 8 个（服主 11-16、11-17），换掉炼金化学按“同名元素流体”自动加的 144 mB ⇄ 16 个。
+        // 炼金化学在它的后初始化里建配方（mcmod.info 里写了我们排在它之后），在这里换，JEI 读到的就是换过的；我们自己的 500 mB 那条在上面已经加了，不会重复
+        if (net.minecraftforge.fml.common.Loader.isModLoaded(moe.qingu.youran.compat.alchemistry.AlchemistryCompat.MODID)) {
+            moe.qingu.youran.compat.alchemistry.AlchemistryCompat.replaceGasIngotPairs();
+        }
         // 家具模组的 MineBay：上架掩模、设计图、底片、软盘（只在装了家具时加载 compat.minebay）
         if (net.minecraftforge.fml.common.Loader.isModLoaded(moe.qingu.youran.compat.minebay.MineBayListings.CFM)) {
             moe.qingu.youran.compat.minebay.MineBayListings.register();
@@ -104,11 +109,6 @@ public final class YouranMod {
     public void loadComplete(net.minecraftforge.fml.common.event.FMLLoadCompleteEvent event) {
         moe.qingu.youran.recipe.MolybdenumRecipes.loadComplete(net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering"));
         moe.qingu.youran.recipe.FluoriteRecipes.loadComplete(net.minecraftforge.fml.common.Loader.isModLoaded(moe.qingu.youran.compat.alchemistry.AlchemistryCompat.MODID));
-        // 液氩、液氙只留 500 mB ⇄ 8 个（服主 11-16），删掉炼金化学按“同名元素流体”自动加的 144 mB ⇄ 16 个
-        if (net.minecraftforge.fml.common.Loader.isModLoaded(moe.qingu.youran.compat.alchemistry.AlchemistryCompat.MODID)) {
-            moe.qingu.youran.compat.alchemistry.AlchemistryCompat.removeIngotFluidPair(moe.qingu.youran.registry.ModFluids.argon);
-            moe.qingu.youran.compat.alchemistry.AlchemistryCompat.removeIngotFluidPair(moe.qingu.youran.registry.ModFluids.xenon);
-        }
         if (event.getSide().isClient() && net.minecraftforge.fml.common.Loader.isModLoaded("immersiveengineering")) {
             moe.qingu.youran.compat.immersiveengineering.LithoManual.register();
         }

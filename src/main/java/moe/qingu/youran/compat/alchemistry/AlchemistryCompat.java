@@ -251,44 +251,62 @@ public final class AlchemistryCompat {
     }
 
     /**
-     * 删掉炼金化学自动给“和元素同名的流体”加的那条“144 mB ⇄ 16 个元素”（按金属锭的量算，它的 {@code initAtomizerRecipes}，
-     * 液化器那条由可逆的雾化器配方生成）。我们的液氩、液氙注册名就叫 argon、xenon（SCP-294 要认），会被它当成熔融金属，
-     * 和我们定的 500 mB ⇄ 8 个（服主 11-16）并存。炼金化学在它的后初始化里才建配方，所以在全部载入完成时调用。
+     * 把炼金化学给“和元素同名的气体 / 低温液体”自动加的“144 mB ⇄ 16 个”换成“500 mB ⇄ 8 个”（规则见 {@link moe.qingu.youran.logic.alchemy.ElementFluidRule}；
+     * 服主 11-17）。要在炼金化学的后初始化（它在那里建配方）之后、JEI 读配方之前调用：放在我们的后初始化里，mcmod.info 里写了排在炼金化学之后。
+     * 已经有 500 mB 那条的（我们的液氩、液氙）只删不加。
      */
-    public static void removeIngotFluidPair(net.minecraftforge.fluids.Fluid fluid) {
-        if (fluid == null) {
-            return;
-        }
+    public static void replaceGasIngotPairs() {
         try {
             Class<?> modRecipesClass = Class.forName("al132.alchemistry.recipes.ModRecipes");
             Object modRecipes = modRecipesClass.getField("INSTANCE").get(null);
-            int removed = 0;
-            java.util.Iterator<Object> it = listOf(modRecipesClass, modRecipes, "getAtomizerRecipes").iterator();
+            List<Object> atomizers = listOf(modRecipesClass, modRecipes, "getAtomizerRecipes");
+            java.util.Map<String, ItemStack> replaced = new java.util.LinkedHashMap<>();
+            java.util.Iterator<Object> it = atomizers.iterator();
             while (it.hasNext()) {
                 Object r = it.next();
                 net.minecraftforge.fluids.FluidStack in = (net.minecraftforge.fluids.FluidStack) r.getClass().getMethod("getInput").invoke(r);
-                if (isIngotAmount(in, fluid)) {
+                ItemStack out = (ItemStack) r.getClass().getMethod("getOutput").invoke(r);
+                if (in != null && in.getFluid() != null && out != null && moe.qingu.youran.logic.alchemy.ElementFluidRule.replaceIngotPair(in.amount, out.getCount(),
+                        in.getFluid().getTemperature(in), in.getFluid().isGaseous(in))) {
                     it.remove();
-                    removed++;
+                    replaced.put(in.getFluid().getName(), out.copy());
                 }
             }
+            int liquifiers = 0;
             it = listOf(modRecipesClass, modRecipes, "getLiquifierRecipes").iterator();
             while (it.hasNext()) {
                 Object r = it.next();
                 net.minecraftforge.fluids.FluidStack out = (net.minecraftforge.fluids.FluidStack) r.getClass().getMethod("getOutput").invoke(r);
-                if (isIngotAmount(out, fluid)) {
+                ItemStack in = (ItemStack) r.getClass().getMethod("getInput").invoke(r);
+                if (out != null && out.getFluid() != null && in != null && replaced.containsKey(out.getFluid().getName())
+                        && out.amount == moe.qingu.youran.logic.alchemy.ElementFluidRule.INGOT_MB && in.getCount() == moe.qingu.youran.logic.alchemy.ElementFluidRule.INGOT_ELEMENTS) {
                     it.remove();
-                    removed++;
+                    liquifiers++;
                 }
             }
-            YouranMod.LOG.info("删掉炼金化学自动加的 {}（144 mB ⇄ 16 个）配方 {} 条", fluid.getName(), removed);
+            for (java.util.Map.Entry<String, ItemStack> e : replaced.entrySet()) {
+                net.minecraftforge.fluids.Fluid fluid = net.minecraftforge.fluids.FluidRegistry.getFluid(e.getKey());
+                if (fluid == null || hasAtomizer(atomizers, fluid, moe.qingu.youran.logic.alchemy.ElementFluidRule.GAS_MB)) {
+                    continue;
+                }
+                ItemStack element = e.getValue().copy();
+                element.setCount(moe.qingu.youran.logic.alchemy.ElementFluidRule.GAS_ELEMENTS);
+                registerAtomizerPair(new net.minecraftforge.fluids.FluidStack(fluid, moe.qingu.youran.logic.alchemy.ElementFluidRule.GAS_MB), element);
+            }
+            YouranMod.LOG.info("炼金化学：气体 / 低温液体的 144 mB ⇄ 16 个换成 500 mB ⇄ 8 个：{}（删雾化器 {} 条、液化器 {} 条）", replaced.keySet(), replaced.size(), liquifiers);
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
-            YouranMod.LOG.error("删炼金化学自动加的 {} 配方失败", fluid.getName(), e);
+            YouranMod.LOG.error("换炼金化学气体的 144 mB 配方失败", e);
         }
     }
 
-    private static boolean isIngotAmount(net.minecraftforge.fluids.FluidStack stack, net.minecraftforge.fluids.Fluid fluid) {
-        return stack != null && stack.getFluid() != null && stack.getFluid().getName().equals(fluid.getName()) && stack.amount == 144;
+    private static boolean hasAtomizer(List<Object> atomizers, net.minecraftforge.fluids.Fluid fluid, int mb) throws ReflectiveOperationException {
+        for (Object r : atomizers) {
+            net.minecraftforge.fluids.FluidStack in = (net.minecraftforge.fluids.FluidStack) r.getClass().getMethod("getInput").invoke(r);
+            if (in != null && in.getFluid() != null && in.getFluid().getName().equals(fluid.getName()) && in.amount == mb) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
