@@ -110,7 +110,8 @@ public final class OrderSpec {
 
     /**
      * 只许这个玩家付（可选）：别的角色登录着 pay.yr 时付款页说明“要由 X 付”，不给付款按钮。
-     * 例如 MineBay 的订单记在 MineBay 登录着的角色名下，钱也从这个角色出（谁坐在电脑前操作不管）。
+     * 不设时谁付都行：付钱和收货是两回事，收货人由网站自己定（例如 MineBay 送给在 MineBay 登录的角色，
+     * dado 送给结账时填的玩家），别人可以替他付。
      */
     public OrderSpec payer(UUID player) {
         this.payer = player;
