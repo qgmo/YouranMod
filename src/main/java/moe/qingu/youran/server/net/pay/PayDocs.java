@@ -87,7 +87,9 @@ final class PayDocs {
                         + "<code>amount_yuan</code>、<code>items</code>、<code>created</code>、<code>expires_at</code>（Unix 秒）。</p>\n");
         b.append("<h2>查询收款单</h2>\n<pre>GET /api/v1/orders/单号</pre>\n")
                 .append("<p><code>status</code>：<code>open</code>、<code>paying</code>、<code>paid</code>、<code>canceled</code>、<code>expired</code>。"
-                        + "付了以后多 <code>paid_at</code>、<code>payment</code>、<code>payer_uuid</code>、<code>payer_name</code>、<code>refunded_yuan</code>、<code>refunded_items</code>。</p>\n");
+                        + "付了以后多 <code>paid_at</code>、<code>payment</code>、<code>payer_uuid</code>、<code>payer_account</code>、<code>payer_name</code>、<code>refunded_yuan</code>、<code>refunded_items</code>。"
+                        + "模组用虚拟账户的余额付的（如清替玩家下单）没有 <code>payer_uuid</code>，<code>payer_account</code> 是 <code>virtual:模组 ID:名字</code>，"
+                        + "<code>payer_name</code> 是它的显示名。要送货给谁按你自己的单子定，不要按付款人。</p>\n");
         b.append("<h2>其他</h2>\n<table class=\"list\">\n")
                 .append("<tr><td><code>POST /api/v1/orders/单号/cancel</code></td><td>取消还没付的单（付过的回 409）</td></tr>\n")
                 .append("<tr><td><code>GET /api/v1/payments/付款号</code></td><td>查一笔付款（金额、已退）</td></tr>\n")
@@ -135,7 +137,16 @@ final class PayDocs {
                 + "PayApi.addListener(AccountRef.virtual(\"mymod:shop\"), (order, payment) -&gt; { /* 发货 */ });\n"
                 + "PayApi.setDisplayName(\"mymod:shop\", \"我的小店\");</pre>\n"
                 + "<p class=\"hint\">模组收款进虚拟账户，不用密钥；回调在服务端主线程上。显示名是付款页、确认框、收支记录里给人看的名字（不起时显示登记名）。"
-                + "<code>reference</code> 不显示在付款页上。</p>\n";
+                + "<code>reference</code> 不显示在付款页上。</p>\n"
+                + "<h2>模组付款：付款入口与付款请求</h2>\n<pre>PaymentInfo p = PayApi.pay(new PaySpec(\"ord_…\", AccountRef.virtual(\"mymod:shop\"))\n"
+                + "        .expect(expectedPrice).requestId(\"req-123\"));\n"
+                + "// 同 PayApi.virtualAccount(\"mymod:shop\").pay(\"ord_…\", expectedPrice, \"req-123\")</pre>\n"
+                + "<p class=\"hint\"><code>PayApi.pay</code> 是唯一的付款入口（玩家在付款页确认以后也是它付的），在 Java 里调用就是授权、不弹确认框。"
+                + "规则同玩家付款（单子要开着、没过期、不能付给自己），虚拟账户从余额里出，不够时抛 <code>insufficient_balance</code>；"
+                + "<code>expect</code> 不为 null 时要和价格一样。同一个请求编号再付只付一次，返回第一次的付款。收款方照常收到回调，退款退回付款的账户。</p>\n"
+                + "<p class=\"hint\">付款页上有人要用某个账户付时，pay.yr 发付款请求：玩家账户由 YouranMod 弹确认框；虚拟账户交给它的模组用 "
+                + "<code>PayApi.setRequestHandler(\"mymod\", handler)</code> 登记的处理者（可选）。没有处理者时什么都不发生，单子照旧开着，以后调 "
+                + "<code>PayApi.pay</code> 照样能付。</p>\n";
     }
 
     private static String help() {

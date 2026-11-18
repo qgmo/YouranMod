@@ -16,6 +16,9 @@ public final class PayHooks {
     /** 虚拟账户（“模组 ID:名字”）→ 给人看的名字；加载阶段就能登记，pay.yr 开着时马上记进账本 */
     private static final Map<String, String> DISPLAY_NAMES = new ConcurrentHashMap<>();
 
+    /** 模组 ID → 处理它的虚拟账户付款请求的一方（可选） */
+    private static final Map<String, moe.qingu.youran.api.pay.PaymentRequestHandler> REQUEST_HANDLERS = new ConcurrentHashMap<>();
+
     private PayHooks() {
     }
 
@@ -58,5 +61,21 @@ public final class PayHooks {
     public static List<PaymentListener> listeners(AccountRef account) {
         List<PaymentListener> list = LISTENERS.get(account);
         return list == null ? Collections.<PaymentListener>emptyList() : list;
+    }
+
+    public static void setRequestHandler(String modId, moe.qingu.youran.api.pay.PaymentRequestHandler h) {
+        if (modId == null || !modId.matches("[a-z0-9_.-]{1,64}")) {
+            throw new IllegalArgumentException("模组 ID 不对：" + modId);
+        }
+        if (h == null) {
+            REQUEST_HANDLERS.remove(modId);
+        } else {
+            REQUEST_HANDLERS.put(modId, h);
+        }
+    }
+
+    /** 处理这个模组的虚拟账户付款请求的一方；没有为 null */
+    public static moe.qingu.youran.api.pay.PaymentRequestHandler requestHandler(String modId) {
+        return modId == null ? null : REQUEST_HANDLERS.get(modId);
     }
 }

@@ -9,7 +9,10 @@ import java.util.List;
  * 模组创建的虚拟账户（服主 11-15：如 YouranSCP 给 dado 建的、家具模组 MineBay 收款用的）。收款单的收款方可以是它，
  * 付款记进来；模组按需查看余额、取出或作废里面的东西。用 {@link PayApi#virtualAccount} 拿（没有时创建）。
  * <p>
- * 查看的方法任意线程都可以调用；取出、作废、发给玩家要在服务端主线程上调用。
+ * 查看的方法任意线程都可以调用；取出、作废、发给玩家、付款要在服务端主线程上调用。
+ * <p>
+ * 拿到这个对象就能动这个账户（服主 11-18：对模组来说走 Java 调用就相当于验证过了），pay.yr 不再核对是哪个模组在调；
+ * 别把它交给不该动这个账户的代码。
  */
 public interface VirtualAccount {
     AccountRef ref();
@@ -37,4 +40,19 @@ public interface VirtualAccount {
      * 余额不够、玩家不在线时抛异常、什么都不扣。
      */
     void giveTo(EntityPlayerMP player, Amount amount, Currency.Unit form, String note) throws PayException;
+
+    /** 请求编号的写法（{@link #pay}） */
+    java.util.regex.Pattern REQUEST_ID = java.util.regex.Pattern.compile("[A-Za-z0-9_.:\\-]{1,100}");
+
+    /**
+     * 用这个账户的余额付一张收款单：{@link PayApi#pay} 的简写（同一个入口、同样的规则、崩溃安全与请求编号），付款账户是这个账户。
+     *
+     * @param orderId   收款单号（{@code ord_…}）
+     * @param expected  预期金额；不为 null 时要和收款单的价格一样，不一样就拒（{@code amount_mismatch}），什么都不扣
+     * @param requestId 请求编号（{@link #REQUEST_ID}）；不为 null 时同一个编号再调只付一次，返回第一次的那笔付款
+     * @return 这笔付款
+     */
+    default PaymentInfo pay(String orderId, Amount expected, String requestId) throws PayException {
+        return PayApi.pay(new PaySpec(orderId, ref()).expect(expected).requestId(requestId));
+    }
 }

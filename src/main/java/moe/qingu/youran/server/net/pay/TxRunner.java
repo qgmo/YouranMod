@@ -83,10 +83,16 @@ final class TxRunner {
      * 其余从背包拿。只用余额付（背包什么都不拿）时也走同样的标记、存盘、核对，崩溃恢复照同一套规则。
      */
     Result pay(Ledger.Order order, WorldPort.PlayerPort payer, Map<PayItem, Long> take, Map<PayItem, Long> change, Amount fromBalance) {
+        return pay(order, payer, take, change, fromBalance, null, null);
+    }
+
+    /** 同上，带预期金额与请求编号（{@link PayEntry}：玩家付款都从这里进） */
+    Result pay(Ledger.Order order, WorldPort.PlayerPort payer, Map<PayItem, Long> take, Map<PayItem, Long> change, Amount fromBalance,
+               Amount expected, String requestId) {
         Ledger.Drops drops = drops(payer, take, change);
         Ledger.Tx tx;
         try {
-            tx = ledger.beginPay(order, payer.id(), payer.name(), take, change, fromBalance, drops, clock.getAsLong());
+            tx = ledger.beginPay(order, payer.id(), payer.name(), take, change, fromBalance, drops, expected, requestId, clock.getAsLong());
         } catch (PayException e) {
             return Result.failed(e);
         } catch (IOException e) {

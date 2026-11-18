@@ -6,8 +6,12 @@ import java.util.UUID;
 public final class PaymentInfo {
     public final String id;
     public final String orderId;
+    /** 付款的玩家；虚拟账户付的（{@link VirtualAccount#pay}）为 null，见 {@link #payerAccount} */
     public final UUID payer;
+    /** 付款人的名字：玩家角色名；虚拟账户付的是它的显示名（如“清”） */
     public final String payerName;
+    /** 付款的账户：玩家付的是他的玩家账户，虚拟账户付的是那个虚拟账户。退款退回这个账户 */
+    public final AccountRef payerAccount;
     public final AccountRef receiver;
     public final String site;
     public final String reference;
@@ -17,11 +21,19 @@ public final class PaymentInfo {
     public final Amount refunded;
     public final long time;
 
+    /** 玩家付的款（{@link #payerAccount} 是 {@code payer} 的玩家账户；{@code payer} 为 null 时也为 null） */
     public PaymentInfo(String id, String orderId, UUID payer, String payerName, AccountRef receiver, String site, String reference,
                        Amount amount, Amount refunded, long time) {
+        this(id, orderId, payer == null ? null : AccountRef.player(payer), payerName, receiver, site, reference, amount, refunded, time);
+    }
+
+    /** {@code payerAccount} 是玩家账户时 {@link #payer} 是那个玩家，是虚拟账户时为 null */
+    public PaymentInfo(String id, String orderId, AccountRef payerAccount, String payerName, AccountRef receiver, String site,
+                       String reference, Amount amount, Amount refunded, long time) {
         this.id = id;
         this.orderId = orderId;
-        this.payer = payer;
+        this.payerAccount = payerAccount;
+        this.payer = payerAccount == null ? null : payerAccount.player;
         this.payerName = payerName;
         this.receiver = receiver;
         this.site = site;

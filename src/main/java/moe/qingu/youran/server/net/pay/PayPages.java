@@ -139,6 +139,8 @@ final class PayPages {
                 return "提现退回";
             case TAKEN:
                 return "取出";
+            case SPENT:
+                return "余额付款";
             default:
                 return "作废";
         }

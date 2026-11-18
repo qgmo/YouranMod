@@ -17,6 +17,9 @@ import moe.qingu.youran.api.pay.OrderSpec;
 import moe.qingu.youran.api.pay.PayException;
 import moe.qingu.youran.api.pay.PayItem;
 import moe.qingu.youran.api.pay.PaymentInfo;
+import moe.qingu.youran.api.pay.PaymentRequest;
+import moe.qingu.youran.api.pay.PaymentRequestHandler;
+import moe.qingu.youran.network.PayHooks;
 import moe.qingu.youran.server.net.service.captcha.SourceLimiter;
 
 import java.nio.charset.StandardCharsets;
@@ -617,6 +620,11 @@ final class PayService {
         return url + (url.indexOf('?') >= 0 ? "&" : "?") + "order=" + orderId + "&status=" + status;
     }
 
+    /**
+     * 付款页点了“付款”：发一个付款请求（{@code PaymentRequest}），按账户类型交给处理者（{@link PayRequests}）。
+     * 付款页现在只会用登录的角色的账户发请求（表单里 {@code from} 可以写别的账户，以后付款页加“用哪个账户付”时用）：
+     * 玩家账户由 {@link #playerRequest} 处理（id.yr 确认框，同意了调付款入口）；虚拟账户交给它的模组，没有处理者时页面写“等主人确认”。
+     */
     private CompletableFuture<HttpResponse> pay(HttpRequest r, Session s, String orderId, long now) {
         Map<String, String> f = r.form();
         if (s == null) {
@@ -630,26 +638,89 @@ final class PayService {
         if (use == null) {
             return done(page(400, PayPages.message("付款", s.name, s.csrf, "err", "用余额付的元数要填 1–9 位整数", link("/c/" + orderId, "回付款页"))));
         }
+        AccountRef from = AccountRef.player(s.player);
+        String fromText = f.get("from");
+        if (fromText != null && !fromText.trim().isEmpty()) {
+            try {
+                from = AccountRef.parse(fromText.trim());
+            } catch (IllegalArgumentException e) {
+                return done(page(400, PayPages.message("付款", s.name, s.csrf, "err", "用哪个账户付写得不对", link("/c/" + orderId, "回付款页"))));
+            }
+        }
+        AccountRef account = from;
+        PaymentRequestHandler players = req -> playerRequest(r, s, req, prefer, use, now);
+        return ctx.onMainThread(() -> {
+            OrderInfo o = core.order(orderId);
+            if (o == null) {
+                return CompletableFuture.completedFuture(PaymentRequestHandler.Reply.refused("没有这张收款单"));
+            }
+            PaymentRequest req = new PaymentRequest(o, account, core.ledger.name(account), s.player, s.name, f);
+            return PayRequests.dispatch(req, players, PayHooks::requestHandler);
+        }).thenCompose(x -> x).thenApply(reply -> requestPage(s, orderId, reply)).exceptionally(e -> {
+            Ledger.LOG.error("pay.yr：处理付款请求 {} 出错", orderId, e);
+            return page(500, PayPages.message("出错了", s.name, s.csrf, "err", "pay.yr 出错了，没有付款。", link("/c/" + orderId, "回付款页")));
+        });
+    }
+
+    /** 付款请求的结果给浏览器看 */
+    private HttpResponse requestPage(Session s, String orderId, PaymentRequestHandler.Reply reply) {
+        switch (reply.kind) {
+            case REDIRECT:
+                if (reply.url != null && (reply.url.startsWith("/") && !reply.url.startsWith("//") || reply.url.matches("https?://[\\x21-\\x7e]{1,1000}"))) {
+                    return redirect(reply.url);
+                }
+                return page(500, PayPages.message("出错了", s.name, s.csrf, "err", "处理这笔付款的一方给的网址不对，没有付款。", link("/c/" + orderId, "回付款页")));
+            case PAID: {
+                OrderInfo o = core.order(orderId);
+                if (o != null && o.returnUrl != null) {
+                    return redirect(appendQuery(o.returnUrl, orderId, "paid"));
+                }
+                return ok(PayPages.message("付款成功", s.name, s.csrf, "ok", "付款成功。", null));
+            }
+            case PENDING:
+                // 不是错：单子照旧开着，等这个账户的主人去付（或者有人取消、过期）；这里不给付款按钮
+                return ok(PayPages.message("等待确认", s.name, s.csrf, "ok", reply.message == null ? "等这个账户的主人确认。" : reply.message,
+                        link("/c/" + orderId + "/cancel", "返回网站")));
+            default:
+                return page(409, PayPages.message("没有付款", s.name, s.csrf, "err", reply.message == null ? "没有付款。" : reply.message,
+                        link("/c/" + orderId, "回付款页")));
+        }
+    }
+
+    /**
+     * YouranMod 自己处理玩家账户的付款请求（主线程）：只能用登录的角色的账户；照现在的背包与余额准备好拿法，请 id.yr 给坐在电脑前的人弹确认框，
+     * 浏览器跳过去。同意了（{@link #op}）在主线程上调付款入口（{@link PayServer#executePay}）；拒绝、超时什么都不做。
+     */
+    private CompletableFuture<PaymentRequestHandler.Reply> playerRequest(HttpRequest r, Session s, PaymentRequest req, CurrencyPlan.Prefer prefer,
+                                                                         CurrencyPlan.BalanceUse use, long now) {
+        String orderId = req.order.id;
+        if (!req.account.equals(AccountRef.player(s.player))) {
+            return PaymentRequestHandler.Reply.refusedNow("只能用登录的角色（" + s.name + "）的账户付");
+        }
         Op op = newOp(s, OpKind.PAY, orderId, now);
         if (op == null) {
-            return done(page(503, PayPages.message("太忙了", s.name, s.csrf, "err", "现在太忙，请稍后再试", null)));
+            return PaymentRequestHandler.Reply.refusedNow("现在太忙，请稍后再试");
         }
         op.back = checkoutUrl(orderId, prefer, use);
         op.again = () -> pay(r, s, orderId, System.currentTimeMillis());
         if (!lock(orderId, op, s, now)) {
             ops.remove(op.id);
-            return done(page(409, PayPages.message("正在付款", s.name, s.csrf, "err", "这张收款单正在别处付款（确认框还开着）。", link(op.back, "回付款页"))));
+            return PaymentRequestHandler.Reply.refusedNow("这张收款单正在别处付款（确认框还开着）。");
         }
-        return ctx.onMainThread(() -> {
-            PayServer.PreparedPay prep;
-            try {
-                prep = core.preparePay(orderId, s.player, prefer, use);
-            } catch (PayException e) {
-                throw new java.util.concurrent.CompletionException(e);
-            }
-            op.prepared = prep;
-            return prep.ask;
-        }).thenCompose(ask -> askId(r, s, op, ask)).exceptionally(e -> failed(op, e));
+        PayServer.PreparedPay prep;
+        try {
+            prep = core.preparePay(orderId, s.player, prefer, use);
+        } catch (PayException e) {
+            return CompletableFuture.completedFuture(PaymentRequestHandler.Reply.redirect(location(failed(op, e))));
+        }
+        op.prepared = prep;
+        return askId(r, s, op, prep.ask).exceptionally(e -> failed(op, e)).thenApply(h -> PaymentRequestHandler.Reply.redirect(location(h)));
+    }
+
+    /** 303 回应跳去哪里 */
+    private static String location(HttpResponse h) {
+        String l = h.headers.get("Location");
+        return l == null ? "/account" : l;
     }
 
     /**
@@ -1476,7 +1547,9 @@ final class PayService {
         if (o.status == OrderInfo.Status.PAID) {
             j.addProperty("paid_at", o.paidAt / 1000);
             j.addProperty("payment", o.paymentId);
-            j.addProperty("payer_uuid", o.payer.toString());
+            // 虚拟账户付的（模组用余额付）没有玩家 UUID：payer_uuid 为 null，payer_account 是 virtual:<名字>
+            j.addProperty("payer_uuid", o.payer == null ? null : o.payer.toString());
+            j.addProperty("payer_account", o.payerAccount == null ? null : o.payerAccount.id());
             j.addProperty("payer_name", o.payerName);
             j.addProperty("refunded_yuan", o.refunded.yuan);
             j.add("refunded_items", itemsJson(o.refunded.items));
@@ -1489,7 +1562,8 @@ final class PayService {
         j.addProperty("id", p.id);
         j.addProperty("object", "payment");
         j.addProperty("order", p.orderId);
-        j.addProperty("payer_uuid", p.payer.toString());
+        j.addProperty("payer_uuid", p.payer == null ? null : p.payer.toString());
+        j.addProperty("payer_account", p.payerAccount == null ? null : p.payerAccount.id());
         j.addProperty("payer_name", p.payerName);
         j.addProperty("amount_yuan", p.amount.yuan);
         j.add("items", itemsJson(p.amount.items));

@@ -55,6 +55,8 @@ public final class PayServer implements PayBackend {
     final Ledger ledger;
     private final McWorld world;
     private final TxRunner runner;
+    /** 唯一的付款入口（{@code PayApi.pay}）：付款页确认以后、模组直接付，都经它 */
+    final PayEntry entry;
     /** 付款页的网址用 https（服务器配了中间 CA）还是 http */
     private volatile boolean https;
     private final Events events = new Events();
@@ -65,6 +67,7 @@ public final class PayServer implements PayBackend {
         this.ledger = ledger;
         this.world = new McWorld(server);
         this.runner = new TxRunner(ledger, world, System::currentTimeMillis, this::firePaid);
+        this.entry = new PayEntry(ledger, world, runner, System::currentTimeMillis, this::firePaid, ItemText::cacheAll);
     }
 
     /** 开服（主线程，世界已加载、还没有玩家）：读账本、恢复、登记接口；读不了账本时返回 null（pay.yr 不开） */
@@ -289,6 +292,24 @@ public final class PayServer implements PayBackend {
         return ledger.orderInfo(id, System.currentTimeMillis(), this::checkoutUrl);
     }
 
+    /** 付款入口（{@code PayApi.pay}，主线程）：做成了返回付款；没做成抛原因；玩家付款存盘还没核对上抛 {@code processing} */
+    @Override
+    public PaymentInfo pay(moe.qingu.youran.api.pay.PaySpec spec) throws PayException {
+        mainThread();
+        if (spec == null) {
+            throw new PayException("invalid_order", "要写付哪张收款单");
+        }
+        TxRunner.Result r = entry.pay(spec, null);
+        switch (r.status) {
+            case DONE:
+                return r.paid.payment.info();
+            case PROCESSING:
+                throw new PayException("processing", "东西已经从背包扣了，正在确认存盘（每秒重试，关服后下次开服照存档补上或作废）；稍后用 PayApi.order 查结果");
+            default:
+                throw r.error;
+        }
+    }
+
     @Override
     public boolean cancelOrder(String id, AccountRef receiver) {
         try {
@@ -446,16 +467,14 @@ public final class PayServer implements PayBackend {
     static final class PreparedPay {
         final String orderId;
         final UUID payer;
-        final CurrencyPlan.PayPlan plan;
-        /** 从付款人 pay.yr 账户余额里出的 */
-        final Amount fromBalance;
+        /** 确认框里写的拿法：确认以后付款入口照它扣 */
+        final PayEntry.Plan confirmed;
         final Ask ask;
 
-        PreparedPay(String orderId, UUID payer, CurrencyPlan.PayPlan plan, Amount fromBalance, Ask ask) {
+        PreparedPay(String orderId, UUID payer, PayEntry.Plan confirmed, Ask ask) {
             this.orderId = orderId;
             this.payer = payer;
-            this.plan = plan;
-            this.fromBalance = fromBalance;
+            this.confirmed = confirmed;
             this.ask = ask;
         }
     }
@@ -537,12 +556,10 @@ public final class PayServer implements PayBackend {
         if (ledger.hasPending(payer)) {
             throw new PayException("busy", "上一笔还没处理完，请稍后再试");
         }
-        Amount fromBal = CurrencyPlan.fromBalance(o.price, ledger.balance(AccountRef.player(payer)), use);
-        CurrencyPlan.PayPlan plan = CurrencyPlan.planPayment(o.price.minus(fromBal), p.counts(), prefer);
-        if (!plan.ok()) {
-            ItemText.cacheAll(plan.lack);
-            throw new PayException("insufficient_items", "背包里的不够：还差 " + ItemText.describe(plan.lack, o.unit));
-        }
+        // 拿法和不带确认的玩家付款用同一个算法（付款入口的 plan）；确认以后照这个扣
+        PayEntry.Plan confirmed = entry.plan(o, payer, prefer, use);
+        CurrencyPlan.PayPlan plan = confirmed.items;
+        Amount fromBal = confirmed.fromBalance;
         ItemText.cacheAll(fromBal);
         String recv = ItemText.clip(ledger.name(o.receiver), 24);
         List<String> head = new ArrayList<>();
@@ -573,17 +590,15 @@ public final class PayServer implements PayBackend {
         String payerName = p.name();
         String last = plan.take.isEmpty() ? "这是 " + payerName + " 的 pay.yr 账户" : "从 " + payerName + " 的背包里拿";
         Ask ask = new Ask("付款给 " + recv, fit(head, lines, java.util.Collections.singletonList(last)), ConfirmRequest.Purpose.PAY);
-        return new PreparedPay(orderId, payer, plan, fromBal, ask);
+        return new PreparedPay(orderId, payer, confirmed, ask);
     }
 
-    /** 确认通过以后（主线程）：再查一遍，照确认时的拿法扣（余额那部分从登录的角色的账户出） */
+    /**
+     * 确认框同意以后（主线程）：调付款入口，照确认时的拿法扣（余额那部分从登录的角色的账户出）。付款页没有别的付法，
+     * 拒绝或超时就不调这里，什么都不动。
+     */
     TxRunner.Result executePay(PreparedPay prep) {
-        Ledger.Order o = ledger.order(prep.orderId);
-        WorldPort.PlayerPort p = world.player(prep.payer);
-        if (o == null || p == null) {
-            return TxRunner.Result.failed(new PayException("offline", "登录的角色不在线"));
-        }
-        return runner.pay(o, p, prep.plan.take, prep.plan.change, prep.fromBalance);
+        return entry.pay(new moe.qingu.youran.api.pay.PaySpec(prep.orderId, AccountRef.player(prep.payer)), prep.confirmed);
     }
 
     static String statusText(OrderInfo.Status s) {

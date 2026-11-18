@@ -20,7 +20,9 @@ public final class PayRecord {
         /** 模组取出（虚拟账户） */
         TAKEN,
         /** 模组作废（虚拟账户） */
-        DISCARDED
+        DISCARDED,
+        /** 用账户余额付了一笔款（虚拟账户付款，{@link VirtualAccount#pay}；从账户扣） */
+        SPENT
     }
 
     public final long time;

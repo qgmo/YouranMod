@@ -16,6 +16,17 @@ import java.util.List;
  * <p>
  * 只在服务端、游戏内网络与 pay.yr 运行时有用（{@link #isAvailable}）；客户端、YouranMod 客户端包里返回 null / 抛 {@link PayException}（{@code unavailable}）。
  * 收款回调可以在模组加载阶段就登记。
+ * <p>
+ * <b>付款分两层</b>（服主 11-18）：
+ * <ol>
+ * <li><b>付款入口</b> {@link #pay}：用某个账户付一张收款单，是唯一动钱付款的地方。在 Java 里调用就是授权，不再弹确认框。
+ * 检查（单子开着、没过期、没付过、不能付给自己……）、扣款、记账、崩溃安全、请求编号都在这里。玩家在付款页上确认以后，YouranMod 也是调它付的；
+ * 模组用自己虚拟账户的余额付别人的收款单同样调它（{@link VirtualAccount#pay} 是它的简写）。</li>
+ * <li><b>付款请求</b> {@link PaymentRequest}：付款页上有人要用某个账户付时，pay.yr 不自己决定，按账户类型交出去：玩家账户由 YouranMod 处理
+ * （id.yr 弹确认框给那名玩家，同意了调 {@link #pay}，拒绝或超时什么都不做）；虚拟账户交给它所属模组登记的 {@link PaymentRequestHandler}（可选）。
+ * 请求只是通知：没有处理者就什么都不发生，单子照旧开着，以后谁主动调 {@link #pay} 都能付。</li>
+ * </ol>
+ * 付钱和收货是两回事：pay.yr 只管付钱，收货人由网站自己定（例如 dado 结账时填的名字记在单号里）。
  */
 public final class PayApi {
     /** 付款服务的域名 */
@@ -39,6 +50,32 @@ public final class PayApi {
     public static OrderInfo order(String id) {
         PayBackend b = PayHooks.backend();
         return b == null || id == null ? null : b.order(id);
+    }
+
+    /**
+     * 付款入口（服主 11-18）：用 {@code spec.payer} 付收款单 {@code spec.orderId}，所有付款都走这里（玩家在付款页上确认以后也是）。
+     * 调用就是授权，不弹确认框。服务端主线程上调用。
+     * <ul>
+     * <li>规则：收款单要开着、没过期、没付过、没取消，不能付给自己；只许某个玩家付的单只有那个玩家能付；{@link PaySpec#expect} 不为 null 时价格要一样。</li>
+     * <li>虚拟账户：整个价格从账户余额里出（钱按元算，绿宝石、悠然元标价的都一样；别的物品要余额里有），不够时抛 {@code insufficient_balance}。
+     * 扣款、记进收款方、收款单改成已付是账本里的一条记录，写盘以后才算数，没有付了一半的时候。</li>
+     * <li>玩家账户：玩家要在线；照 {@link PaySpec#prefer}、{@link PaySpec#balanceYuan} 从背包拿、用余额，找零放进背包。动背包要核对存档：
+     * 偶尔核对不上时抛 {@code processing}（东西已经扣了，pay.yr 每秒重试，关服后下次开服照存档补上或作废），之后用 {@link #order} 查结果。</li>
+     * <li>{@link PaySpec#requestId}：同一个付款账户、同一个编号再付只付一次，返回第一次的那笔（不再回调）。</li>
+     * </ul>
+     * 付成以后收款方照常收到 {@link PaymentListener#onPaid}；付款记录里的付款人是这个账户（{@link PaymentInfo#payerAccount}，名字是玩家名或虚拟账户的显示名）。
+     * 这笔款退款时退回这个账户。
+     */
+    public static PaymentInfo pay(PaySpec spec) throws PayException {
+        return need().pay(spec);
+    }
+
+    /**
+     * 登记处理付款请求的一方（{@link PaymentRequestHandler}）：虚拟账户 {@code modId:…} 的请求交给它；{@code handler} 为 null 时去掉。
+     * 一个模组 ID 一个（后登记的替换先登记的）。可选，加载阶段就能登记。
+     */
+    public static void setRequestHandler(String modId, PaymentRequestHandler handler) {
+        PayHooks.setRequestHandler(modId, handler);
     }
 
     /** 收款方取消一张还没付的收款单；取消了返回 true */

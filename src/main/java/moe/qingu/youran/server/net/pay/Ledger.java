@@ -39,6 +39,8 @@ import java.util.function.Function;
  * 动到世界（背包）的操作分两步记：开始（{@code begin}，写明要拿哪些、给哪些）→ 动物品、存盘、核对 → 结束（{@code commit} 或 {@code abort}）。
  * 中间崩了，开服时由 {@link TxRunner#recover} 照存档里的实际情况（玩家存档里有没有这笔的标记、掉落物在不在区块里）补上结束那一条。
  * <p>
+ * 不动世界的改动（退款、模组取出、虚拟账户付款……）都只有一条，写盘以后就是做了，没有做了一半的时候。
+ * <p>
  * 所有方法加同一把锁，任意线程可调用；改世界的部分在 {@link TxRunner}（主线程）。
  */
 final class Ledger {
@@ -118,6 +120,8 @@ final class Ledger {
         UUID onlyPayer;
         OrderStatus status = OrderStatus.OPEN;
         long paidAt;
+        /** 付款的账户（玩家或虚拟账户）；没付为 null。玩家付的时 {@link #payer} 是那个玩家 */
+        AccountRef payerAcct;
         UUID payer;
         String payerName;
         String paymentId;
@@ -139,8 +143,12 @@ final class Ledger {
     static final class Payment {
         String id;
         String orderId;
+        /** 付款的账户：玩家付的是他的玩家账户（{@link #payer} 是他），虚拟账户付的是那个虚拟账户（{@link #payer} 为 null）。退款退回这里 */
+        AccountRef payerAcct;
         UUID payer;
         String payerName;
+        /** 虚拟账户付款时带的请求编号（同一个账户同一个编号只付一次）；没有为 null */
+        String requestId;
         AccountRef receiver;
         String site;
         String reference;
@@ -149,7 +157,7 @@ final class Ledger {
         long time;
 
         PaymentInfo info() {
-            return new PaymentInfo(id, orderId, payer, payerName, receiver, site, reference, amount, refunded, time);
+            return new PaymentInfo(id, orderId, payerAcct, payerName, receiver, site, reference, amount, refunded, time);
         }
     }
 
@@ -171,6 +179,8 @@ final class Ledger {
         Map<PayItem, Long> give = Collections.emptyMap();
         /** 付款：收款方收到的价格；提现：从账户扣的 */
         Amount value = Amount.ZERO;
+        /** 付款时带的请求编号；没有为 null */
+        String requestId;
         String note;
         long at;
         /** 掉在脚边的（放不下背包的）；没有为 null */
@@ -200,10 +210,17 @@ final class Ledger {
     static final class Paid {
         final Order order;
         final Payment payment;
+        /** 虚拟账户付款时同一个请求编号再来一次：没有再付，这是第一次的那笔（不再回调） */
+        final boolean replayed;
 
         Paid(Order order, Payment payment) {
+            this(order, payment, false);
+        }
+
+        Paid(Order order, Payment payment, boolean replayed) {
             this.order = order;
             this.payment = payment;
+            this.replayed = replayed;
         }
     }
 
@@ -297,7 +314,7 @@ final class Ledger {
     synchronized OrderInfo info(Order o, long now, Function<String, String> checkoutUrl) {
         Payment p = o.paymentId == null ? null : payments.get(o.paymentId);
         return new OrderInfo(o.id, o.status(now), o.receiver, name(o.receiver), o.site, o.price, o.unit, o.description, o.reference,
-                o.returnUrl, o.cancelUrl, o.createdAt, o.expiresAt, o.paidAt, o.payer, o.payerName, o.paymentId,
+                o.returnUrl, o.cancelUrl, o.createdAt, o.expiresAt, o.paidAt, o.payerAcct, o.payerName, o.paymentId,
                 p == null ? Amount.ZERO : p.refunded, checkoutUrl.apply(o.id), o.onlyPayer);
     }
 
@@ -469,25 +486,24 @@ final class Ledger {
         return beginPay(o, payer, payerName, take, change, Amount.ZERO, drops, now);
     }
 
-    /**
-     * 开始付款：收款单要还能付；记下要从背包拿的、要找的、要从付款人 pay.yr 账户余额里出的（{@code fromBalance}，这时就从账户扣掉，
-     * 作废时退回）。拿法由调用方算好（{@link CurrencyPlan}）。
-     */
     synchronized Tx beginPay(Order o, UUID payer, String payerName, Map<PayItem, Long> take, Map<PayItem, Long> change, Amount fromBalance,
                              Drops drops, long now) throws IOException, PayException {
+        return beginPay(o, payer, payerName, take, change, fromBalance, drops, null, null, now);
+    }
+
+    /**
+     * 开始付款（玩家账户，{@link PayEntry} 经 {@link TxRunner} 调）：收款单要能由这个玩家付（{@link #checkPayable}）；记下要从背包拿的、要找的、
+     * 要从付款人 pay.yr 账户余额里出的（{@code fromBalance}，这时就从账户扣掉，作废时退回）。拿法由调用方算好（{@link CurrencyPlan}）。
+     */
+    synchronized Tx beginPay(Order o, UUID payer, String payerName, Map<PayItem, Long> take, Map<PayItem, Long> change, Amount fromBalance,
+                             Drops drops, Amount expected, String requestId, long now) throws IOException, PayException {
         Amount bal = fromBalance == null ? Amount.ZERO : fromBalance;
-        if (o.onlyPayer != null && !o.onlyPayer.equals(payer)) {
-            throw new PayException("wrong_payer", "这张收款单只能由指定的角色付");
-        }
+        checkPayable(o, AccountRef.player(payer), expected, now);
         if (!bal.isZero()) {
             Account a = accounts.get(AccountRef.player(payer));
             if (a == null || !a.balance().covers(bal)) {
                 throw new PayException("insufficient_balance", "pay.yr 账户余额不够");
             }
-        }
-        if (o.status(now) != OrderInfo.Status.OPEN) {
-            throw new PayException(o.status(now) == OrderInfo.Status.EXPIRED ? "order_expired" : "order_not_open",
-                    o.status(now) == OrderInfo.Status.EXPIRED ? "收款单已经过期了" : "收款单已经付过或取消了");
         }
         if (hasPending(payer)) {
             throw new PayException("busy", "上一笔还没处理完，请稍后再试");
@@ -506,10 +522,71 @@ final class Ledger {
         if (!bal.isZero()) {
             e.add("bal", PayJson.amount(bal));
         }
+        PayJson.put(e, "req", requestId);
         putDrops(e, drops);
         e.addProperty("at", now);
         commitEntry(e);
         return pending.get(e.get("tx").getAsString());
+    }
+
+    /**
+     * 这张收款单现在能不能由 {@code payer} 付：所有付款（玩家、虚拟账户）都过这一道。开着（没过期、没付过、没取消、没人正在付）、
+     * 不是付给自己、只许某个玩家付的只有那个玩家、{@code expected} 不为 null 时和价格一样。
+     */
+    private void checkPayable(Order o, AccountRef payer, Amount expected, long now) throws PayException {
+        switch (o.status(now)) {
+            case OPEN:
+                break;
+            case EXPIRED:
+                throw new PayException("order_expired", "收款单已经过期了");
+            case CANCELED:
+                throw new PayException("order_not_open", "收款单已经被网站取消了");
+            case PAYING:
+                throw new PayException("order_not_open", "收款单正在付款");
+            default:
+                throw new PayException("order_not_open", payer.equals(o.payerAcct) ? "收款单已经付过了（是这个账户付的，付款编号 " + o.paymentId + "）"
+                        : "收款单已经付过了");
+        }
+        if (o.receiver.equals(payer)) {
+            throw new PayException("self_payment", "不能付给自己");
+        }
+        if (o.onlyPayer != null && !(payer.isPlayer() && o.onlyPayer.equals(payer.player))) {
+            throw new PayException("wrong_payer", "这张收款单只能由网站指定的角色付");
+        }
+        if (expected != null && !expected.equals(o.price)) {
+            throw new PayException("amount_mismatch", "收款单的价格是 " + o.price + "，和预期的 " + expected + " 不一样，没有付");
+        }
+    }
+
+    /**
+     * 这个付款账户用请求编号 {@code requestId} 付过的那笔（{@link Paid#replayed}）；没有为 null。用在另一张单上抛 {@code request_id_reused}。
+     */
+    synchronized Paid replay(AccountRef payer, String orderId, String requestId) throws PayException {
+        if (requestId == null) {
+            return null;
+        }
+        for (Payment p : payments.values()) {
+            if (payer.equals(p.payerAcct) && requestId.equals(p.requestId)) {
+                if (!p.orderId.equals(orderId)) {
+                    throw new PayException("request_id_reused", "这个请求编号已经用在另一张收款单（" + p.orderId + "）上了；新的付款要换一个编号");
+                }
+                return new Paid(orders.get(p.orderId), p, true);
+            }
+        }
+        return null;
+    }
+
+    /** 这个玩家带着请求编号 {@code requestId}、还没结束的那笔付款；没有为 null */
+    synchronized Tx pendingByRequest(UUID player, String requestId) {
+        if (requestId == null) {
+            return null;
+        }
+        for (Tx t : pending.values()) {
+            if (t.kind == TxKind.PAY && t.player.equals(player) && requestId.equals(t.requestId)) {
+                return t;
+            }
+        }
+        return null;
     }
 
     /** 开始提现：先从账户扣掉（余额要够），物品之后再给 */
@@ -642,6 +719,45 @@ final class Ledger {
         e.addProperty("at", now);
         commitEntry(e);
         return p;
+    }
+
+    /**
+     * 虚拟账户付款（{@link PayEntry} 调）：用 {@code payer} 的余额付收款单 {@code orderId}。检查都在这里（同一把锁里，{@link #checkPayable}），
+     * 通过了写<b>一条</b>日志（{@code vpay}：从付款账户扣、记进收款方、收款单改成已付、记下付款），写盘以后才改内存。
+     * 不动世界，所以不分开始 / 结束：崩在写盘前（或日志最后一行只写了一半，读盘时丢掉）就是没付，写盘后就是付了，开服时没有要补的。
+     * <p>
+     * {@code requestId} 不为 null 时先找这个账户用同一个编号付过的：有就原样返回（{@link Paid#replayed}），不再付。
+     */
+    synchronized Paid payFromVirtual(AccountRef payer, String orderId, Amount expected, String requestId, long now)
+            throws IOException, PayException {
+        if (payer == null || payer.isPlayer()) {
+            throw new IllegalArgumentException("只有虚拟账户这样付");
+        }
+        Paid again = replay(payer, orderId, requestId);
+        if (again != null) {
+            return again;
+        }
+        Order o = orderId == null ? null : orders.get(orderId);
+        if (o == null) {
+            throw new PayException("no_such_order", "没有这张收款单");
+        }
+        checkPayable(o, payer, expected, now);
+        Account a = accounts.get(payer);
+        Amount bal = a == null ? Amount.ZERO : a.balance();
+        if (!bal.covers(o.price)) {
+            throw new PayException("insufficient_balance", "账户余额不够：要付 " + o.price + "，余额 " + bal + "，还差 " + bal.shortOf(o.price));
+        }
+        JsonObject e = entry("vpay");
+        e.addProperty("payer", payer.id());
+        e.addProperty("pname", name(payer));
+        e.addProperty("order", o.id);
+        String paymentId = newId("pay_");
+        e.addProperty("payment", paymentId);
+        e.add("value", PayJson.amount(o.price));
+        PayJson.put(e, "req", requestId);
+        e.addProperty("at", now);
+        commitEntry(e);
+        return new Paid(o, payments.get(paymentId), false);
     }
 
     /** 模组取出 / 作废虚拟账户里的东西 */
@@ -780,11 +896,15 @@ final class Ledger {
                 Account r = need(p.receiver);
                 r.subtract(a);
                 r.record(new PayRecord(at, PayRecord.Kind.REFUND_OUT, a, p.payerName, p.id, note));
-                Account payer = needPlayer(p.payer, p.payerName);
+                // 退回付款的账户：玩家付的退进他的账户，虚拟账户付的退回那个虚拟账户
+                Account payer = p.payerAcct != null && !p.payerAcct.isPlayer() ? need(p.payerAcct) : needPlayer(p.payer, p.payerName);
                 payer.add(a);
                 payer.record(new PayRecord(at, PayRecord.Kind.REFUND_IN, a, r.name, p.id, note));
                 break;
             }
+            case "vpay":
+                applyVirtualPay(e);
+                break;
             case "take": {
                 Account a = need(AccountRef.parse(e.get("acct").getAsString()));
                 Amount amt = PayJson.amount(e.get("amount"));
@@ -811,6 +931,7 @@ final class Ledger {
         tx.give = PayJson.items(e.get("give"));
         tx.value = PayJson.amount(e.get("value"));
         tx.fromBalance = e.has("bal") ? PayJson.amount(e.get("bal")) : Amount.ZERO;
+        tx.requestId = PayJson.str(e, "req");
         tx.note = PayJson.str(e, "note");
         tx.at = PayJson.num(e, "at");
         readDrops(tx, e);
@@ -828,6 +949,47 @@ final class Ledger {
         }
     }
 
+    /** {@code vpay}：从付款的虚拟账户扣、记进收款方、收款单改成已付（检查在 {@link #payFromVirtual}，重放时照记） */
+    private void applyVirtualPay(JsonObject e) {
+        AccountRef payerRef = AccountRef.parse(e.get("payer").getAsString());
+        String payerName = PayJson.str(e, "pname");
+        Order o = orders.get(e.get("order").getAsString());
+        Amount value = PayJson.amount(e.get("value"));
+        long at = PayJson.num(e, "at");
+        AccountRef recvRef = o == null ? null : o.receiver;
+        Payment p = new Payment();
+        p.id = e.get("payment").getAsString();
+        p.orderId = e.get("order").getAsString();
+        p.payerAcct = payerRef;
+        p.payerName = payerName;
+        p.requestId = PayJson.str(e, "req");
+        p.receiver = recvRef;
+        p.site = o == null ? null : o.site;
+        p.reference = o == null ? null : o.reference;
+        p.amount = value;
+        p.time = at;
+        if (o == null) {
+            // 不会发生：付的时候查过收款单；快照会清掉旧收款单，但快照之前的日志也一起清了，重放不到这条
+            LOG.error("pay.yr：重放虚拟账户付款 {} 时没有收款单 {}，跳过", p.id, p.orderId);
+            return;
+        }
+        Account payer = need(payerRef);
+        // 先扣（不够时抛异常，什么都没改），再改别的
+        payer.subtract(value);
+        payments.put(p.id, p);
+        o.status = OrderStatus.PAID;
+        o.paidAt = at;
+        o.payerAcct = payerRef;
+        o.payer = null;
+        o.payerName = payerName;
+        o.paymentId = p.id;
+        String what = o.site + (o.description == null ? "" : " " + o.description);
+        Account recv = need(recvRef);
+        recv.add(value);
+        recv.record(new PayRecord(at, PayRecord.Kind.RECEIVED, value, payerName, p.id, what));
+        payer.record(new PayRecord(at, PayRecord.Kind.SPENT, value, recv.name, p.id, what));
+    }
+
     private void applyCommit(JsonObject e) {
         Tx tx = pending.remove(e.get("tx").getAsString());
         if (tx == null) {
@@ -842,8 +1004,10 @@ final class Ledger {
             Payment p = new Payment();
             p.id = tx.paymentId;
             p.orderId = tx.orderId;
+            p.payerAcct = AccountRef.player(tx.player);
             p.payer = tx.player;
             p.payerName = tx.playerName;
+            p.requestId = tx.requestId;
             p.receiver = tx.account;
             p.site = o == null ? null : o.site;
             p.reference = o == null ? null : o.reference;
@@ -853,6 +1017,7 @@ final class Ledger {
             if (o != null) {
                 o.status = OrderStatus.PAID;
                 o.paidAt = at;
+                o.payerAcct = AccountRef.player(tx.player);
                 o.payer = tx.player;
                 o.payerName = tx.playerName;
                 o.paymentId = p.id;
@@ -970,6 +1135,9 @@ final class Ledger {
             x.addProperty("status", o.status.name());
             x.addProperty("paidAt", o.paidAt);
             PayJson.put(x, "payer", o.payer == null ? null : o.payer.toString());
+            if (o.payerAcct != null && !o.payerAcct.isPlayer()) {
+                x.addProperty("payerAcct", o.payerAcct.id());
+            }
             PayJson.put(x, "payerName", o.payerName);
             PayJson.put(x, "payment", o.paymentId);
             os.add(x);
@@ -980,8 +1148,13 @@ final class Ledger {
             JsonObject x = new JsonObject();
             x.addProperty("id", p.id);
             x.addProperty("order", p.orderId);
-            x.addProperty("payer", p.payer.toString());
+            if (p.payer != null) {
+                x.addProperty("payer", p.payer.toString());
+            } else {
+                x.addProperty("payerAcct", p.payerAcct.id());
+            }
             PayJson.put(x, "payerName", p.payerName);
+            PayJson.put(x, "req", p.requestId);
             x.addProperty("recv", p.receiver.id());
             PayJson.put(x, "site", p.site);
             PayJson.put(x, "ref", p.reference);
@@ -1007,6 +1180,7 @@ final class Ledger {
             if (!t.fromBalance.isZero()) {
                 x.add("bal", PayJson.amount(t.fromBalance));
             }
+            PayJson.put(x, "req", t.requestId);
             PayJson.put(x, "note", t.note);
             x.addProperty("at", t.at);
             if (t.drops != null) {
@@ -1060,6 +1234,8 @@ final class Ledger {
             o.paidAt = PayJson.num(x, "paidAt");
             String payer = PayJson.str(x, "payer");
             o.payer = payer == null ? null : UUID.fromString(payer);
+            String payerAcct = PayJson.str(x, "payerAcct");
+            o.payerAcct = payerAcct != null ? AccountRef.parse(payerAcct) : o.payer == null ? null : AccountRef.player(o.payer);
             o.payerName = PayJson.str(x, "payerName");
             o.paymentId = PayJson.str(x, "payment");
             orders.put(o.id, o);
@@ -1069,8 +1245,12 @@ final class Ledger {
             Payment p = new Payment();
             p.id = x.get("id").getAsString();
             p.orderId = PayJson.str(x, "order");
-            p.payer = UUID.fromString(x.get("payer").getAsString());
+            String payer = PayJson.str(x, "payer");
+            p.payer = payer == null ? null : UUID.fromString(payer);
+            String payerAcct = PayJson.str(x, "payerAcct");
+            p.payerAcct = payerAcct != null ? AccountRef.parse(payerAcct) : AccountRef.player(p.payer);
             p.payerName = PayJson.str(x, "payerName");
+            p.requestId = PayJson.str(x, "req");
             p.receiver = AccountRef.parse(x.get("recv").getAsString());
             p.site = PayJson.str(x, "site");
             p.reference = PayJson.str(x, "ref");
@@ -1093,6 +1273,7 @@ final class Ledger {
             t.give = PayJson.items(x.get("give"));
             t.value = PayJson.amount(x.get("value"));
             t.fromBalance = x.has("bal") ? PayJson.amount(x.get("bal")) : Amount.ZERO;
+            t.requestId = PayJson.str(x, "req");
             t.note = PayJson.str(x, "note");
             t.at = PayJson.num(x, "at");
             readDrops(t, x);

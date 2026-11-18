@@ -39,8 +39,12 @@ public final class OrderInfo {
     public final long expiresAt;
     /** 付了以后才有 */
     public final long paidAt;
+    /** 付款的玩家；没付、或是虚拟账户付的（{@link VirtualAccount#pay}）为 null，见 {@link #payerAccount} */
     public final UUID payer;
+    /** 付款人的名字：玩家角色名；虚拟账户付的是它的显示名（如“清”） */
     public final String payerName;
+    /** 付款的账户（玩家账户或虚拟账户）；没付为 null */
+    public final AccountRef payerAccount;
     public final String paymentId;
     /** 已经退了多少（没付、没退为零） */
     public final Amount refunded;
@@ -49,9 +53,19 @@ public final class OrderInfo {
     /** 只许这个玩家付（{@link OrderSpec#payer}）；谁付都行时为 null */
     public final UUID requiredPayer;
 
+    /** 玩家付的（{@link #payerAccount} 是 {@code payer} 的玩家账户；没付为 null） */
     public OrderInfo(String id, Status status, AccountRef receiver, String receiverName, String site, Amount price, Currency.Unit unit,
                      String description, String reference, String returnUrl, String cancelUrl, long createdAt, long expiresAt,
                      long paidAt, UUID payer, String payerName, String paymentId, Amount refunded, String checkoutUrl,
+                     UUID requiredPayer) {
+        this(id, status, receiver, receiverName, site, price, unit, description, reference, returnUrl, cancelUrl, createdAt, expiresAt,
+                paidAt, payer == null ? null : AccountRef.player(payer), payerName, paymentId, refunded, checkoutUrl, requiredPayer);
+    }
+
+    /** {@code payerAccount} 是玩家账户时 {@link #payer} 是那个玩家，是虚拟账户或没付时为 null */
+    public OrderInfo(String id, Status status, AccountRef receiver, String receiverName, String site, Amount price, Currency.Unit unit,
+                     String description, String reference, String returnUrl, String cancelUrl, long createdAt, long expiresAt,
+                     long paidAt, AccountRef payerAccount, String payerName, String paymentId, Amount refunded, String checkoutUrl,
                      UUID requiredPayer) {
         this.id = id;
         this.status = status;
@@ -67,7 +81,8 @@ public final class OrderInfo {
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
         this.paidAt = paidAt;
-        this.payer = payer;
+        this.payerAccount = payerAccount;
+        this.payer = payerAccount == null ? null : payerAccount.player;
         this.payerName = payerName;
         this.paymentId = paymentId;
         this.refunded = refunded;

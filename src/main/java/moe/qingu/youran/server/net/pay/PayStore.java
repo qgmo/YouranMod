@@ -51,6 +51,26 @@ final class PayStore {
         }
     }
 
+    /** 测试用：下一次 {@link #append} 时出的事（只出一次） */
+    enum Fault {
+        NONE,
+        /** 写不进去（磁盘满）：什么都没写，抛 IOException */
+        FAIL_BEFORE_WRITE,
+        /** 写了半行就死了（抛 {@link Crash}，不截回去） */
+        CRASH_HALF_WRITTEN,
+        /** 写完、fsync 以后，返回之前死了（抛 {@link Crash}：内存没改，盘上有这条） */
+        CRASH_AFTER_FSYNC
+    }
+
+    /** 测试用：模拟进程在这里死掉 */
+    static final class Crash extends RuntimeException {
+        Crash(String m) {
+            super(m);
+        }
+    }
+
+    volatile Fault fault = Fault.NONE;
+
     PayStore(Path dir) {
         this.dir = dir;
     }
@@ -147,12 +167,20 @@ final class PayStore {
         String json = entry.toString();
         byte[] line = (s + " " + crc(json) + " " + json + "\n").getBytes(StandardCharsets.UTF_8);
         long start = journal.position();
+        Fault f = fault;
+        fault = Fault.NONE;
         try {
-            ByteBuffer buf = ByteBuffer.wrap(line);
+            if (f == Fault.FAIL_BEFORE_WRITE) {
+                throw new IOException("测试：写不进去");
+            }
+            ByteBuffer buf = ByteBuffer.wrap(line, 0, f == Fault.CRASH_HALF_WRITTEN ? line.length / 2 : line.length);
             while (buf.hasRemaining()) {
                 journal.write(buf);
             }
             journal.force(false);
+            if (f != Fault.NONE) {
+                throw new Crash("测试：" + f);
+            }
         } catch (IOException e) {
             // 写到一半：截回去，免得后面的接在半行上
             try {

@@ -17,6 +17,9 @@ public interface PayBackend {
 
     OrderInfo order(String id);
 
+    /** 付款入口（{@code PayApi.pay}） */
+    PaymentInfo pay(moe.qingu.youran.api.pay.PaySpec spec) throws PayException;
+
     boolean cancelOrder(String id, AccountRef receiver);
 
     PaymentInfo payment(String id);
