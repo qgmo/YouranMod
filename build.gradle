@@ -10,7 +10,7 @@ version = property('mod_version')
 group = 'moe.qingu.youran'
 
 base {
-    archivesName.set('youranmod')
+    archivesName.set('YouranServer')
 }
 
 java {
@@ -163,8 +163,8 @@ test {
 }
 
 // ---- 分包（服主 11-14）----
-// 完整包：reobfJar 的产物 youranmod-<版本>.jar（服务器用，也能单人游戏；单人游戏里有游戏内网络）。
-// 客户端包：youranmod-<版本>-client.jar，发给玩家。只比完整包少服务端的实现：server/net 包（服务端权威的网络实现：
+// 完整包：reobfJar 的产物 YouranServer-<版本>.jar（产物名沿用以前的 YouranServer，服主 11-18）（服务器用，也能单人游戏；单人游戏里有游戏内网络）。
+// 客户端包：YouranServer-<版本>-client.jar，发给玩家。只比完整包少服务端的实现：server/net 包（服务端权威的网络实现：
 // 路由器、地址分配表、DNS 根 / 顶级域 / 递归解析器、NTP、机房服务、测试网站、网卡的服务端校验、测试命令、网络配置）
 // 与 server/lang 包（服务端翻译读语言目录与模组 jar 的实现；接口 api.lang 两端都在，客户端包里只有服务端英文）。
 // 两端共用的协议栈、网络包、公开 api 包、已有的其他内容照旧都在。不像 YouranSCP 那样严格（服主 11-14）：只查这几个包。
