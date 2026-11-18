@@ -149,7 +149,11 @@ final class PayDocs {
                 + "<code>expect</code> 不为 null 时要和价格一样。同一个请求编号再付只付一次，返回第一次的付款。收款方照常收到回调，退款退回付款的账户。</p>\n"
                 + "<p class=\"hint\">付款页上有人要用某个账户付时，pay.yr 发付款请求：玩家账户由 YouranMod 弹确认框；虚拟账户交给它的模组用 "
                 + "<code>PayApi.setRequestHandler(\"mymod\", handler)</code> 登记的处理者（可选）。没有处理者时什么都不发生，单子照旧开着，以后调 "
-                + "<code>PayApi.pay</code> 照样能付。</p>\n";
+                + "<code>PayApi.pay</code> 照样能付。</p>\n"
+                + "<h2>模组充值</h2>\n<pre>DepositInfo d = PayApi.virtualAccount(\"mymod:shop\").deposit(Amount.ofItems(things), \"req-456\", \"从箱子充值\");</pre>\n"
+                + "<p class=\"hint\">直接往虚拟账户余额里加钱和物品，记一条“充值”收支记录，不发回调。pay.yr 不管东西从哪来：调用的模组先把东西收走，来源由它负责。"
+                + "绿宝石、悠然元按价值折成元，其他物品分开记；黑名单物品、装着东西的容器拒。同一个请求编号只入账一次，"
+                + "崩溃恢复时用 <code>deposited(\"req-456\")</code> 查上次充没充进去。</p>\n";
     }
 
     private static String help() {

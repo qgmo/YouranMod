@@ -141,6 +141,8 @@ final class PayPages {
                 return "取出";
             case SPENT:
                 return "余额付款";
+            case DEPOSIT:
+                return "充值";
             default:
                 return "作废";
         }

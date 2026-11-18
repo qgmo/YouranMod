@@ -7,6 +7,7 @@ import moe.qingu.youran.api.network.stack.HttpClient;
 import moe.qingu.youran.api.pay.AccountRef;
 import moe.qingu.youran.api.pay.Amount;
 import moe.qingu.youran.api.pay.Currency;
+import moe.qingu.youran.api.pay.DepositInfo;
 import moe.qingu.youran.api.pay.OrderInfo;
 import moe.qingu.youran.api.pay.OrderSpec;
 import moe.qingu.youran.api.pay.PayApi;
@@ -249,15 +250,45 @@ public final class PayServer implements PayBackend {
 
     /** 这种物品能不能用来付：黑名单、装着东西的容器 */
     static void checkUsable(PayItem item, ItemStack stack) throws PayException {
+        checkUsable(item, stack, "用来付款");
+    }
+
+    /** 同上；{@code what} 写进原因里（“用来付款”“充值”） */
+    static void checkUsable(PayItem item, ItemStack stack, String what) throws PayException {
         if (item.isCurrency()) {
             return;
         }
         if (ItemRules.blacklisted(item, PayConfig.blacklist)) {
-            throw new PayException("item_not_allowed", "这种物品不能用来付款（服务器设置）：" + ItemText.cache(item));
+            throw new PayException("item_not_allowed", "这种物品不能" + what + "（服务器设置）：" + ItemText.cache(item));
         }
         if (ItemRules.filledContainer(stack)) {
-            throw new PayException("item_not_allowed", "装着东西的容器不能用来付款：" + ItemText.cache(item));
+            throw new PayException("item_not_allowed", "装着东西的容器不能" + what + "：" + ItemText.cache(item));
         }
+    }
+
+    /**
+     * 充值收的东西（服主 11-18，规则同付款）：钱已经在 {@link Amount} 里按元折好；其他物品要现在有、NBT 记得了账、不在黑名单、不是装着东西的容器，
+     * 按 pay.yr 的写法重新认一遍（同 {@link #draft}）。不行时抛异常。主线程（要做物品）
+     */
+    static Amount depositable(Amount amount) throws PayException {
+        if (amount == null || amount.isZero()) {
+            throw new PayException("invalid_amount", "要充多少？");
+        }
+        Map<PayItem, Long> items = new LinkedHashMap<>();
+        for (Map.Entry<PayItem, Long> e : amount.items.entrySet()) {
+            PayItem i = e.getKey();
+            ItemStack s = i.toStack(1);
+            if (s.isEmpty()) {
+                throw new PayException("invalid_item", "没有这种物品：" + i);
+            }
+            PayItem norm = McWorld.itemOf(s);
+            if (norm == null) {
+                throw new PayException("invalid_item", "这种物品的 NBT 记不了账：" + i);
+            }
+            checkUsable(norm, s, "充值");
+            items.merge(norm, e.getValue(), Math::addExact);
+        }
+        return Amount.of(amount.yuan, items);
     }
 
     private static String text(String s, int max, String field, String what) throws PayException {
@@ -836,6 +867,32 @@ public final class PayServer implements PayBackend {
             } catch (IOException e) {
                 throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
             }
+        }
+
+        @Override
+        public DepositInfo deposit(Amount amount, String requestId, String note) throws PayException {
+            mainThread();
+            if (requestId != null && !REQUEST_ID.matcher(requestId).matches()) {
+                throw new PayException("invalid_request_id", "请求编号要 1–100 个字母、数字或 _ . : -");
+            }
+            // 同一个编号、同样的东西：直接认出是重发（物品规则后来改了也不影响已经入账的那笔）
+            DepositInfo prior = requestId == null ? null : ledger.deposited(ref, requestId);
+            Amount checked = prior != null && prior.amount.equals(amount) ? amount : depositable(amount);
+            try {
+                DepositInfo d = ledger.deposit(ref, checked, requestId, note, System.currentTimeMillis());
+                if (!d.replayed) {
+                    Ledger.LOG.info("pay.yr：{} 充值 {}（{}）", ledger.name(ref), d.amount, d.id);
+                }
+                return d;
+            } catch (IOException e) {
+                Ledger.LOG.error("pay.yr：写账本失败，{} 没有充值", ref, e);
+                throw new PayException("storage", "pay.yr 记账失败，没有充，请稍后再试");
+            }
+        }
+
+        @Override
+        public DepositInfo deposited(String requestId) {
+            return ledger.deposited(ref, requestId);
         }
 
         @Override

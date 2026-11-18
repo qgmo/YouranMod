@@ -22,7 +22,9 @@ public final class PayRecord {
         /** 模组作废（虚拟账户） */
         DISCARDED,
         /** 用账户余额付了一笔款（虚拟账户付款，{@link VirtualAccount#pay}；从账户扣） */
-        SPENT
+        SPENT,
+        /** 模组充值（虚拟账户，{@link VirtualAccount#deposit}；记进账户） */
+        DEPOSIT
     }
 
     public final long time;
@@ -31,7 +33,7 @@ public final class PayRecord {
     public final Amount amount;
     /** 对方（付款人、收款方等）的名字；没有为 null */
     public final String counterparty;
-    /** 相关的付款编号（{@code pay_…}）等；没有为 null */
+    /** 相关的付款编号（{@code pay_…}）、充值编号（{@code dep_…}）等；没有为 null */
     public final String ref;
     public final String note;
 
@@ -51,6 +53,7 @@ public final class PayRecord {
             case CHANGE:
             case REFUND_IN:
             case WITHDRAW_RETURNED:
+            case DEPOSIT:
                 return 1;
             case PAID:
                 return 0;

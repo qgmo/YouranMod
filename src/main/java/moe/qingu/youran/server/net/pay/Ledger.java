@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import moe.qingu.youran.api.pay.AccountRef;
 import moe.qingu.youran.api.pay.Amount;
 import moe.qingu.youran.api.pay.Currency;
+import moe.qingu.youran.api.pay.DepositInfo;
 import moe.qingu.youran.api.pay.OrderInfo;
 import moe.qingu.youran.api.pay.PayException;
 import moe.qingu.youran.api.pay.PayItem;
@@ -39,7 +40,7 @@ import java.util.function.Function;
  * 动到世界（背包）的操作分两步记：开始（{@code begin}，写明要拿哪些、给哪些）→ 动物品、存盘、核对 → 结束（{@code commit} 或 {@code abort}）。
  * 中间崩了，开服时由 {@link TxRunner#recover} 照存档里的实际情况（玩家存档里有没有这笔的标记、掉落物在不在区块里）补上结束那一条。
  * <p>
- * 不动世界的改动（退款、模组取出、虚拟账户付款……）都只有一条，写盘以后就是做了，没有做了一半的时候。
+ * 不动世界的改动（退款、模组取出、虚拟账户付款、充值……）都只有一条，写盘以后就是做了，没有做了一半的时候。
  * <p>
  * 通知收款方不在记账那一条里：付款、退款记下以后由 {@link PayNotifier} 回调收款方，回调正常返回以后再记一条 {@code ntf}。
  * 崩在两条之间的，开服后补发（至少一次；收款方按付款编号去重）。
@@ -74,6 +75,8 @@ final class Ledger {
         /** 账户设置“操作前必须验证身份”（服主 11-15；默认关闭） */
         boolean verifyBeforeOps;
         final ArrayDeque<PayRecord> records = new ArrayDeque<>();
+        /** 带请求编号的充值：请求编号 → 那笔（同一个编号只入账一次；收支记录只留 200 条，所以单独记） */
+        final LinkedHashMap<String, Deposit> deposits = new LinkedHashMap<>();
 
         Account(AccountRef ref, String name) {
             this.ref = ref;
@@ -168,6 +171,27 @@ final class Ledger {
 
         PaymentInfo info() {
             return new PaymentInfo(id, orderId, payerAcct, payerName, receiver, site, reference, amount, refunded, time);
+        }
+    }
+
+    /** 一笔带请求编号的充值（{@link #deposit}） */
+    static final class Deposit {
+        final String id;
+        final String requestId;
+        final Amount amount;
+        final String note;
+        final long time;
+
+        Deposit(String id, String requestId, Amount amount, String note, long time) {
+            this.id = id;
+            this.requestId = requestId;
+            this.amount = amount;
+            this.note = note;
+            this.time = time;
+        }
+
+        DepositInfo info(AccountRef acct, boolean replayed) {
+            return new DepositInfo(id, acct, amount, requestId, note, time, replayed);
         }
     }
 
@@ -808,6 +832,51 @@ final class Ledger {
         return new Paid(o, payments.get(paymentId), false);
     }
 
+    /**
+     * 充值（{@link PayServer} 的虚拟账户调，物品规则已经查过）：往 {@code acct} 的余额里加 {@code amount}，记一条“充值”收支记录。
+     * 一条日志（{@code dep}），写盘以后才改内存；崩在写盘前就是没充，写盘后就是充了。
+     * <p>
+     * {@code requestId} 不为 null 时先找这个账户用同一个编号充过的：有就原样返回（{@link DepositInfo#replayed}），金额不一样抛 {@code request_id_reused}。
+     */
+    synchronized DepositInfo deposit(AccountRef acct, Amount amount, String requestId, String note, long now) throws IOException, PayException {
+        if (acct == null || acct.isPlayer()) {
+            throw new IllegalArgumentException("只有虚拟账户能充值");
+        }
+        Account a = accounts.get(acct);
+        Deposit prior = a == null || requestId == null ? null : a.deposits.get(requestId);
+        if (prior != null) {
+            if (!prior.amount.equals(amount)) {
+                throw new PayException("request_id_reused", "这个请求编号已经用在另一笔充值（" + prior.amount + "）上了；新的充值要换一个编号");
+            }
+            return prior.info(acct, true);
+        }
+        if (amount == null || amount.isZero()) {
+            throw new PayException("invalid_amount", "要充多少？");
+        }
+        try {
+            (a == null ? Amount.ZERO : a.balance()).plus(amount);
+        } catch (ArithmeticException e) {
+            throw new PayException("invalid_amount", "充了以后余额太大，记不下");
+        }
+        JsonObject e = entry("dep");
+        e.addProperty("acct", acct.id());
+        String id = newId("dep_");
+        e.addProperty("id", id);
+        e.add("amount", PayJson.amount(amount));
+        PayJson.put(e, "req", requestId);
+        PayJson.put(e, "note", note);
+        e.addProperty("at", now);
+        commitEntry(e);
+        return new DepositInfo(id, acct, amount, requestId, note, now, false);
+    }
+
+    /** 这个账户用请求编号 {@code requestId} 充过的那笔；没有为 null */
+    synchronized DepositInfo deposited(AccountRef acct, String requestId) {
+        Account a = accounts.get(acct);
+        Deposit d = a == null || requestId == null ? null : a.deposits.get(requestId);
+        return d == null ? null : d.info(acct, true);
+    }
+
     /** 模组取出 / 作废虚拟账户里的东西 */
     synchronized void remove(AccountRef acct, Amount amount, PayRecord.Kind kind, String note, long now) throws IOException, PayException {
         Account a = accounts.get(acct);
@@ -994,6 +1063,20 @@ final class Ledger {
                 }
                 break;
             }
+            case "dep": {
+                Account a = need(AccountRef.parse(e.get("acct").getAsString()));
+                Amount amt = PayJson.amount(e.get("amount"));
+                String id = e.get("id").getAsString();
+                String req = PayJson.str(e, "req");
+                String note = PayJson.str(e, "note");
+                long at = PayJson.num(e, "at");
+                a.add(amt);
+                if (req != null) {
+                    a.deposits.put(req, new Deposit(id, req, amt, note, at));
+                }
+                a.record(new PayRecord(at, PayRecord.Kind.DEPOSIT, amt, null, id, note));
+                break;
+            }
             case "take": {
                 Account a = need(AccountRef.parse(e.get("acct").getAsString()));
                 Amount amt = PayJson.amount(e.get("amount"));
@@ -1176,6 +1259,9 @@ final class Ledger {
             }
         }
         payments.values().removeIf(p -> now - p.time > keepMillis);
+        for (Account a : accounts.values()) {
+            a.deposits.values().removeIf(d -> now - d.time > keepMillis);
+        }
         unnotified.removeIf(id -> !payments.containsKey(id));
     }
 
@@ -1205,6 +1291,19 @@ final class Ledger {
                 rec.add(x);
             }
             o.add("records", rec);
+            if (!a.deposits.isEmpty()) {
+                JsonArray deps = new JsonArray();
+                for (Deposit d : a.deposits.values()) {
+                    JsonObject x = new JsonObject();
+                    x.addProperty("id", d.id);
+                    x.addProperty("req", d.requestId);
+                    x.add("amount", PayJson.amount(d.amount));
+                    PayJson.put(x, "note", d.note);
+                    x.addProperty("at", d.time);
+                    deps.add(x);
+                }
+                o.add("deps", deps);
+            }
             accs.add(o);
         }
         s.add("accounts", accs);
@@ -1312,6 +1411,14 @@ final class Ledger {
                 JsonObject x = r.getAsJsonObject();
                 a.records.addLast(new PayRecord(PayJson.num(x, "at"), PayRecord.Kind.valueOf(x.get("kind").getAsString()),
                         PayJson.amount(x.get("amount")), PayJson.str(x, "who"), PayJson.str(x, "ref"), PayJson.str(x, "note")));
+            }
+            if (o.has("deps")) {
+                for (JsonElement d : o.getAsJsonArray("deps")) {
+                    JsonObject x = d.getAsJsonObject();
+                    String req = x.get("req").getAsString();
+                    a.deposits.put(req, new Deposit(x.get("id").getAsString(), req, PayJson.amount(x.get("amount")), PayJson.str(x, "note"),
+                            PayJson.num(x, "at")));
+                }
             }
             accounts.put(ref, a);
         }
