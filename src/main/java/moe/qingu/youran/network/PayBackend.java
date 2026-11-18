@@ -36,4 +36,7 @@ public interface PayBackend {
     void applyDisplayName(String key, String name);
 
     String checkoutUrl(String orderId);
+
+    /** 有收款回调登记到 {@code account} 了（{@link PayHooks#addListener} 调用，任意线程）：把这个账户还没确认通知过的付款补发一遍 */
+    void listenerAdded(AccountRef account);
 }

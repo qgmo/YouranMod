@@ -53,16 +53,7 @@ public final class OrderInfo {
     /** 只许这个玩家付（{@link OrderSpec#payer}）；谁付都行时为 null */
     public final UUID requiredPayer;
 
-    /** 玩家付的（{@link #payerAccount} 是 {@code payer} 的玩家账户；没付为 null） */
-    public OrderInfo(String id, Status status, AccountRef receiver, String receiverName, String site, Amount price, Currency.Unit unit,
-                     String description, String reference, String returnUrl, String cancelUrl, long createdAt, long expiresAt,
-                     long paidAt, UUID payer, String payerName, String paymentId, Amount refunded, String checkoutUrl,
-                     UUID requiredPayer) {
-        this(id, status, receiver, receiverName, site, price, unit, description, reference, returnUrl, cancelUrl, createdAt, expiresAt,
-                paidAt, payer == null ? null : AccountRef.player(payer), payerName, paymentId, refunded, checkoutUrl, requiredPayer);
-    }
-
-    /** {@code payerAccount} 是玩家账户时 {@link #payer} 是那个玩家，是虚拟账户或没付时为 null */
+    /** {@code payerAccount}：玩家付的写 {@code AccountRef.player(玩家)}（{@link #payer} 就是那个玩家），虚拟账户付的写那个虚拟账户（{@link #payer} 为 null）；没付为 null */
     public OrderInfo(String id, Status status, AccountRef receiver, String receiverName, String site, Amount price, Currency.Unit unit,
                      String description, String reference, String returnUrl, String cancelUrl, long createdAt, long expiresAt,
                      long paidAt, AccountRef payerAccount, String payerName, String paymentId, Amount refunded, String checkoutUrl,

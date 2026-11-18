@@ -14,7 +14,6 @@ import moe.qingu.youran.api.pay.PayException;
 import moe.qingu.youran.api.pay.PayItem;
 import moe.qingu.youran.api.pay.PayRecord;
 import moe.qingu.youran.api.pay.PaymentInfo;
-import moe.qingu.youran.api.pay.PaymentListener;
 import moe.qingu.youran.api.pay.VirtualAccount;
 import moe.qingu.youran.network.PayBackend;
 import moe.qingu.youran.network.PayHooks;
@@ -57,6 +56,8 @@ public final class PayServer implements PayBackend {
     private final TxRunner runner;
     /** 唯一的付款入口（{@code PayApi.pay}）：付款页确认以后、模组直接付，都经它 */
     final PayEntry entry;
+    /** 通知收款方（至少一次）：付款、退款以后回调，没确认的开服后、监听器登记时补发 */
+    final PayNotifier notifier;
     /** 付款页的网址用 https（服务器配了中间 CA）还是 http */
     private volatile boolean https;
     private final Events events = new Events();
@@ -68,6 +69,8 @@ public final class PayServer implements PayBackend {
         this.world = new McWorld(server);
         this.runner = new TxRunner(ledger, world, System::currentTimeMillis, this::firePaid);
         this.entry = new PayEntry(ledger, world, runner, System::currentTimeMillis, this::firePaid, ItemText::cacheAll);
+        this.notifier = new PayNotifier(ledger, PayHooks::listeners, id -> ledger.orderInfo(id, System.currentTimeMillis(), this::checkoutUrl),
+                System::currentTimeMillis);
     }
 
     /** 开服（主线程，世界已加载、还没有玩家）：读账本、恢复、登记接口；读不了账本时返回 null（pay.yr 不开） */
@@ -82,6 +85,8 @@ public final class PayServer implements PayBackend {
             return null;
         }
         PayServer s = new PayServer(server, ledger);
+        // 上次没确认通知收款方的（含下面崩溃恢复补上的付款）：开服后第一次 tick 补发，那时各模组都已开服、读好了自己的存档
+        s.notifier.kickAll();
         int pending = ledger.pending().size();
         if (pending > 0) {
             int n = s.runner.recover();
@@ -95,7 +100,8 @@ public final class PayServer implements PayBackend {
                 s.applyDisplayName(e.getKey(), e.getValue());
             }
         }
-        Ledger.LOG.info("pay.yr：账本 {} 已读", dir);
+        int unnotified = ledger.notices().size();
+        Ledger.LOG.info("pay.yr：账本 {} 已读{}", dir, unnotified == 0 ? "" : "；" + unnotified + " 笔付款 / 退款还没确认通知过收款方，开服后补发（收款方没登记监听器的等登记了再发）");
         return s;
     }
 
@@ -353,15 +359,8 @@ public final class PayServer implements PayBackend {
     PaymentInfo doRefund(String paymentId, Amount amount, String note) throws PayException {
         try {
             Ledger.Payment p = ledger.refund(paymentId, amount, note, System.currentTimeMillis());
-            PaymentInfo info = p.info();
-            for (PaymentListener l : PayHooks.listeners(p.receiver)) {
-                try {
-                    l.onRefunded(info, amount);
-                } catch (RuntimeException e) {
-                    Ledger.LOG.error("pay.yr：退款回调出错", e);
-                }
-            }
-            return info;
+            notifier.notify(p.id);
+            return p.info();
         } catch (IOException e) {
             Ledger.LOG.error("pay.yr：写账本失败，没退款", e);
             throw new PayException("storage", "pay.yr 记账失败，请稍后再试");
@@ -397,13 +396,12 @@ public final class PayServer implements PayBackend {
         OrderInfo o = ledger.info(paid.order, System.currentTimeMillis(), this::checkoutUrl);
         PaymentInfo p = paid.payment.info();
         Ledger.LOG.info("pay.yr：{} 付了 {}（{}，{} → {}）", p.payerName, o.id, p.amount, o.site, o.receiverName);
-        for (PaymentListener l : PayHooks.listeners(o.receiver)) {
-            try {
-                l.onPaid(o, p);
-            } catch (RuntimeException e) {
-                Ledger.LOG.error("pay.yr：收款回调出错", e);
-            }
-        }
+        notifier.notify(p.id);
+    }
+
+    @Override
+    public void listenerAdded(AccountRef account) {
+        notifier.kick(account);
     }
 
     private void mainThread() throws PayException {
@@ -883,6 +881,9 @@ public final class PayServer implements PayBackend {
             ticks++;
             if (ticks % 20 == 0) {
                 runner.tick();
+            }
+            if (ticks == 1 || ticks % 20 == 0) {
+                notifier.tick();
             }
             if (ticks % 1200 == 0) {
                 ledger.maybeSnapshot(System.currentTimeMillis(), keepMillis());

@@ -12,7 +12,7 @@ import java.util.List;
  * <p>
  * 流程：{@link #createOrder} 拿到收款单 → 把玩家的浏览器跳到 {@link OrderInfo#checkoutUrl} → 玩家在 pay.yr 用游戏角色登录、
  * 在系统确认框里确认付款，服务端从他背包扣物品、记进收款方账户 → 浏览器跳回 {@link OrderSpec#returnUrl}，
- * 同时在主线程上调用收款方登记的 {@link PaymentListener}；网站也可以用 {@link #order} 查是不是付了。
+ * 同时在主线程上调用收款方登记的 {@link PaymentListener}（至少一次，可能重复，收款方按付款编号去重）；网站也可以用 {@link #order} 查是不是付了。
  * <p>
  * 只在服务端、游戏内网络与 pay.yr 运行时有用（{@link #isAvailable}）；客户端、YouranMod 客户端包里返回 null / 抛 {@link PayException}（{@code unavailable}）。
  * 收款回调可以在模组加载阶段就登记。
@@ -155,7 +155,13 @@ public final class PayApi {
         return b == null ? Collections.<PayRecord>emptyList() : b.records(account, max);
     }
 
-    /** 收款回调：收款方 {@code receiver} 收到付款、退款时调用（主线程）。加载阶段就能登记 */
+    /**
+     * 收款回调：收款方 {@code receiver} 收到付款、退款时调用（主线程）。加载阶段就能登记，开服以后登记也行。
+     * <p>
+     * <b>回调可能对同一笔付款来不止一次，收款方要按付款编号（{@link PaymentInfo#id}）去重</b>：pay.yr 保证至少送到一次——
+     * 回调正常返回以后才在账本里记“已通知”，没记上的在开服后、以及有监听器登记到这个账户时补发（登记以前付的也补），回调抛异常的过一阵重试。
+     * 详见 {@link PaymentListener}。
+     */
     public static void addListener(AccountRef receiver, PaymentListener listener) {
         PayHooks.addListener(receiver, listener);
     }

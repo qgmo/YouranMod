@@ -63,14 +63,11 @@ public final class NavServer implements NavService.Env {
     private final PaymentListener payListener = new PaymentListener() {
         @Override
         public void onPaid(OrderInfo order, PaymentInfo payment) {
+            // pay.yr 可能把同一笔付款通知不止一次：AdBook.paid 只认还在等付款的广告，处理过的返回 false，不会排两次
             AdBook.Ad ad = book.byOrder(order.id);
             if (ad != null && book.paid(ad, payment.id, System.currentTimeMillis(), System.currentTimeMillis())) {
                 NavService.LOG.info("180.yr：{} 付了广告 #{}（{}）", payment.payerName, ad.id, payment.id);
             }
-        }
-
-        @Override
-        public void onRefunded(PaymentInfo payment, Amount refund) {
         }
     };
     private volatile Today today = Today.UNKNOWN;

@@ -117,6 +117,40 @@ class AdBookTest {
         assertFalse(book.paid(d, "pay_1", 100, 4), "重复的回调不再处理");
     }
 
+    /**
+     * pay.yr 补发（服主 11-18：回调至少一次，可能重复）：同一笔付款的回调在关服重开后、上线后、播完后、下架后再来，都不再处理——
+     * 不重新排队、不改开播时间、不写盘
+     */
+    @Test
+    void resentPaymentNoticeIsIgnored() throws Exception {
+        AdBook.Ad a = buy(AdSlot.SQUARE, alice, 2, 100, 1);
+        AdBook.Ad q = buy(AdSlot.SQUARE, bob, 1, 100, 2);
+        AdBook.Ad w = buy(AdSlot.SQUARE, bob, 1, 100, 3);
+        assertEquals(AdBook.State.QUEUED, w.state);
+        // 关服重开（读存档），pay.yr 开服后把三笔都补发一遍
+        AdBook copy = new AdBook(rules, x -> saves++);
+        copy.load(book.toJson(), new ArrayList<String>());
+        int before = saves;
+        for (AdBook.Ad x : new AdBook.Ad[]{a, q, w}) {
+            AdBook.Ad y = copy.byOrder("ord_" + x.id);
+            long start = y.startTick;
+            assertFalse(copy.paid(y, "pay_" + x.id, 5000, 50), "补发的回调不再处理：" + x.state);
+            assertEquals(x.state, y.state);
+            assertEquals(start, y.startTick);
+        }
+        assertEquals(before, saves, "没有改动，不写盘");
+        // 下架、播完以后再来一次
+        AdBook.Ad z = copy.byOrder("ord_" + w.id);
+        assertTrue(copy.remove(z, "Admin", "测试", 0, 200, 62));
+        assertFalse(copy.paid(z, "pay_" + w.id, 201, 63));
+        AdBook.Ad y = copy.byOrder("ord_" + a.id);
+        copy.tick(100 + 2 * DAY, 60);
+        assertEquals(AdBook.State.ENDED, y.state);
+        assertFalse(copy.paid(y, "pay_" + a.id, 100 + 2 * DAY + 1, 61));
+        assertEquals(AdBook.State.ENDED, y.state);
+        assertEquals(AdBook.State.REMOVED, z.state);
+    }
+
     @Test
     void takeDownWithRefunds() throws Exception {
         AdBook.Ad a = buy(AdSlot.BANNER, alice, 4, 0, 1);

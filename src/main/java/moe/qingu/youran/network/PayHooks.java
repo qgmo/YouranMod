@@ -30,8 +30,13 @@ public final class PayHooks {
         backend = b;
     }
 
+    /** 登记收款回调；pay.yr 开着时请它把这个账户还没确认通知过的付款补发一遍（下一秒在主线程上） */
     public static void addListener(AccountRef account, PaymentListener l) {
         LISTENERS.computeIfAbsent(account, k -> new CopyOnWriteArrayList<>()).add(l);
+        PayBackend b = backend;
+        if (b != null) {
+            b.listenerAdded(account);
+        }
     }
 
     public static void removeListener(AccountRef account, PaymentListener l) {

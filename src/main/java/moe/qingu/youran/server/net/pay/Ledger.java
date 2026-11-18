@@ -41,6 +41,9 @@ import java.util.function.Function;
  * <p>
  * 不动世界的改动（退款、模组取出、虚拟账户付款……）都只有一条，写盘以后就是做了，没有做了一半的时候。
  * <p>
+ * 通知收款方不在记账那一条里：付款、退款记下以后由 {@link PayNotifier} 回调收款方，回调正常返回以后再记一条 {@code ntf}。
+ * 崩在两条之间的，开服后补发（至少一次；收款方按付款编号去重）。
+ * <p>
  * 所有方法加同一把锁，任意线程可调用；改世界的部分在 {@link TxRunner}（主线程）。
  */
 final class Ledger {
@@ -155,6 +158,13 @@ final class Ledger {
         Amount amount;
         Amount refunded = Amount.ZERO;
         long time;
+        /**
+         * 已经通知过收款方（{@code onPaid} 正常返回以后由 {@link PayNotifier} 记一条 {@code ntf}）。新付的是 false；
+         * 没有这一项的老快照按 true 读（那时还没有这个记录，不补发）
+         */
+        boolean notified;
+        /** 还没通知收款方的退款：退款编号 → 这一次退的（按退款先后） */
+        final LinkedHashMap<String, Amount> refundNotices = new LinkedHashMap<>();
 
         PaymentInfo info() {
             return new PaymentInfo(id, orderId, payerAcct, payerName, receiver, site, reference, amount, refunded, time);
@@ -206,6 +216,25 @@ final class Ledger {
         }
     }
 
+    /** 一笔付款还没通知收款方的事（{@link PayNotifier} 用；查的那一刻的快照） */
+    static final class Notice {
+        final String paymentId;
+        final String orderId;
+        final AccountRef receiver;
+        /** 还没通知 {@code onPaid} */
+        final boolean paid;
+        /** 还没通知的退款：退款编号 → 这一次退的（按先后） */
+        final Map<String, Amount> refunds;
+
+        Notice(Payment p) {
+            this.paymentId = p.id;
+            this.orderId = p.orderId;
+            this.receiver = p.receiver;
+            this.paid = !p.notified;
+            this.refunds = Collections.unmodifiableMap(new LinkedHashMap<>(p.refundNotices));
+        }
+    }
+
     /** 一笔付款完成（给回调用） */
     static final class Paid {
         final Order order;
@@ -231,6 +260,8 @@ final class Ledger {
     private final Map<String, Payment> payments = new LinkedHashMap<>();
     private final Map<String, Tx> pending = new LinkedHashMap<>();
     private final Map<String, AccountRef> keys = new HashMap<>();
+    /** 还有事没通知收款方的付款编号（付款或退款），按先后 */
+    private final java.util.LinkedHashSet<String> unnotified = new java.util.LinkedHashSet<>();
     /** 回放日志时为 true（不发回调、不检查） */
     private boolean replaying;
 
@@ -340,6 +371,23 @@ final class Ledger {
 
     synchronized Tx pending(String id) {
         return pending.get(id);
+    }
+
+    /** 还有事没通知收款方的付款（付了还没通知、退了款还没通知），按先后 */
+    synchronized List<Notice> notices() {
+        List<Notice> out = new ArrayList<>();
+        for (String id : unnotified) {
+            Payment p = payments.get(id);
+            if (p != null) {
+                out.add(new Notice(p));
+            }
+        }
+        return out;
+    }
+
+    /** 这笔付款还有没有事没通知收款方 */
+    synchronized boolean unnotified(String paymentId) {
+        return unnotified.contains(paymentId);
     }
 
     /** 这个玩家有没有进行中的（还没结束的）扣物品 / 发物品 */
@@ -778,6 +826,29 @@ final class Ledger {
         commitEntry(e);
     }
 
+    /**
+     * 记下已经通知过收款方：{@code refundId} 为 null 时是这笔付款（{@code onPaid}），否则是这一次退款。收款方的回调正常返回以后才调（{@link PayNotifier}）。
+     * 已经记过的、付款没有了的什么都不写
+     */
+    synchronized void markNotified(String paymentId, String refundId) throws IOException {
+        Payment p = payments.get(paymentId);
+        if (p == null || (refundId == null ? p.notified : !p.refundNotices.containsKey(refundId))) {
+            return;
+        }
+        JsonObject e = entry("ntf");
+        e.addProperty("payment", paymentId);
+        PayJson.put(e, "refund", refundId);
+        commitEntry(e);
+    }
+
+    private void indexNotice(Payment p) {
+        if (!p.notified || !p.refundNotices.isEmpty()) {
+            unnotified.add(p.id);
+        } else {
+            unnotified.remove(p.id);
+        }
+    }
+
     /** 攒够了就写快照（顺便清掉过期很久的收款单、很早的付款） */
     synchronized void maybeSnapshot(long now, long keepMillis) {
         if (store.entriesSinceSnapshot() >= SNAPSHOT_EVERY) {
@@ -893,6 +964,11 @@ final class Ledger {
                 long at = PayJson.num(e, "at");
                 String note = PayJson.str(e, "note");
                 p.refunded = p.refunded.plus(a);
+                String refundId = PayJson.str(e, "id");
+                if (refundId != null) {
+                    p.refundNotices.put(refundId, a);
+                    indexNotice(p);
+                }
                 Account r = need(p.receiver);
                 r.subtract(a);
                 r.record(new PayRecord(at, PayRecord.Kind.REFUND_OUT, a, p.payerName, p.id, note));
@@ -905,6 +981,19 @@ final class Ledger {
             case "vpay":
                 applyVirtualPay(e);
                 break;
+            case "ntf": {
+                Payment p = payments.get(e.get("payment").getAsString());
+                if (p != null) {
+                    String refundId = PayJson.str(e, "refund");
+                    if (refundId == null) {
+                        p.notified = true;
+                    } else {
+                        p.refundNotices.remove(refundId);
+                    }
+                    indexNotice(p);
+                }
+                break;
+            }
             case "take": {
                 Account a = need(AccountRef.parse(e.get("acct").getAsString()));
                 Amount amt = PayJson.amount(e.get("amount"));
@@ -977,6 +1066,7 @@ final class Ledger {
         // 先扣（不够时抛异常，什么都没改），再改别的
         payer.subtract(value);
         payments.put(p.id, p);
+        indexNotice(p);
         o.status = OrderStatus.PAID;
         o.paidAt = at;
         o.payerAcct = payerRef;
@@ -1014,6 +1104,7 @@ final class Ledger {
             p.amount = tx.value;
             p.time = at;
             payments.put(p.id, p);
+            indexNotice(p);
             if (o != null) {
                 o.status = OrderStatus.PAID;
                 o.paidAt = at;
@@ -1085,6 +1176,7 @@ final class Ledger {
             }
         }
         payments.values().removeIf(p -> now - p.time > keepMillis);
+        unnotified.removeIf(id -> !payments.containsKey(id));
     }
 
     JsonObject writeSnapshot() {
@@ -1161,6 +1253,17 @@ final class Ledger {
             x.add("amount", PayJson.amount(p.amount));
             x.add("refunded", PayJson.amount(p.refunded));
             x.addProperty("at", p.time);
+            x.addProperty("ntf", p.notified);
+            if (!p.refundNotices.isEmpty()) {
+                JsonArray rn = new JsonArray();
+                for (Map.Entry<String, Amount> r : p.refundNotices.entrySet()) {
+                    JsonObject y = new JsonObject();
+                    y.addProperty("id", r.getKey());
+                    y.add("amount", PayJson.amount(r.getValue()));
+                    rn.add(y);
+                }
+                x.add("refNtf", rn);
+            }
             ps.add(x);
         }
         s.add("payments", ps);
@@ -1257,7 +1360,15 @@ final class Ledger {
             p.amount = PayJson.amount(x.get("amount"));
             p.refunded = PayJson.amount(x.get("refunded"));
             p.time = PayJson.num(x, "at");
+            p.notified = !x.has("ntf") || x.get("ntf").getAsBoolean();
+            if (x.has("refNtf")) {
+                for (JsonElement r : x.getAsJsonArray("refNtf")) {
+                    JsonObject y = r.getAsJsonObject();
+                    p.refundNotices.put(y.get("id").getAsString(), PayJson.amount(y.get("amount")));
+                }
+            }
             payments.put(p.id, p);
+            indexNotice(p);
         }
         for (JsonElement el : s.getAsJsonArray("pending")) {
             JsonObject x = el.getAsJsonObject();

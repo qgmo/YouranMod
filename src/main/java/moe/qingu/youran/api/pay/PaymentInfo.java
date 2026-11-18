@@ -21,13 +21,7 @@ public final class PaymentInfo {
     public final Amount refunded;
     public final long time;
 
-    /** 玩家付的款（{@link #payerAccount} 是 {@code payer} 的玩家账户；{@code payer} 为 null 时也为 null） */
-    public PaymentInfo(String id, String orderId, UUID payer, String payerName, AccountRef receiver, String site, String reference,
-                       Amount amount, Amount refunded, long time) {
-        this(id, orderId, payer == null ? null : AccountRef.player(payer), payerName, receiver, site, reference, amount, refunded, time);
-    }
-
-    /** {@code payerAccount} 是玩家账户时 {@link #payer} 是那个玩家，是虚拟账户时为 null */
+    /** {@code payerAccount}：玩家付的写 {@code AccountRef.player(玩家)}（{@link #payer} 就是那个玩家），虚拟账户付的写那个虚拟账户（{@link #payer} 为 null） */
     public PaymentInfo(String id, String orderId, AccountRef payerAccount, String payerName, AccountRef receiver, String site,
                        String reference, Amount amount, Amount refunded, long time) {
         this.id = id;
