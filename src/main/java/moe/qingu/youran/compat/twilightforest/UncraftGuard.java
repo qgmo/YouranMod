@@ -37,13 +37,17 @@ import java.util.Set;
  * <p>不让拆的配方直接从候选里去掉：一条都不剩时拆解台和放进一件没有配方的东西一样，什么都不显示。
  * 两端都算（拆解台的格子由服务端同步给客户端，以服务端为准）；配置的名单只在服务端读，客户端只用写死的部分。
  *
- * <p>这个类只引用原版与 Forge 的类，没装暮色森林时不会被加载（只有 Mixin 引用它）。
+ * <p>JEI 的“拆解”页（Twilight Tweaks）也用这里的判定藏起拆不了的配方、把候选固定成拆解台实际给的那种（{@link #jeiView}，
+ * 由 {@code compat.jei.TwilightUncrafting} 在客户端调用）。
+ *
+ * <p>这个类只引用原版与 Forge 的类，没装暮色森林时不会被加载（只有 Mixin 与只在装了 Twilight Tweaks 时加载的 JEI 部分引用它）。
  */
 public final class UncraftGuard {
     /** 同 {@code YouranMod.LOG}（不碰 YouranMod 类，单测里不用初始化它） */
     private static final Logger LOG = LogManager.getLogger("YouranMod");
     private static UncraftRules.Rules rules;
     private static String[][] rulesFrom;
+    private static UncraftRules.Rules builtin;
     private static final Set<String> reported = Collections.synchronizedSet(new HashSet<>());
     private static final ItemPatterns CHEAPER = ItemPatterns.parse(UncraftBuiltins.CHEAPER_SUBSTITUTES);
 
@@ -71,6 +75,17 @@ public final class UncraftGuard {
             }
         }
         return true;
+    }
+
+    /**
+     * 只有写死的规则（{@link UncraftBuiltins} 与 {@link UncraftRules} 的机制），不加配置的名单：给客户端的 JEI 用。
+     * 客户端不知道服务端配置里另加的名单，那些照旧显示（拆的时候服务端会挡），不为此做网络同步。
+     */
+    public static synchronized UncraftRules.Rules builtinRules() {
+        if (builtin == null) {
+            builtin = build(true, null, null, null);
+        }
+        return builtin;
     }
 
     /** 写死的名单加上额外的；名单里格式不对的行记一条日志 */
@@ -111,6 +126,12 @@ public final class UncraftGuard {
     }
 
     public static UncraftRules.Verdict verdict(UncraftRules.Rules r, ItemStack input, IRecipe recipe, ItemStack[] shown, @Nullable World world) {
+        return verdict(r, input, recipe, shown, world, true);
+    }
+
+    /** {@code report}：配方检查出错时记日志（每条配方一次）。JEI 那边没有世界、出错不算数，不记 */
+    private static UncraftRules.Verdict verdict(UncraftRules.Rules r, ItemStack input, IRecipe recipe, ItemStack[] shown, @Nullable World world,
+                                                boolean report) {
         if (!r.enabled) {
             return UncraftRules.Verdict.ALLOW;
         }
@@ -129,7 +150,7 @@ public final class UncraftGuard {
             UncraftRules.Simulation sim = simulate(input, recipe, grid, world);
             return UncraftRules.recipe(r, name(recipe), parts, outputCovered, sim);
         } catch (RuntimeException | LinkageError e) {
-            if (reported.add(name(recipe))) {
+            if (report && reported.add(name(recipe))) {
                 LOG.warn("拆解台：检查配方 {} 时出错，这条配方不拿来拆", name(recipe), e);
             }
             return UncraftRules.Verdict.CHECK_FAILED;
@@ -243,20 +264,112 @@ public final class UncraftGuard {
         List<Ingredient> ings = recipe.getIngredients();
         for (int i = 0; i < shown.length && i < ings.size(); i++) {
             ItemStack[] matching = ings.get(i).getMatchingStacks();
-            if (matching.length <= 1) {
-                continue;
-            }
-            String[] ids = new String[matching.length];
-            int[] metas = new int[matching.length];
-            for (int k = 0; k < matching.length; k++) {
-                ids[k] = matching[k].isEmpty() ? "" : id(matching[k]);
-                metas[k] = matching[k].getMetadata();
-            }
-            int pick = UncraftRules.chooseVariant(CHEAPER, ids, metas);
-            if (pick >= 0) {
-                shown[i] = matching[pick];
+            if (matching.length > 1) {
+                shown[i] = matching[variant(matching)];
             }
         }
+    }
+
+    /** 几种候选里拆解台给哪一种（下标）；{@code matching} 不能是空的 */
+    private static int variant(ItemStack[] matching) {
+        String[] ids = new String[matching.length];
+        int[] metas = new int[matching.length];
+        for (int k = 0; k < matching.length; k++) {
+            ids[k] = matching[k].isEmpty() ? "" : id(matching[k]);
+            metas[k] = matching[k].getMetadata();
+        }
+        return Math.max(0, UncraftRules.chooseVariant(CHEAPER, ids, metas));
+    }
+
+    /**
+     * 拆解台为这条配方摆的材料，不用开拆解台：暮色森林的 {@code getIngredients}（每个配方材料取一种候选）加上 {@link #lockVariants}，
+     * 候选固定以后与玩家在拆解台里按哪个箭头无关。每个配方材料一个，没有归一化（摆进格子时才把数量换成 1、通配数据值换成 0）。
+     */
+    static ItemStack[] fixedIngredients(IRecipe recipe) {
+        List<Ingredient> ings = recipe.getIngredients();
+        ItemStack[] out = new ItemStack[ings.size()];
+        for (int i = 0; i < out.length; i++) {
+            ItemStack[] matching = ings.get(i).getMatchingStacks();
+            out[i] = matching.length == 0 ? ItemStack.EMPTY : matching[matching.length == 1 ? 0 : variant(matching)];
+        }
+        return out;
+    }
+
+    /** JEI 拆解页上的一条配方怎么显示（{@link #jeiView}） */
+    public static final class JeiView {
+        /** 藏起来 */
+        public final boolean hidden;
+        /** 不藏时每个配方材料一格显示的东西（与拆解台实际给的一致；空列表是这一格不显示：空格、带容器的材料），藏起来时为 null */
+        @Nullable
+        public final List<List<ItemStack>> slots;
+        /** 与 Twilight Tweaks 原来显示的不一样（原来列出全部候选、通配数据值展开成所有种类），要换成 {@link #slots} */
+        public final boolean differs;
+
+        JeiView(boolean hidden, @Nullable List<List<ItemStack>> slots, boolean differs) {
+            this.hidden = hidden;
+            this.slots = slots;
+            this.differs = differs;
+        }
+    }
+
+    /**
+     * JEI 的“拆解”页（Twilight Tweaks）上这条配方怎么显示（服主 11-18）。页上把配方产物当作放进拆解台的东西，用同一套判定
+     * （{@link #inputVerdict}、{@link #verdict}，规则由调用方给，客户端用 {@link #builtinRules}），是不是藏见 {@link UncraftRules#hiddenInJei}。
+     * 没有世界（JEI 启动时还没进世界），配方的 {@code matches} 收到 null；用世界的配方出错时照旧显示。
+     */
+    public static JeiView jeiView(UncraftRules.Rules r, IRecipe recipe) {
+        ItemStack input = recipe.getRecipeOutput();
+        ItemStack[] fixed = r.enabled ? fixedIngredients(recipe) : null;
+        UncraftRules.Verdict in = inputVerdict(r, input);
+        UncraftRules.Verdict rv = in.allowed() ? verdict(r, input, recipe, fixed, null, false) : null;
+        if (UncraftRules.hiddenInJei(in, rv)) {
+            return new JeiView(true, null, false);
+        }
+        if (fixed == null) {
+            List<List<ItemStack>> tt = twilightTweaksSlots(recipe);
+            return new JeiView(false, tt, false);
+        }
+        List<List<ItemStack>> slots = new ArrayList<>(fixed.length);
+        for (ItemStack s : fixed) {
+            ItemStack n = normalized(s);
+            slots.add(given(n) ? Collections.singletonList(n) : Collections.<ItemStack>emptyList());
+        }
+        return new JeiView(false, slots, !sameSlots(slots, twilightTweaksSlots(recipe)));
+    }
+
+    /** Twilight Tweaks 的 {@code UncraftingWrapper} 原来显示的：每个配方材料的全部候选，去掉带容器的 */
+    static List<List<ItemStack>> twilightTweaksSlots(IRecipe recipe) {
+        List<List<ItemStack>> out = new ArrayList<>();
+        for (Ingredient ing : recipe.getIngredients()) {
+            List<ItemStack> l = new ArrayList<>();
+            for (ItemStack s : ing.getMatchingStacks()) {
+                if (!s.getItem().hasContainerItem(s)) {
+                    l.add(s);
+                }
+            }
+            out.add(l);
+        }
+        return out;
+    }
+
+    /** 两种显示一样：每格的物品、数据值（含通配值，JEI 会把它展开成所有种类）、数量、NBT 都相同 */
+    static boolean sameSlots(List<List<ItemStack>> a, List<List<ItemStack>> b) {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            List<ItemStack> x = a.get(i);
+            List<ItemStack> y = b.get(i);
+            if (x.size() != y.size()) {
+                return false;
+            }
+            for (int k = 0; k < x.size(); k++) {
+                if (!ItemStack.areItemStacksEqual(x.get(k), y.get(k))) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     static String id(ItemStack s) {

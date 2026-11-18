@@ -78,6 +78,12 @@ if (!tfJar.isFile()) {
     throw new GradleException("缺少暮色森林：把整合包里的 ${property('tf_jar')} 放到 libs/（只编译，不进仓库，见 README）")
 }
 
+// Twilight Tweaks 的 jar（只编译）：同暮色森林，放在 libs/ 下，文件名见 gradle.properties 的 tt_jar
+def ttJar = file("libs/${property('tt_jar')}")
+if (!ttJar.isFile()) {
+    throw new GradleException("缺少 Twilight Tweaks：把整合包里的 ${property('tt_jar')} 放到 libs/（只编译，不进仓库，见 README）")
+}
+
 // 家具 fork 的 MineBay 上架接口的编译用替身（src/minebayApi，见里面的 package-info）：家具依赖 YouranMod，YouranMod 不能反过来依赖家具的 jar。
 // 只给 compat.minebay 编译用，不打包、不上运行时；运行时用家具里的真类（没装家具时不加载 compat.minebay）
 sourceSets {
@@ -114,6 +120,8 @@ dependencies {
     compileOnly rfg.deobf(files(ipJar))
     // 暮色森林 3.11.1021（与整合包同版本，只编译、不打包）：只有 mixin.twilightforest（拆解台）引用，没装暮色森林时不注册这个 Mixin
     compileOnly rfg.deobf(files(tfJar))
+    // Twilight Tweaks 1.0.2（与整合包同版本，只编译、不打包）：只有 compat.jei.TwilightUncrafting（JEI 的拆解页）引用，没装时不加载
+    compileOnly rfg.deobf(files(ttJar))
     // 匠魂 2.13.0.183 与 Mantle 1.3.3.55（与整合包同版本）：只编译、不打包；只有 compat.tconstruct 引用（浇铸台的事件、合金与浇铸配方），
     // 没装匠魂时不加载这些类
     compileOnly(rfg.deobf('slimeknights:TConstruct:1.12.2-2.13.0.183')) { transitive = false }

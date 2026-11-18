@@ -89,4 +89,17 @@ class UncraftRulesTest {
                 "数据值不对不算");
         assertEquals(1, UncraftRules.chooseVariant(cheaper, new String[]{"minecraft:dye", "quark:root_dye"}, new int[]{4, 0}));
     }
+
+    /** JEI 拆解页：整件不让拆、配方不拿来拆的藏；检查出错的不知道（客户端没有世界）照旧显示 */
+    @Test
+    void hiddenInJei() {
+        assertEquals(false, UncraftRules.hiddenInJei(Verdict.ALLOW, Verdict.ALLOW));
+        assertEquals(true, UncraftRules.hiddenInJei(Verdict.INPUT_BLOCKED, null), "整件不让拆：不用看配方");
+        assertEquals(true, UncraftRules.hiddenInJei(Verdict.CARRIES_DATA, Verdict.ALLOW));
+        for (Verdict v : Verdict.values()) {
+            boolean expected = v != Verdict.ALLOW && v != Verdict.CHECK_FAILED;
+            assertEquals(expected, UncraftRules.hiddenInJei(Verdict.ALLOW, v), v.name());
+        }
+        assertEquals(false, UncraftRules.hiddenInJei(Verdict.ALLOW, null));
+    }
 }

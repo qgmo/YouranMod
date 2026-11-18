@@ -34,6 +34,7 @@ import java.util.List;
  * 电弧炉、粉碎机、搅拌机、打粉机、炼油厂、灌装机、热能离心机、溶解机、浇铸台、冶炼炉的新配方由各模组自己的 JEI 插件显示；
  * 按纯度多登记的配方只列 9 个 9 的（沉浸工程按 {@code listInJEI}，匠魂合金在这里藏起来）。
  * 三氯氢硅、混合气、硅晶圆、报废硅晶圆另有说明页。
+ * 装了 Twilight Tweaks 时，它的“拆解”页按暮色森林拆解台的限制藏起拆不了的配方（见 {@link TwilightUncrafting}）。
  */
 @JEIPlugin
 public final class YouranJeiPlugin implements IModPlugin {
@@ -207,6 +208,10 @@ public final class YouranJeiPlugin implements IModPlugin {
         // 冶炼炉按纯度多登记的混合气合金配方（9 个 9 以外的）不列（炼油厂、灌装机的由沉浸工程按 listInJEI 不列）
         if (Loader.isModLoaded("tconstruct")) {
             TicHidden.hide(runtime.getRecipeRegistry(), TIC_ALLOY);
+        }
+        // Twilight Tweaks 的“拆解”页：拆解台拆不了的配方不列，候选换成拆解台实际给的那种（服主 11-18）
+        if (Loader.isModLoaded(TwilightUncrafting.MODID)) {
+            TwilightUncrafting.apply(runtime.getRecipeRegistry());
         }
     }
 }

@@ -165,6 +165,26 @@ public final class UncraftRules {
     }
 
     /**
+     * JEI 的“拆解”页（整合包里的 Twilight Tweaks 加的，把工作台配方反过来列）要不要藏起这条配方（服主 11-18）。
+     * 页上把配方产物当作放进拆解台的东西：{@code input} 是产物整件的判定（{@link #input}），{@code recipe} 是这条配方的判定
+     * （{@link #recipe}；产物整件不让拆时不用算，可以是 null）。
+     * <ul>
+     *     <li>整件不让拆、或这条配方不拿来拆：藏；</li>
+     *     <li>检查时配方自己出错（{@link Verdict#CHECK_FAILED}）：照旧显示。客户端是在没有世界的时候判的（JEI 启动时还没进世界），
+     *     出错可能只是因为没有世界，拆解台在服务端有世界时不一定出错；不知道就不藏，真拆的时候服务端会挡。</li>
+     * </ul>
+     */
+    public static boolean hiddenInJei(Verdict input, Verdict recipe) {
+        if (!input.allowed()) {
+            return true;
+        }
+        if (recipe == null || recipe == Verdict.CHECK_FAILED) {
+            return false;
+        }
+        return !recipe.allowed();
+    }
+
+    /**
      * 一格有几种候选材料时给哪一种（拆解台本来让玩家在候选里随便挑，挑贵的就是洗：普通箱子做的拆出末影箱、绿粘液球做的拆出紫粘液球、
      * 橡树苗做的拆出粘液树种子……）：候选里有 {@code cheaper} 名单里的（便宜的替代品，如 IC2 工业钻石、Quark 的根染料）给它，
      * 否则给第一种（配方作者列的第一种，一般是原版或最普通的那种）。返回下标；没有候选时为 -1。

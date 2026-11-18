@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -262,5 +263,156 @@ class UncraftGuardTest {
                 return l;
             }
         };
+    }
+
+    // ---- JEI 拆解页（服主 11-18）：页上把配方产物当作放进去的东西，只用写死的规则 ----
+
+    static UncraftGuard.JeiView jei(IRecipe r) {
+        return UncraftGuard.jeiView(UncraftGuard.builtinRules(), r);
+    }
+
+    /** 铁剑照常显示，显示的与 Twilight Tweaks 原来的一样（不用换） */
+    @Test
+    void jeiShowsOrdinaryRecipes() {
+        UncraftGuard.JeiView v = jei(sword());
+        assertEquals(false, v.hidden);
+        assertEquals(false, v.differs);
+        assertEquals(3, v.slots.size());
+        assertEquals(Items.IRON_INGOT, v.slots.get(0).get(0).getItem());
+        assertEquals(Items.STICK, v.slots.get(2).get(0).getItem());
+    }
+
+    /** 产物整件不让拆的（铁锭、骨粉、铁轨）：藏 */
+    @Test
+    void jeiHidesBlockedOutputs() {
+        IRecipe ingot = named(new ShapelessRecipes("", new ItemStack(Items.IRON_INGOT, 9), ings(new ItemStack(net.minecraft.init.Blocks.IRON_BLOCK))),
+                "minecraft:iron_ingot_from_block");
+        assertTrue(jei(ingot).hidden);
+        IRecipe bonemeal = named(new ShapelessRecipes("", new ItemStack(Items.DYE, 3, 15), ings(stack(Items.BONE))), "minecraft:bone_meal_from_bone");
+        assertTrue(jei(bonemeal).hidden);
+        IRecipe lapis = named(new ShapelessRecipes("", new ItemStack(Items.DYE, 9, 4), ings(new ItemStack(net.minecraft.init.Blocks.LAPIS_BLOCK))),
+                "minecraft:lapis_lazuli");
+        assertEquals(false, jei(lapis).hidden, "同一种物品别的数据值（青金石）照常");
+        assertNull(jei(ingot).slots);
+    }
+
+    /** 按机制挡住的配方：拆出它自己、摆回去合成出来不一样、合成时还回的工具，都藏 */
+    @Test
+    void jeiHidesRecipesTheTableRejects() {
+        IRecipe dye = named(new ShapelessRecipes("", new ItemStack(Items.ELYTRA), ings(stack(Items.ELYTRA), new ItemStack(Items.DYE, 1, 4))),
+                "quark:elytra_dyeing");
+        assertTrue(jei(dye).hidden);
+        ItemStack anyWool = new ItemStack(net.minecraft.init.Blocks.WOOL, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE);
+        IRecipe white = named(new ShapelessRecipes("", new ItemStack(net.minecraft.init.Blocks.WOOL, 1, 0),
+                ings(anyWool, new ItemStack(Items.DYE, 1, 15))), "quark:wool");
+        assertTrue(jei(white).hidden, "任意羊毛认产物本身");
+        IRecipe coil = named(new ShapelessRecipes("", new ItemStack(Items.LEAD), ings(stack(Items.STRING), stack(Items.SLIME_BALL))) {
+            @Override
+            public ItemStack getCraftingResult(InventoryCrafting inv) {
+                ItemStack s = new ItemStack(Items.LEAD);
+                s.setTagCompound(new NBTTagCompound());
+                s.getTagCompound().setInteger("wireLength", 2);
+                return s;
+            }
+        }, "test:coil2");
+        assertTrue(jei(coil).hidden, "产物没写的 NBT 是合成时算出来的");
+        IRecipe cut = named(new ShapelessRecipes("", new ItemStack(Items.STICK, 8), ings(new ItemStack(net.minecraft.init.Blocks.LOG),
+                stack(Items.DIAMOND_AXE))) {
+            @Override
+            public NonNullList<ItemStack> getRemainingItems(InventoryCrafting inv) {
+                NonNullList<ItemStack> l = NonNullList.withSize(inv.getSizeInventory(), ItemStack.EMPTY);
+                for (int i = 0; i < inv.getSizeInventory(); i++) {
+                    if (inv.getStackInSlot(i).getItem() == Items.DIAMOND_AXE) {
+                        l.set(i, inv.getStackInSlot(i).copy());
+                    }
+                }
+                return l;
+            }
+        }, "test:cut_log");
+        assertTrue(jei(cut).hidden);
+        IRecipe map = named(new ShapelessRecipes("", new ItemStack(Items.MAP), ings(stack(Items.PAPER), new ItemStack(Items.FILLED_MAP))),
+                "test:mapext");
+        assertTrue(jei(map).hidden, "拆出已绘制地图");
+    }
+
+    /** 产物带 NBT 的配方：页上放进去的就是这件带 NBT 的产物，照常显示（拆解台挡的是不带这些 NBT 的） */
+    @Test
+    void jeiShowsOutputWithNbt() {
+        ItemStack out = new ItemStack(Items.PAPER);
+        out.setTagCompound(new NBTTagCompound());
+        out.getTagCompound().setString("blueprint", "light_source");
+        IRecipe r = named(new ShapelessRecipes("", out, ings(stack(Items.BOOK), stack(Items.DIAMOND))), "test:blueprint");
+        assertEquals(false, jei(r).hidden);
+    }
+
+    /** 只用写死的规则：配置另加的名单（这个测试类的 rules 里有饼干）客户端不知道，照旧显示 */
+    @Test
+    void jeiIgnoresConfiguredLists() {
+        IRecipe cookie = named(new ShapelessRecipes("", new ItemStack(Items.COOKIE, 8), ings(stack(Items.WHEAT), new ItemStack(Items.DYE, 1, 3),
+                stack(Items.WHEAT))), "minecraft:cookie");
+        assertEquals(Verdict.INPUT_BLOCKED, UncraftGuard.inputVerdict(rules, new ItemStack(Items.COOKIE)));
+        assertEquals(false, jei(cookie).hidden);
+    }
+
+    /** 检查时配方出错（客户端没有世界，可能只是因为这个）：照旧显示 */
+    @Test
+    void jeiShowsFailingRecipes() {
+        IRecipe bad = named(new ShapelessRecipes("", new ItemStack(Items.BOWL), ings(stack(Items.STICK))) {
+            @Override
+            public boolean matches(InventoryCrafting inv, net.minecraft.world.World worldIn) {
+                throw new IllegalStateException("测试");
+            }
+        }, "test:bad");
+        UncraftGuard.JeiView v = jei(bad);
+        assertEquals(false, v.hidden);
+        assertEquals(Items.STICK, v.slots.get(0).get(0).getItem());
+    }
+
+    /** 几种候选的格子显示拆解台实际给的那一种：金苹果（不是附魔金苹果）；与拆解台摆的（getIngredients 再固定）一致 */
+    @Test
+    void jeiShowsTheLockedVariant() {
+        IRecipe apple = oneSlot(new ItemStack(Items.GOLDEN_APPLE, 1, 0), new ItemStack(Items.GOLDEN_APPLE, 1, 1));
+        UncraftGuard.JeiView v = jei(apple);
+        assertEquals(false, v.hidden);
+        assertTrue(v.differs);
+        assertEquals(1, v.slots.get(0).size());
+        assertEquals(0, v.slots.get(0).get(0).getMetadata());
+        assertEquals(2, UncraftGuard.twilightTweaksSlots(apple).get(0).size(), "Twilight Tweaks 原来两种都列");
+        // 与拆解台一致：暮色森林的 getIngredients 按箭头取一种候选，再由 lockVariants 固定
+        for (int cycle = 0; cycle < 2; cycle++) {
+            ItemStack[] m = apple.getIngredients().get(0).getMatchingStacks();
+            ItemStack[] table = {m[cycle % m.length]};
+            UncraftGuard.lockVariants(apple, table);
+            assertTrue(ItemStack.areItemStacksEqual(table[0], UncraftGuard.fixedIngredients(apple)[0]));
+        }
+    }
+
+    /** 通配数据值（任意木板、任意羊毛）：拆解台给数据值 0 的，页上也只显示它（JEI 原来会展开成所有种类） */
+    @Test
+    void jeiShowsWildcardAsMetaZero() {
+        ItemStack anyPlanks = new ItemStack(net.minecraft.init.Blocks.PLANKS, 1, net.minecraftforge.oredict.OreDictionary.WILDCARD_VALUE);
+        IRecipe chest = named(new ShapedRecipes("", 3, 3, ings(anyPlanks, anyPlanks, anyPlanks, anyPlanks, null, anyPlanks, anyPlanks, anyPlanks,
+                anyPlanks), new ItemStack(net.minecraft.init.Blocks.CHEST)), "minecraft:chest");
+        UncraftGuard.JeiView v = jei(chest);
+        assertEquals(false, v.hidden);
+        assertTrue(v.differs);
+        assertEquals(0, v.slots.get(0).get(0).getMetadata());
+        assertTrue(v.slots.get(4).isEmpty(), "空格");
+        assertEquals(1, v.slots.get(0).get(0).getCount());
+    }
+
+    /** 第一种候选是带容器的（水桶），拆解台给的是它（拿不走），页上这格不显示，不再显示后面能拿走的候选（雪球） */
+    @Test
+    void jeiShowsNothingForContainerVariant() {
+        IRecipe r = oneSlot(new ItemStack(Items.WATER_BUCKET), new ItemStack(Items.SNOWBALL));
+        UncraftGuard.JeiView v = jei(r);
+        assertEquals(false, v.hidden);
+        assertTrue(v.differs);
+        assertTrue(v.slots.get(0).isEmpty());
+        assertEquals(Items.SNOWBALL, UncraftGuard.twilightTweaksSlots(r).get(0).get(0).getItem(), "Twilight Tweaks 原来显示雪球");
+        IRecipe cake = named(new ShapelessRecipes("", new ItemStack(Items.CAKE), ings(stack(Items.MILK_BUCKET), stack(Items.SUGAR))), "test:cake");
+        UncraftGuard.JeiView c = jei(cake);
+        assertEquals(false, c.differs, "只有一种候选的带容器材料，Twilight Tweaks 原来也不显示");
+        assertTrue(c.slots.get(0).isEmpty());
     }
 }
