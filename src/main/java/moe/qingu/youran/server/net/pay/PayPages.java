@@ -63,7 +63,7 @@ final class PayPages {
                 .append("input.go { padding: 3px 14px; background: #f0a020; border: 1px solid #b97811; color: #ffffff; font-weight: bold; }\n")
                 .append("div.foot { margin: 0 8px 8px 8px; color: #7d8996; font-size: 11px; text-align: center; }\n")
                 .append("</style>\n</head>\n<body>\n")
-                .append("<div class=\"top\"><table><tr><td><span class=\"logo\">pay.yr</span><span class=\"logo2\">悠然付款</span></td>")
+                .append("<div class=\"top\"><table><tr><td><span class=\"logo\">pay.yr</span><span class=\"logo2\">悠然聚合支付</span></td>")
                 .append("<td class=\"who\">");
         if (who != null) {
             sb.append("已登录：<b>").append(esc(who)).append("</b> | <a href=\"/account\">我的账户</a>");
@@ -77,7 +77,7 @@ final class PayPages {
         }
         sb.append(" | <a href=\"").append(esc(docs("/help"))).append("\">帮助</a>");
         sb.append("</td></tr></table></div>\n<div class=\"main\">\n").append(body).append("</div>\n")
-                .append("<div class=\"foot\">pay.yr · 悠然付款 · <a href=\"").append(esc(docs("/"))).append("\">开发者文档</a></div>\n")
+                .append("<div class=\"foot\">pay.yr · 悠然聚合支付 · <a href=\"").append(esc(docs("/"))).append("\">开发者文档</a></div>\n")
                 .append("</body>\n</html>\n");
         return sb.toString();
     }
@@ -213,7 +213,7 @@ final class PayPages {
     /** 首页：一句话 + 登录 / 我的账户；接入说明在 docs.pay.yr */
     static String index(String who, String csrf, boolean idOk, String idDomain, boolean https) {
         StringBuilder b = new StringBuilder();
-        b.append("<h1>pay.yr 悠然付款</h1>\n")
+        b.append("<h1>pay.yr 悠然聚合支付</h1>\n")
                 .append("<p>在游戏内的网站上买东西，到这里付款。绿宝石、悠然元都能付（1 绿宝石 = 2 元）。</p>\n");
         if (!idOk) {
             b.append("<p class=\"err\">服务器没有开游戏角色登录（").append(esc(idDomain)).append("），暂时不能付款。</p>\n");
