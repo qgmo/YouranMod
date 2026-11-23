@@ -165,14 +165,14 @@ public final class PayServer implements PayBackend {
 
     Ledger.Order create(Ledger.Draft d, long now) throws PayException {
         if (ledger.openOrders(d.receiver, now) >= PayConfig.maxOpenOrders) {
-            throw new PayException("too_many_orders", "还能付的收款单太多了（最多 " + PayConfig.maxOpenOrders + " 张），等一些过期或取消后再建");
+            throw new PayException("too_many_orders", "还能付的账单太多了（最多 " + PayConfig.maxOpenOrders + " 张），等一些过期或取消后再建");
         }
         try {
             if (d.receiver.isPlayer()) {
                 if (ledger.account(d.receiver) == null) {
                     GameProfile gp = server.getPlayerProfileCache().getProfileByUUID(d.receiver.player);
                     if (gp == null) {
-                        throw new PayException("no_such_account", "收款方不是这个服务器的玩家");
+                        throw new PayException("no_such_account", "收款人不是这个服务器的玩家");
                     }
                     ledger.touchPlayer(d.receiver.player, gp.getName());
                 }
@@ -241,7 +241,7 @@ public final class PayServer implements PayBackend {
         d.origin = origin;
         if (spec.payer() != null) {
             if (d.receiver.isPlayer() && d.receiver.player.equals(spec.payer())) {
-                throw new PayException("self_payment", "指定的付款人就是收款方");
+                throw new PayException("self_payment", "指定的付款人就是收款人");
             }
             d.onlyPayer = spec.payer();
         }
@@ -334,7 +334,7 @@ public final class PayServer implements PayBackend {
     public PaymentInfo pay(moe.qingu.youran.api.pay.PaySpec spec) throws PayException {
         mainThread();
         if (spec == null) {
-            throw new PayException("invalid_order", "要写付哪张收款单");
+            throw new PayException("invalid_order", "要写付哪张账单");
         }
         TxRunner.Result r = entry.pay(spec, null);
         switch (r.status) {
@@ -382,7 +382,7 @@ public final class PayServer implements PayBackend {
             throw new PayException("no_such_payment", "没有这笔付款");
         }
         if (p.receiver.isPlayer()) {
-            throw new PayException("not_allowed", "收款方是玩家的付款只能由他自己在 pay.yr 上退");
+            throw new PayException("not_allowed", "收款人是玩家的付款只能由他自己在 pay.yr 上退");
         }
         return doRefund(paymentId, amount, note);
     }
@@ -566,7 +566,7 @@ public final class PayServer implements PayBackend {
         long now = System.currentTimeMillis();
         Ledger.Order o = ledger.order(orderId);
         if (o == null) {
-            throw new PayException("no_such_order", "没有这张收款单");
+            throw new PayException("no_such_order", "没有这张账单");
         }
         OrderInfo.Status st = o.status(now);
         if (st != OrderInfo.Status.OPEN) {
@@ -580,7 +580,7 @@ public final class PayServer implements PayBackend {
             throw new PayException("self_payment", "不能付给自己");
         }
         if (o.onlyPayer != null && !o.onlyPayer.equals(payer)) {
-            throw new PayException("wrong_payer", "这张收款单要由 " + ledger.name(AccountRef.player(o.onlyPayer)) + " 付（网站指定的），现在登录的是 " + p.name());
+            throw new PayException("wrong_payer", "这张账单要由 " + ledger.name(AccountRef.player(o.onlyPayer)) + " 付（网站指定的），现在登录的是 " + p.name());
         }
         if (ledger.hasPending(payer)) {
             throw new PayException("busy", "上一笔还没处理完，请稍后再试");
@@ -592,7 +592,7 @@ public final class PayServer implements PayBackend {
         ItemText.cacheAll(fromBal);
         String recv = ItemText.clip(ledger.name(o.receiver), 24);
         List<String> head = new ArrayList<>();
-        head.add("收款方：" + recv);
+        head.add("收款人：" + recv);
         if (o.site != null && !o.site.equals(PayApi.DOMAIN)) {
             // 框上的“网站”是 pay.yr（是它请 id.yr 弹的框），收款的网站写在这里
             head.add("收款网站：" + PayPages.site(o.site));
@@ -614,7 +614,7 @@ public final class PayServer implements PayBackend {
             lines.add(line("拿出：", e.getKey(), e.getValue()));
         }
         for (Map.Entry<PayItem, Long> e : plan.change.entrySet()) {
-            lines.add(line("找回：", e.getKey(), e.getValue()));
+            lines.add(line("找零：", e.getKey(), e.getValue()));
         }
         String payerName = p.name();
         String last = plan.take.isEmpty() ? "这是 " + payerName + " 的 pay.yr 账户" : "从 " + payerName + " 的背包里拿";
@@ -633,13 +633,13 @@ public final class PayServer implements PayBackend {
     static String statusText(OrderInfo.Status s) {
         switch (s) {
             case PAID:
-                return "这张收款单已经付过了";
+                return "这张账单已经付过了";
             case CANCELED:
-                return "这张收款单已经被网站取消了";
+                return "这张账单已经被网站取消了";
             case EXPIRED:
-                return "这张收款单已经过期了";
+                return "这张账单已经过期了";
             case PAYING:
-                return "这张收款单正在付款";
+                return "这张账单正在付款";
             default:
                 return "可以付款";
         }
@@ -758,13 +758,13 @@ public final class PayServer implements PayBackend {
     }
 
     void executeRefund(PreparedRefund prep) throws PayException {
-        doRefund(prep.paymentId, prep.amount, "收款方在 pay.yr 退款");
+        doRefund(prep.paymentId, prep.amount, "收款人在 pay.yr 退款");
     }
 
     /** 重置密钥的确认框；标题写明是谁的账户（同一台电脑上别人登录着时，坐下的人看得出不是自己的） */
     Ask keyAsk(String accountName) {
         String n = ItemText.clip(accountName, 16);
-        return new Ask("重置 " + n + " 的 pay.yr 密钥", java.util.Arrays.asList("生成一把新的密钥，给你的网站创建、查询收款单用", "旧的密钥马上作废"),
+        return new Ask("重置 " + n + " 的 pay.yr 密钥", java.util.Arrays.asList("生成一把新的密钥，给你的网站创建、查询账单用", "旧的密钥马上作废"),
                 ConfirmRequest.Purpose.ACTION);
     }
 

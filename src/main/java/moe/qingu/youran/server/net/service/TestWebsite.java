@@ -35,7 +35,7 @@ public final class TestWebsite {
             + "</head>\n"
             + "<body>\n"
             + "<h1>test.yr</h1>\n"
-            + "<p>这是悠然服务器内网的测试网站。能看到这一页，说明 DNS 和 TCP 都通了。</p>\n"
+            + "<p>这是悠然服务器内网的测试网站。能看到这一页，说明这台电脑的网络是通的。</p>\n"
             + "</body>\n"
             + "</html>\n";
 

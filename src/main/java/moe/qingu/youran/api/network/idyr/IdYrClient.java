@@ -397,7 +397,7 @@ public class IdYrClient {
     public static String loginErrorText(String error, String description) {
         switch (error) {
             case "login_unavailable":
-                return "no_operator".equals(description) ? "这台电脑现在没人操作，不能登录。" : "这台电脑不能用游戏角色一键登录。";
+                return "no_operator".equals(description) ? "这台电脑现在没人操作，不能登录。" : "这台电脑不能用游戏角色登录。";
             case "access_denied":
                 if ("timeout".equals(description)) {
                     return "确认框超时了，没有登录。";
@@ -407,9 +407,9 @@ public class IdYrClient {
                 }
                 return "你在确认框里拒绝了登录。";
             case "temporarily_unavailable":
-                return "busy".equals(description) ? "已经有一个确认框开着，先处理那个。" : "登录服务暂时不可用，请稍后再试。";
+                return "busy".equals(description) ? "已经有一个确认框开着，先处理那个。" : "id.yr 暂时用不了，请稍后再试。";
             default:
-                return "登录失败（" + error + "）。";
+                return "登录失败，请重新登录（" + error + "）。";
         }
     }
 
@@ -418,7 +418,7 @@ public class IdYrClient {
         String r = reason == null ? "denied" : reason;
         switch (r) {
             case "denied":
-                return verify ? "身份验证没有通过（拒绝了，或者不是帐号本人）。" : "你在确认框里点了拒绝。";
+                return verify ? "验证身份没有通过（点了拒绝，或者不是账号本人）。" : "你在确认框里点了拒绝。";
             case "timeout":
                 return "确认框超时了。";
             case "operator_changed":
@@ -426,13 +426,13 @@ public class IdYrClient {
             case "no_operator":
                 return "这台电脑现在没人操作。";
             case "no_capability":
-                return "这台电脑不能弹 id.yr 的确认框。";
+                return "这台电脑弹不出 id.yr 的确认框。";
             case "busy":
                 return "已经有一个确认框开着，先处理那个。";
             case "expired":
-                return "确认请求过期了，请重试。";
+                return "等太久，这次确认过期了，请重试。";
             default:
-                return "确认服务暂时不可用，请稍后再试。";
+                return "id.yr 暂时用不了，请稍后再试。";
         }
     }
 

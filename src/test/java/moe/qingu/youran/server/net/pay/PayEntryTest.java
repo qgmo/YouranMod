@@ -167,7 +167,7 @@ class PayEntryTest {
         assertSame(o.id, paid.get(0).order.id);
         assertNull(r.paid.payment.payer);
         assertEquals(QING, r.paid.payment.payerAcct);
-        assertEquals("清", paid.get(0).payment.payerName, "收款方回调里付款人名字是显示名");
+        assertEquals("清", paid.get(0).payment.payerName, "收款人回调里付款人名字是显示名");
         TxRunner.Result again = entry.pay(spec, null);
         assertTrue(again.paid.replayed);
         assertEquals(1, paid.size());

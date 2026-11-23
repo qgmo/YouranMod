@@ -60,7 +60,7 @@ final class PayEntry {
     TxRunner.Result pay(PaySpec spec, Plan confirmed) {
         try {
             if (spec.orderId == null || spec.orderId.isEmpty()) {
-                throw new PayException("invalid_order", "要写收款单号");
+                throw new PayException("invalid_order", "要写账单号");
             }
             String req = spec.requestId();
             if (req != null && !VirtualAccount.REQUEST_ID.matcher(req).matches()) {
@@ -94,7 +94,7 @@ final class PayEntry {
         }
         Ledger.Order o = ledger.order(spec.orderId);
         if (o == null) {
-            throw new PayException("no_such_order", "没有这张收款单");
+            throw new PayException("no_such_order", "没有这张账单");
         }
         WorldPort.PlayerPort p = world.player(uuid);
         if (p == null) {

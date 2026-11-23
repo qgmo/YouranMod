@@ -610,23 +610,23 @@ final class Ledger {
             case OPEN:
                 break;
             case EXPIRED:
-                throw new PayException("order_expired", "收款单已经过期了");
+                throw new PayException("order_expired", "账单已经过期了");
             case CANCELED:
-                throw new PayException("order_not_open", "收款单已经被网站取消了");
+                throw new PayException("order_not_open", "账单已经被网站取消了");
             case PAYING:
-                throw new PayException("order_not_open", "收款单正在付款");
+                throw new PayException("order_not_open", "账单正在付款");
             default:
-                throw new PayException("order_not_open", payer.equals(o.payerAcct) ? "收款单已经付过了（是这个账户付的，付款编号 " + o.paymentId + "）"
-                        : "收款单已经付过了");
+                throw new PayException("order_not_open", payer.equals(o.payerAcct) ? "账单已经付过了（是这个账户付的，付款编号 " + o.paymentId + "）"
+                        : "账单已经付过了");
         }
         if (o.receiver.equals(payer)) {
             throw new PayException("self_payment", "不能付给自己");
         }
         if (o.onlyPayer != null && !(payer.isPlayer() && o.onlyPayer.equals(payer.player))) {
-            throw new PayException("wrong_payer", "这张收款单只能由网站指定的角色付");
+            throw new PayException("wrong_payer", "这张账单只能由网站指定的角色付");
         }
         if (expected != null && !expected.equals(o.price)) {
-            throw new PayException("amount_mismatch", "收款单的价格是 " + o.price + "，和预期的 " + expected + " 不一样，没有付");
+            throw new PayException("amount_mismatch", "账单的价格是 " + o.price + "，和预期的 " + expected + " 不一样，没有付");
         }
     }
 
@@ -640,7 +640,7 @@ final class Ledger {
         for (Payment p : payments.values()) {
             if (payer.equals(p.payerAcct) && requestId.equals(p.requestId)) {
                 if (!p.orderId.equals(orderId)) {
-                    throw new PayException("request_id_reused", "这个请求编号已经用在另一张收款单（" + p.orderId + "）上了；新的付款要换一个编号");
+                    throw new PayException("request_id_reused", "这个请求编号已经用在另一张账单（" + p.orderId + "）上了；新的付款要换一个编号");
                 }
                 return new Paid(orders.get(p.orderId), p, true);
             }
@@ -811,7 +811,7 @@ final class Ledger {
         }
         Order o = orderId == null ? null : orders.get(orderId);
         if (o == null) {
-            throw new PayException("no_such_order", "没有这张收款单");
+            throw new PayException("no_such_order", "没有这张账单");
         }
         checkPayable(o, payer, expected, now);
         Account a = accounts.get(payer);

@@ -30,7 +30,7 @@ public final class OrderSpec {
     /** @param site 网站域名（付款页上写给玩家看的，如 {@code minebay.yr}） */
     public OrderSpec(AccountRef receiver, String site) {
         if (receiver == null || site == null) {
-            throw new IllegalArgumentException("收款方、网站域名都要给");
+            throw new IllegalArgumentException("收款人、网站域名都要给");
         }
         this.receiver = receiver;
         this.site = site;

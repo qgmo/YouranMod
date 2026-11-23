@@ -171,15 +171,15 @@ public final class NavServer implements NavService.Env {
         List<NavDirectory.Decl> out = new ArrayList<>();
         // 别的模组登记了同一个名字时用别人的（兜底）
         out.add(new NavDirectory.Decl("portal.yr", SiteInfo.of("悠然面板", SiteInfo.Category.SERVICE, "公告、消息、我的角色").featured(), true));
-        out.add(new NavDirectory.Decl("id.yr", SiteInfo.of("角色登录", SiteInfo.Category.SERVICE, "用游戏角色一键登录网站"), true));
+        out.add(new NavDirectory.Decl("id.yr", SiteInfo.of("角色登录", SiteInfo.Category.SERVICE, "用游戏角色登录网站"), true));
         for (NetworkRegistry.NavDecl d : NetworkRegistry.navs()) {
             out.add(new NavDirectory.Decl(d.name, d.info, d.fallback));
         }
-        out.add(new NavDirectory.Decl("pay.yr", SiteInfo.of("pay.yr 支付", SiteInfo.Category.SERVICE, "付款、收款、提现").featured(), false));
+        out.add(new NavDirectory.Decl("pay.yr", SiteInfo.of("pay.yr 付款", SiteInfo.Category.SERVICE, "付款、收款、提现").featured(), false));
         out.add(new NavDirectory.Decl(NavService.PLATFORM, SiteInfo.of("180 广告", SiteInfo.Category.SERVICE, "在 180 上投放广告").featured(), false));
         out.add(new NavDirectory.Decl(NavService.HELP, SiteInfo.of("180 帮助", SiteInfo.Category.TOOL, "设主页、投广告、举报"), false));
         out.add(new NavDirectory.Decl("captcha.yr", SiteInfo.of("人机验证", SiteInfo.Category.TOOL, "给网站用的图片验证码"), false));
-        out.add(new NavDirectory.Decl("location.yr", SiteInfo.of("位置验证", SiteInfo.Category.TOOL, "核对电脑位置证明"), false));
+        out.add(new NavDirectory.Decl("location.yr", SiteInfo.of("位置验证", SiteInfo.Category.TOOL, "给网站用：核对电脑的位置"), false));
         return out;
     }
 

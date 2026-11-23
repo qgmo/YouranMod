@@ -123,7 +123,7 @@ final class AdInput {
         }
         byte[] png = DyePng.fromDataUrl(dataUrl);
         if (png == null) {
-            throw new Bad("图片的写法不对（要 PNG）");
+            throw new Bad("图片读不出来，请重新画一次");
         }
         DyePng.Image img;
         try {

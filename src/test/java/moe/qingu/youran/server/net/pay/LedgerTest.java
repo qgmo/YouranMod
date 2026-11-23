@@ -87,7 +87,7 @@ class LedgerTest {
         assertEquals("order_expired", expired.code);
 
         Ledger.Order c = l.createOrder(draft(bob, 10, T0 + 60_000), T0);
-        assertFalse(l.cancel(c.id, AccountRef.player(ALICE), T0), "只有收款方能取消");
+        assertFalse(l.cancel(c.id, AccountRef.player(ALICE), T0), "只有收款人能取消");
         assertTrue(l.cancel(c.id, bob, T0));
         assertSame(OrderInfo.Status.CANCELED, l.order(c.id).status(T0));
         assertThrows(PayException.class, () -> pay(l, l.order(c.id), ALICE, T0 + 10));

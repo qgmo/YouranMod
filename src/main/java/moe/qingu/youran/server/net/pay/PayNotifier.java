@@ -199,7 +199,7 @@ final class PayNotifier {
             }
             return true;
         } catch (RuntimeException | LinkageError e) {
-            failed(n, step, "收款方的回调出错", e, now);
+            failed(n, step, "收款人的回调出错", e, now);
             return false;
         }
     }

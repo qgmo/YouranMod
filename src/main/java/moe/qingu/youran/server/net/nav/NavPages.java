@@ -217,7 +217,7 @@ final class NavPages {
         }
         if (free) {
             b.append(any ? " <span class=\"sep\">|</span> " : "").append("<a class=\"gray\" href=\"").append(esc(url(s, NavService.PLATFORM, "/buy?slot=text")))
-                    .append("\">在这里推广</a>");
+                    .append("\">在这里打广告</a>");
         }
         b.append("</div>\n");
         // 分栏

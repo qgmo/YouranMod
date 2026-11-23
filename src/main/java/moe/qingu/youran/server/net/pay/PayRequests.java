@@ -39,6 +39,6 @@ final class PayRequests {
     /** 没有处理者（或处理者没给结果）：什么都没做 */
     static Reply waiting(PaymentRequest req) {
         return Reply.pending("这笔付款要等账户“" + (req.accountName == null ? req.account.id() : req.accountName) + "”的主人确认。"
-                + "确认以前收款单照旧开着。");
+                + "确认以前这张账单还能付。");
     }
 }

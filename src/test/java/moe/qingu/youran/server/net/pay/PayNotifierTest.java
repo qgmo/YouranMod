@@ -50,9 +50,9 @@ class PayNotifierTest {
         public void onPaid(OrderInfo order, PaymentInfo payment) {
             if (failNext > 0) {
                 failNext--;
-                throw new IllegalStateException("收款方还没准备好（测试）");
+                throw new IllegalStateException("收款人还没准备好（测试）");
             }
-            assertNotNull(order, "onPaid 要带收款单");
+            assertNotNull(order, "onPaid 要带账单");
             assertEquals(payment.orderId, order.id);
             assertSame(OrderInfo.Status.PAID, order.status);
             got.add("paid " + payment.id);
@@ -62,7 +62,7 @@ class PayNotifierTest {
         public void onRefunded(PaymentInfo payment, String refundId, Amount refund) {
             if (failNext > 0) {
                 failNext--;
-                throw new IllegalStateException("收款方还没准备好（测试）");
+                throw new IllegalStateException("收款人还没准备好（测试）");
             }
             got.add("refund " + payment.id + " " + refundId + " " + refund.yuan);
         }
@@ -177,7 +177,7 @@ class PayNotifierTest {
             PayNotifier n2 = notifier(again);
             n2.kickAll();
             n2.tick();
-            assertEquals(Arrays.asList("paid " + p.payment.id, "paid " + p.payment.id), dado.got, "再发一次：收款方要按付款编号去重");
+            assertEquals(Arrays.asList("paid " + p.payment.id, "paid " + p.payment.id), dado.got, "再发一次：收款人要按付款编号去重");
             assertFalse(again.unnotified(p.payment.id));
             again.close();
             listeners.clear();

@@ -39,9 +39,9 @@ class IdYrClientTest {
         assertEquals(IdYrClient.Outcome.Status.PENDING, o.status);
         assertFalse(o.approved());
         // 验证身份：拒绝与不是本人说法一样（网站本来也分不出）
-        assertTrue(IdYrClient.reasonText("denied", true).contains("不是帐号本人"));
+        assertTrue(IdYrClient.reasonText("denied", true).contains("不是账号本人"));
         assertTrue(IdYrClient.reasonText("denied", false).contains("拒绝"));
-        assertTrue(IdYrClient.reasonText("whatever", false).contains("暂时不可用"));
+        assertTrue(IdYrClient.reasonText("whatever", false).contains("暂时用不了"));
     }
 
     /** 追加授权：类型、同意后结果里带新令牌 */

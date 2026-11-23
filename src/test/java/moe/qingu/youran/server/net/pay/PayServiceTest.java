@@ -103,10 +103,10 @@ class PayServiceTest {
     @Test
     void askText() {
         PayServer.Ask a = new PayServer.Ask("付款给 §c坏人" + new String(new char[50]).replace("\0", "长"),
-                java.util.Arrays.asList("收款方：A\u202e", new String(new char[100]).replace("\0", "字")), moe.qingu.youran.api.network.ConfirmRequest.Purpose.PAY);
+                java.util.Arrays.asList("收款人：A\u202e", new String(new char[100]).replace("\0", "字")), moe.qingu.youran.api.network.ConfirmRequest.Purpose.PAY);
         assertTrue(a.title.startsWith("付款给 坏人"), a.title);
         assertEquals(40, a.title.codePointCount(0, a.title.length()));
-        assertEquals("收款方：A", a.items.get(0));
+        assertEquals("收款人：A", a.items.get(0));
         assertEquals(80, a.items.get(1).length());
     }
 
@@ -143,7 +143,7 @@ class PayServiceTest {
 
     @Test
     void loginErrors() {
-        assertTrue(PayService.loginError("login_unavailable", "no_capability").contains("一键登录"));
+        assertTrue(PayService.loginError("login_unavailable", "no_capability").contains("不能用游戏角色登录"));
         assertTrue(PayService.loginError("access_denied", "timeout").contains("超时"));
         assertTrue(PayService.loginError("access_denied", null).contains("拒绝"));
     }

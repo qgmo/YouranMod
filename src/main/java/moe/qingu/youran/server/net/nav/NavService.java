@@ -401,11 +401,11 @@ final class NavService {
     private String index(Session s, String scheme, String msg) {
         StringBuilder b = new StringBuilder();
         if ("canceled".equals(msg)) {
-            b.append("<p class=\"err\">没有付款。</p>");
+            b.append("<p class=\"err\">你没有付款，广告没有上线。</p>");
         }
         b.append("<h1>在 180 上做广告</h1>\n");
         if (!env.payAvailable()) {
-            b.append("<p class=\"err\">付款服务 pay.yr 没开，暂停投放。</p>");
+            b.append("<p class=\"err\">pay.yr 现在用不了，暂时不能投放。</p>");
         }
         long tick = env.tick();
         b.append("<table class=\"list\"><tr><th>广告位</th><th>尺寸</th><th>价格 / 天</th><th>最早上线</th><th></th></tr>");
@@ -428,11 +428,11 @@ final class NavService {
             }
             b.append("<h3>我的广告</h3>");
             if ("security_on".equals(msg) || "security_off".equals(msg)) {
-                b.insert(0, "<p class=\"ok\">" + ("security_on".equals(msg) ? "已打开“操作前必须验证身份”。" : "已关闭“操作前必须验证身份”。") + "</p>");
+                b.insert(0, "<p class=\"ok\">" + ("security_on".equals(msg) ? "已打开“操作前验证身份”。" : "已关闭“操作前验证身份”。") + "</p>");
             }
             List<AdBook.Ad> mine = book.byOwner(s.player);
             if (mine.isEmpty()) {
-                b.append("<p class=\"gray\">还没有。</p>");
+                b.append("<p class=\"gray\">你还没有投放过广告。</p>");
             } else {
                 b.append("<table class=\"list\"><tr><th>编号</th><th>广告位</th><th>内容</th><th>状态</th></tr>");
                 for (AdBook.Ad a : mine) {
@@ -442,9 +442,9 @@ final class NavService {
                 b.append("</table>");
             }
             boolean on = book.verifyRequired(s.player);
-            b.append("<h3>帐号设置</h3><form method=\"post\" action=\"/account/security\"><div><input type=\"hidden\" name=\"csrf\" value=\"")
+            b.append("<h3>账号设置</h3><form method=\"post\" action=\"/account/security\"><div><input type=\"hidden\" name=\"csrf\" value=\"")
                     .append(NavPages.esc(s.csrf)).append("\" /><input type=\"hidden\" name=\"verify\" value=\"").append(on ? "0" : "1").append("\" />")
-                    .append("操作前必须验证身份：<b>").append(on ? "已打开" : "已关闭").append("</b> <input type=\"submit\" value=\"").append(on ? "关闭" : "打开")
+                    .append("操作前验证身份：<b>").append(on ? "已打开" : "已关闭").append("</b> <input type=\"submit\" value=\"").append(on ? "关闭" : "打开")
                     .append("\" /> <span class=\"small gray\">打开后投放、管理前要你本人确认。<a href=\"").append(NavPages.esc(NavPages.url(scheme, HELP, "/verify")))
                     .append("\">说明</a></span></div></form>\n");
         }
@@ -513,7 +513,7 @@ final class NavService {
                     .append(AdInput.MAX_TEXT).append(" 字</span></td></tr>");
         }
         b.append("<tr><th></th><td><input class=\"go2\" type=\"submit\" value=\"去付款\" /></td></tr></table></form>\n");
-        b.append("<p class=\"small gray\">付款后马上上线，先上后审。<a href=\"").append(NavPages.esc(NavPages.url(scheme, HELP, "/rules"))).append("\">广告规则</a></p>");
+        b.append("<p class=\"small gray\">付款后马上上线，管理员之后会检查。<a href=\"").append(NavPages.esc(NavPages.url(scheme, HELP, "/rules"))).append("\">广告规则</a></p>");
         return frame("投放", s, scheme, b.toString());
     }
 
@@ -533,7 +533,7 @@ final class NavService {
         // 画的图原样带回表单（看得懂的才带，带不回的不会是画板交上来的）
         String echo = DyePng.fromDataUrl(image) != null && image.length() < 200_000 ? image : "";
         if (!env.payAvailable()) {
-            return done(page(503, buyPage(s, scheme, slot, "付款服务 pay.yr 没开，暂停投放。", days, link, text, echo)));
+            return done(page(503, buyPage(s, scheme, slot, "pay.yr 现在用不了，暂时不能投放。", days, link, text, echo)));
         }
         if (!buyLimit.tryAcquire(s.player.toString(), now)) {
             return done(page(429, buyPage(s, scheme, slot, "提交太快了，过一会再试。", days, link, text, echo)));
@@ -598,7 +598,7 @@ final class NavService {
                 Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
                 book.cancelDraft(ad, System.currentTimeMillis());
                 LOG.warn("180.yr：给广告 #{} 开收款单失败：{}", ad.id, c == null ? "?" : c.toString());
-                return fail.page(new Failure(502, "开不了收款单：" + (c == null ? "?" : c.getMessage())));
+                return fail.page(new Failure(502, "没能发起付款：" + (c == null ? "请稍后再试" : c.getMessage())));
             }
             LOG.info("180.yr：{} 下单广告 #{}（{} {} 天）", s.name, ad.id, slot.code, days);
             return redirect(url);
@@ -960,7 +960,7 @@ final class NavService {
     private CompletableFuture<HttpResponse> start(HttpRequest r, Session s, boolean verify, String title, List<String> items,
                                                   Supplier<CompletableFuture<HttpResponse>> action, Refused refused) {
         if (id == null) {
-            return done(refused.page("验证不了身份（id.yr 没开）。", ""));
+            return done(refused.page("现在验证不了身份（id.yr 用不了），请稍后再试。", ""));
         }
         long now = System.currentTimeMillis();
         sweepGates(now);
@@ -1021,7 +1021,7 @@ final class NavService {
         if (c instanceof IdYrException) {
             IdYrException x = (IdYrException) c;
             LOG.warn("180.yr：向 {} 建验证请求失败：{}", id.domain(), x.getMessage());
-            return x.tokenExpired() ? "登录过期了，请重新登录。" : "验证不了身份（" + x.code + "）。";
+            return x.tokenExpired() ? "登录过期了，请重新登录。" : "现在验证不了身份，请稍后再试（" + x.code + "）。";
         }
         LOG.warn("180.yr：向 {} 建验证请求失败：{}", id == null ? "id.yr" : id.domain(), c == null ? "?" : c.toString());
         return "连不上 id.yr，请稍后再试。";
@@ -1034,7 +1034,7 @@ final class NavService {
     private CompletableFuture<HttpResponse> verified(HttpRequest r, Session s, String scheme, String gateId) {
         Gate g = gates.get(gateId);
         if (g == null || s == null || !g.sessionId.equals(s.id)) {
-            return done(page(404, frame("验证身份", s, scheme, "<p class=\"err\">这次验证已经结束或过期了，请回去重新操作。</p><p><a href=\"/\">回首页</a></p>")));
+            return done(page(404, frame("验证身份", s, scheme, "<p class=\"err\">这次验证已经结束或过期，请回去重新操作。</p><p><a href=\"/\">回首页</a></p>")));
         }
         String why = g.failed;
         if (why != null) {
@@ -1057,7 +1057,7 @@ final class NavService {
                 s.swap(out.token);
                 if (!s.scopes.contains(IdYrClient.VERIFY)) {
                     g.checking.set(false);
-                    return done(fail(s, g, "id.yr 没有给“验证身份”的授权。"));
+                    return done(fail(s, g, "id.yr 没有允许验证身份，请再试一次。"));
                 }
                 if (g.verify) {
                     // 授权有了，接着请本人验证身份（新的请求、新的框）
@@ -1075,14 +1075,14 @@ final class NavService {
 
     /** 追加授权没通过的说明 */
     static String scopeText(IdYrClient.Outcome out) {
-        return "denied".equals(out.reason) ? "在 id.yr 的确认框里没有同意。" : out.text(false);
+        return "denied".equals(out.reason) ? "你在确认框里没有同意。" : out.text(false);
     }
 
     /** 没通过时的“重新验证”：同一个操作、填的内容不变，重新向 id.yr 建请求（新的框） */
     private CompletableFuture<HttpResponse> retry(HttpRequest r, Session s, String scheme, String gateId) {
         Gate g = gates.get(gateId);
         if (g == null || s == null || !g.sessionId.equals(s.id)) {
-            return done(page(404, frame("验证身份", s, scheme, "<p class=\"err\">这次验证已经结束或过期了，请回去重新操作。</p><p><a href=\"/\">回首页</a></p>")));
+            return done(page(404, frame("验证身份", s, scheme, "<p class=\"err\">这次验证已经结束或过期，请回去重新操作。</p><p><a href=\"/\">回首页</a></p>")));
         }
         if (!s.csrf.equals(r.form().get("csrf"))) {
             return done(page(403, frame("页面过期了", s, scheme, "<p class=\"err\">页面过期了，请回去刷新后再试。</p>")));
@@ -1096,7 +1096,7 @@ final class NavService {
     }
 
     private HttpResponse waitingGate(Session s, String scheme, Gate g) {
-        return ok(NavPages.frame("验证身份", "广告平台", s.name, s.csrf, isAdmin(s), scheme, "<h1>等验证结果</h1><p>要在游戏弹出的确认框里确认。</p>"
+        return ok(NavPages.frame("验证身份", "广告平台", s.name, s.csrf, isAdmin(s), scheme, "<h1>等你确认</h1><p>请在游戏弹出的确认框里确认。</p>"
                 + "<p><a href=\"/verified/" + g.id + "\">刷新</a></p>", 2, "/verified/" + g.id));
     }
 
@@ -1113,7 +1113,7 @@ final class NavService {
             return done(page(403, frame("页面过期了", s, scheme, "<p class=\"err\">页面过期了，请回去刷新后再试。</p>")));
         }
         boolean on = "1".equals(r.form().get("verify"));
-        return start(r, s, !on, "关闭操作前验证身份", java.util.Arrays.asList("platform.180.yr 帐号：" + s.name, "关闭后，坐在这台电脑前的人就能操作"), () -> {
+        return start(r, s, !on, "关闭操作前验证身份", java.util.Arrays.asList("platform.180.yr 账号：" + s.name, "关闭后，坐在这台电脑前的人就能操作"), () -> {
             book.setVerifyRequired(s.player, on);
             LOG.info("180.yr：{} {}了“操作前必须验证身份”", s.name, on ? "打开" : "关闭");
             return done(redirect("/?msg=" + (on ? "security_on" : "security_off")));
@@ -1126,7 +1126,7 @@ final class NavService {
         String next = safeNext(r.queryParameters().get("next"));
         String scheme = r.secure ? "https" : "http";
         if (!env.idAvailable()) {
-            return page(503, frame("不能登录", null, scheme, "<p class=\"err\">这个服务器没开游戏角色一键登录（" + NavPages.esc(id.domain()) + "），暂时不能登录。</p>"));
+            return page(503, frame("不能登录", null, scheme, "<p class=\"err\">这个服务器没开游戏角色登录（" + NavPages.esc(id.domain()) + "），暂时不能登录。</p>"));
         }
         if (!loginLimit.tryAcquire(String.valueOf(r.remoteAddress), now)) {
             return page(429, frame("太快了", null, scheme, "<p class=\"err\">登录太频繁，请稍后再试。</p>"));
@@ -1148,10 +1148,10 @@ final class NavService {
             return done(page(400, frame("登录失败", null, scheme, "<p class=\"err\">这次登录过期了，请重新登录。</p><p><a href=\"/login\">重新登录</a></p>")));
         }
         if (!l.source.equals(r.remoteAddress)) {
-            return done(page(403, frame("登录失败", null, scheme, "<p class=\"err\">要在发起登录的那台电脑上完成。</p>")));
+            return done(page(403, frame("登录失败", null, scheme, "<p class=\"err\">登录要在点“登录”的那台电脑上完成。</p>")));
         }
         if (!id.issuerOk(q.get("iss"))) {
-            return done(page(400, frame("登录失败", null, scheme, "<p class=\"err\">登录服务对不上。</p>")));
+            return done(page(400, frame("登录失败", null, scheme, "<p class=\"err\">登录结果不是 id.yr 给的，没有登录。请重新登录。</p>")));
         }
         String again = "<p><a href=\"/login?next=" + NavPages.esc(IdYrClient.enc(l.next)) + "\">重新登录</a></p>";
         String err = q.get("error");
@@ -1160,13 +1160,13 @@ final class NavService {
         }
         String code = q.get("code");
         if (code == null || code.isEmpty()) {
-            return done(page(400, frame("登录失败", null, scheme, "<p class=\"err\">登录服务没给授权码。</p>" + again)));
+            return done(page(400, frame("登录失败", null, scheme, "<p class=\"err\">登录没有完成，请重新登录。</p>" + again)));
         }
         return id.exchange(l.scheme, code, l.verifier).handle((who, e) -> {
             if (who == null) {
                 Throwable c = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
                 LOG.warn("180.yr：向 {} 兑换授权码失败：{}", id.domain(), c == null ? "?" : c.toString());
-                return page(502, frame("登录失败", null, scheme, "<p class=\"err\">登录服务没响应，请重试。</p>" + again));
+                return page(502, frame("登录失败", null, scheme, "<p class=\"err\">id.yr 没有回应，请重新登录。</p>" + again));
             }
             if (sessions.size() >= MAX_SESSIONS) {
                 return page(503, frame("太忙了", null, scheme, "<p class=\"err\">现在太忙，请稍后再试。</p>"));
@@ -1191,9 +1191,9 @@ final class NavService {
                 }
                 return "你拒绝了登录。";
             case "temporarily_unavailable":
-                return "busy".equals(description) ? "你已经有一个确认框开着。" : "登录服务暂时不可用。";
+                return "busy".equals(description) ? "你已经有一个确认框开着。" : "id.yr 暂时用不了，请稍后再试。";
             default:
-                return "登录失败（" + error + "）。";
+                return "登录失败，请重新登录（" + error + "）。";
         }
     }
 

@@ -426,7 +426,7 @@ class NavServiceTest {
     @Test
     void verifyBeforeBuy() throws Exception {
         NavService.Session s = gatedService.addSession(alice, "Alice", System.currentTimeMillis());
-        assertTrue(text(send(gatedService, "GET", "platform.180.yr", "/", null, s, PC)).contains("操作前必须验证身份：<b>已关闭</b>"));
+        assertTrue(text(send(gatedService, "GET", "platform.180.yr", "/", null, s, PC)).contains("操作前验证身份：<b>已关闭</b>"));
         // 打开：id.yr 的同意框（追加授权 verify），不是验证身份
         HttpResponse r = send(gatedService, "POST", "platform.180.yr", "/account/security", "csrf=" + s.csrf + "&verify=1", s, PC);
         assertEquals(303, r.status);
@@ -467,7 +467,7 @@ class NavServiceTest {
         gate = fakeId.back();
         r = send(gatedService, "GET", "platform.180.yr", gate, null, s, PC);
         assertEquals(403, r.status);
-        assertTrue(text(r).contains("身份验证没有通过"), text(r));
+        assertTrue(text(r).contains("验证身份没有通过"), text(r));
         assertTrue(text(r).contains("value=\"" + img + "\""), "画的图带回表单");
         assertTrue(text(r).contains("value=\"好木头\""));
         assertTrue(text(r).contains("action=\"" + gate + "/again\"") && text(r).contains("重新验证"), "有“重新验证”");
@@ -505,7 +505,7 @@ class NavServiceTest {
         fakeId.next = new IdYrClient.Outcome(IdYrClient.Outcome.Status.PENDING, null, null);
         r = send(gatedService, "GET", "platform.180.yr", fakeId.back(), null, s, PC);
         assertEquals(200, r.status);
-        assertTrue(text(r).contains("等验证结果"));
+        assertTrue(text(r).contains("等你确认"));
         assertEquals(1, env.orders.size());
 
         // 建不了验证请求（登录过期）：不下单，填的带回

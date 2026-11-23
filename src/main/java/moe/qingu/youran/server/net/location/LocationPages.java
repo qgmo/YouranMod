@@ -17,7 +17,7 @@ final class LocationPages {
                 + "<h2>网站怎么要位置</h2>"
                 + "<p>在表单里放一个特殊的输入框（家具电脑的浏览器认得它）：</p>"
                 + "<pre>&lt;input type=\"x-yr-location\" name=\"loc\" value=\"你发的一次性随机数\" /&gt;</pre>"
-                + "<p>提交时浏览器先弹出系统确认框（在电脑屏幕之外，网页点不到），操作者同意后服务器签名，浏览器把证明全文放进这个字段提交；"
+                + "<p>提交时浏览器先弹出确认框（在电脑屏幕之外，网页点不到），操作者同意后服务器签名，浏览器把证明全文放进这个字段提交；"
                 + "没装定位模块、被拒绝等情况下字段的值是 <code>error:no_locator</code>、<code>error:denied</code> 这样的代号。</p>"
                 + "<h2>证明的格式</h2>"
                 + "<pre>youran-location-proof v1\ndimension=0\nx=120\ny=64\nz=-35\ndevice=fd12:3456:789a::c:4000:1e00\ntime=1763200000\n"

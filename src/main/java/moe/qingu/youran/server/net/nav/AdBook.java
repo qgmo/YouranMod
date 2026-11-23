@@ -581,7 +581,7 @@ final class AdBook {
                 try {
                     verify.add(UUID.fromString(e.getAsString()));
                 } catch (RuntimeException ex) {
-                    problems.add("跳过一条读不了的帐号设置：" + ex);
+                    problems.add("跳过一条读不了的账号设置：" + ex);
                 }
             }
         }

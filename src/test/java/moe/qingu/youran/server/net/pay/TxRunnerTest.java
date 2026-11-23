@@ -176,7 +176,7 @@ class TxRunnerTest {
         assertSame(TxRunner.Result.Status.PROCESSING, r.status);
         assertTrue(runner.processing(r.txId));
         assertSame(OrderInfo.Status.PAYING, ledger.order(o.id).status(T0));
-        assertTrue(ledger.balance(AccountRef.player(BOB)).isZero(), "没确认存盘前不记进收款方");
+        assertTrue(ledger.balance(AccountRef.player(BOB)).isZero(), "没确认存盘前不记进收款人");
         runner.tick();
         assertTrue(runner.processing(r.txId));
         world.persistFails = false;
