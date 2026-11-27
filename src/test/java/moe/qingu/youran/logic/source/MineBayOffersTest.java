@@ -35,6 +35,7 @@ class MineBayOffersTest {
             assertEquals(MineBayOffers.Tier.LOW, MineBayOffers.Tier.of(m), m.id);
         }
         assertEquals(MineBayOffers.Tier.MID, MineBayOffers.Tier.of(ChipModel.I8088));
+        assertEquals(MineBayOffers.Tier.MID, MineBayOffers.Tier.of(ChipModel.NIC_CTRL), "网卡控制芯片按中档（服主 11-27：同 8088）");
         assertEquals(MineBayOffers.Tier.HIGH, MineBayOffers.Tier.of(ChipModel.YR2000));
     }
 
@@ -52,14 +53,15 @@ class MineBayOffersTest {
             assertTrue(o.limited() && o.monthlyReset, o.id + " 按月整批重置");
             assertEquals("youranmod:photomask/" + o.model.id, o.id);
             assertNull(o.nameKey, "名字用物品自己的（各语言）");
-            int expect = o.model == ChipModel.YR2000 ? MineBayConfig.maskPriceHigh : o.model == ChipModel.I8088 ? MineBayConfig.maskPriceMid : MineBayConfig.maskPriceLow;
+            int expect = o.model == ChipModel.YR2000 ? MineBayConfig.maskPriceHigh
+                    : o.model == ChipModel.I8088 || o.model == ChipModel.NIC_CTRL ? MineBayConfig.maskPriceMid : MineBayConfig.maskPriceLow;
             assertEquals(expect, o.price, o.id);
         }
         assertEquals(ChipModel.values().length, seen.size(), "全部型号都有掩模卖");
         assertTrue(MineBayConfig.maskPriceLow < MineBayConfig.maskPriceMid && MineBayConfig.maskPriceMid < MineBayConfig.maskPriceHigh);
     }
 
-    /** 设计图便宜、不限量；底片三种不限量；ROM 镜像盘三种不限量；工具盘四张照服主 11-15（每天补） */
+    /** 设计图便宜、不限量；底片四种不限量；ROM 镜像盘三种不限量；工具盘四张照服主 11-15（每天补） */
     @Test
     void othersUnlimitedExceptToolDisks() {
         int designs = 0, films = 0, roms = 0, tools = 0;
@@ -95,7 +97,7 @@ class MineBayOffersTest {
             }
         }
         assertEquals(ChipModel.values().length, designs);
-        assertEquals(3, films, "普通电脑、个人电脑、汉卡三种底片（家具电脑主板没有底片）");
+        assertEquals(4, films, "普通电脑、个人电脑、汉卡、ISA 扩展卡四种底片（家具电脑主板没有底片）");
         assertEquals(3, roms);
         assertEquals(4, tools);
         int[] prices = new int[4], perMonth = new int[4];

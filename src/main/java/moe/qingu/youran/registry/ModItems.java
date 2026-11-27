@@ -80,6 +80,8 @@ public final class ModItems {
     /** 外设（服主 11-15；接口见 api.peripheral）：5.25 英寸软驱（个人电脑出厂带一个）、汉卡（普通电脑出厂带一块） */
     public static Item floppyDrive;
     public static Item hanziCard;
+    /** 个人电脑的 ISA 网卡（2.3.1.0 第 1 期；外设种类 nic_pc，不能堆叠） */
+    public static moe.qingu.youran.item.ItemNicCard nicPc;
     /** 光刻（服主 11-15 / 11-16）：负胶链的环化橡胶、叠氮化钠粉；汞灯的玻璃管两档、钨棒、掺钍阴极棒、汞灯（配方见 recipe.LithoRecipes）；掩模、芯片设计图、芯片 */
     public static Item cyclizedRubber;
     public static Item sodiumAzideDust;
@@ -193,6 +195,8 @@ public final class ModItems {
         hanziCard = add(registry, new moe.qingu.youran.item.ItemHanziCard("hanzi_card", Peripherals.KIND_HANZI));
         Peripherals.register(floppyDrive);
         Peripherals.register(hanziCard);
+        nicPc = (moe.qingu.youran.item.ItemNicCard) add(registry, new moe.qingu.youran.item.ItemNicCard("nic_pc", Peripherals.KIND_NIC_PC));
+        Peripherals.register(nicPc);
         Peripherals.register(locatorModule);
         Peripherals.register(identityModule);
         cyclizedRubber = add(registry, new moe.qingu.youran.item.ItemLangTooltip("cyclized_rubber", 64));

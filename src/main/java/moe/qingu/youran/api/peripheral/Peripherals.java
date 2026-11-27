@@ -35,6 +35,12 @@ public final class Peripherals {
      * 物品是 YouranMod 的 {@code identity_module}
      */
     public static final String KIND_IDENTITY = "identity";
+    /**
+     * 个人电脑的 ISA 网卡（2.3.1.0 第 1 期）：装上后电脑接进游戏内网络（地址按电脑那一格分）。物品是 YouranMod 的 {@code nic_pc}，
+     * 带 {@code Board} 数据（{@code api.pcb.BoardNbt}），规格由网卡控制芯片的品质现算（{@code api.pcb.NicSpec}）。079 服务里占 I/O 300h–31Fh、
+     * IRQ 3、选项 ROM C800，软中断 INT F8h
+     */
+    public static final String KIND_NIC_PC = "nic_pc";
     /** 能力：这台电脑能报出自己的位置（定位模块） */
     public static final String CAP_LOCATION = "location";
     /** 能力：这台电脑能替它的操作者签操作者证明（身份模块，见 {@code api.network.identity.OperatorProofs}） */

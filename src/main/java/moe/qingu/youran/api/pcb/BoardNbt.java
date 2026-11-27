@@ -16,10 +16,13 @@ import java.util.List;
  *  Cpu:{芯片 NBT},                         // CPU（普通电脑 Z80、个人电脑 8088、家具电脑 YR-2000）
  *  Rom:{芯片 NBT…, Content:{RomContent}},   // ROM：掩模 ROM 或 EPROM（EPROM 另有 Eprom:1b、Window:{玻璃管}）
  *  Ram:[{芯片 NBT}, …],                     // 4164：普通电脑 6 颗、个人电脑 20 颗
- *  Font:[{芯片 NBT} ×4]}                    // 汉卡：字库 ROM 1–4
+ *  Font:[{芯片 NBT} ×4],                   // 汉卡：字库 ROM 1–4
+ *  Ctrl:{芯片 NBT}}                        // ISA 扩展卡：控制芯片（网卡控制芯片；装哪种就是哪种卡）
  * </pre>
  * 芯片 NBT 同光刻机出来的芯片（{@code item.ChipNbt}，带 {@code Model}）。
  * 家具电脑主板（{@code Type:"furniture"}，服主 11-16）只有 {@code Cpu}（YR-2000），没有 ROM、内存。
+ * ISA 扩展卡（{@code Type:"isa"}，2.3.1.0 第 1 期）只有 {@code Ctrl}：网卡控制芯片（个人电脑网卡 {@code nic_pc}）；卡的规格不存，
+ * 由这颗芯片的品质现算（{@link NicSpec}）。
  */
 public final class BoardNbt {
     public static final String TAG = "Board";
@@ -31,6 +34,8 @@ public final class BoardNbt {
     public static final String ROM_WINDOW = "Window";
     public static final String RAM = "Ram";
     public static final String FONT = "Font";
+    /** ISA 扩展卡的控制芯片 */
+    public static final String CTRL = "Ctrl";
 
     private BoardNbt() {
     }
@@ -67,6 +72,21 @@ public final class BoardNbt {
     public static ChipModel[] fonts(BoardType t) {
         return t == BoardType.HANZI ? new ChipModel[]{ChipModel.FONT_ROM_1, ChipModel.FONT_ROM_2, ChipModel.FONT_ROM_3, ChipModel.FONT_ROM_4}
                 : new ChipModel[0];
+    }
+
+    /** 这种板子能装的控制芯片（ISA 扩展卡：网卡控制芯片；以后的加密协处理器也加在这里）；别的板子没有 */
+    public static ChipModel[] controllers(BoardType t) {
+        return t == BoardType.ISA ? new ChipModel[]{ChipModel.NIC_CTRL} : new ChipModel[0];
+    }
+
+    public static boolean hasController(NBTTagCompound b) {
+        return b.hasKey(CTRL, 10);
+    }
+
+    /** 装着的控制芯片的型号；没装时 null */
+    @Nullable
+    public static ChipModel controllerModel(NBTTagCompound b) {
+        return hasController(b) ? ChipModel.byId(b.getCompoundTag(CTRL).getString(ChipModel.TAG)) : null;
     }
 
     /** 正版 ROM 的内容 id（同掩模 ROM 型号 id）：普通电脑监控程序、个人电脑 BIOS */
@@ -127,6 +147,9 @@ public final class BoardNbt {
         }
         if (t == BoardType.HANZI) {
             return fontCount(b) == fonts(t).length;
+        }
+        if (controllers(t).length > 0) {
+            return hasController(b);
         }
         return (cpu(t) == null || hasCpu(b)) && (romMask(t) == null || hasRom(b)) && ram(b) == ramCount(t);
     }
@@ -223,6 +246,13 @@ public final class BoardNbt {
                     rom.setTag(ROM_CONTENT, RomContent.mask(p.model.id));
                 }
                 b.setTag(ROM, rom);
+            } else if (java.util.Arrays.asList(controllers(t)).contains(p.model)) {
+                if (hasController(b)) {
+                    return null;
+                }
+                NBTTagCompound c = p.chip.copy();
+                c.setString(ChipModel.TAG, p.model.id);
+                b.setTag(CTRL, c);
             } else if (java.util.Arrays.asList(fonts(t)).contains(p.model)) {
                 NBTTagList l = b.getTagList(FONT, 10);
                 for (int i = 0; i < l.tagCount(); i++) {

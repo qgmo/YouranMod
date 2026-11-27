@@ -83,6 +83,20 @@ public final class CreativeStandards {
         return done == null ? b : done;
     }
 
+    /** 装齐了标准芯片的扩展卡（ISA 扩展卡：标准品质的网卡控制芯片） */
+    public static NBTTagCompound card(BoardType type) {
+        java.util.List<BoardNbt.Part> parts = new java.util.ArrayList<>();
+        for (ChipModel m : BoardNbt.controllers(type)) {
+            parts.add(new BoardNbt.Part(m, chip(m)));
+            break;
+        }
+        for (ChipModel m : BoardNbt.fonts(type)) {
+            parts.add(new BoardNbt.Part(m, chip(m)));
+        }
+        NBTTagCompound done = parts.isEmpty() ? null : BoardNbt.install(BoardNbt.empty(type), parts);
+        return done == null ? BoardNbt.empty(type) : done;
+    }
+
     /** 标准空白 EPROM 的 NBT：标准 2764 芯片 + 石英小窗（3 个 9），没烧过 */
     public static NBTTagCompound eprom() {
         NBTTagCompound t = new NBTTagCompound();
