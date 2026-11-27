@@ -303,4 +303,74 @@ class TcpConnectionTest {
         assertEquals(0, client.connectionCount());
         assertFalse(sink.error != null);
     }
+
+    /**
+     * 对方通告零窗口、一直回确认但不收（像 079 上的程序很久不读）：探测照退避一直发，不因为探测没确认而断开
+     * （RFC 1122 第 4.2.2.17 节）；窗口开了以后探测的那 1 字节马上重发，不等重传计时器。对方由测试手工扮演（Java 栈自己不会通告 0）。
+     */
+    @Test
+    void zeroWindowProbingKeepsTheConnectionAndResumesAtOnce() {
+        TestLink link = new TestLink();
+        NetStack client = link.host("fd00::a");
+        long[] peer = {0, 0}; // 对方的 ISS + 1、确认到的序号
+        int[] window = {0};
+        List<TcpSegment> got = new ArrayList<>();
+        link.filter = raw -> {
+            TcpSegment seg = tcpOf(raw);
+            if (seg == null || !Ipv6Packet.destinationOf(raw).equals(B)) {
+                return 0L;
+            }
+            got.add(seg);
+            TcpSegment reply;
+            if (seg.has(TcpSegment.SYN)) {
+                peer[0] = 5001;
+                peer[1] = (seg.seq + 1) & 0xFFFFFFFFL;
+                reply = new TcpSegment(80, seg.sourcePort, 5000, peer[1], TcpSegment.SYN | TcpSegment.ACK, window[0], 1220, new byte[0]);
+            } else if (window[0] == 0) {
+                // 零窗口：数据不收，回确认报窗口 0
+                reply = new TcpSegment(80, seg.sourcePort, peer[0], peer[1], TcpSegment.ACK, 0, -1, new byte[0]);
+            } else {
+                if (seg.seq == peer[1]) {
+                    peer[1] = (peer[1] + seg.data.length) & 0xFFFFFFFFL;
+                }
+                reply = new TcpSegment(80, seg.sourcePort, peer[0], peer[1], TcpSegment.ACK, window[0], -1, new byte[0]);
+            }
+            byte[] back = reply.toPacket(B, A).encode();
+            link.loop.schedule(() -> client.receive(back), 1);
+            return null;
+        };
+        CompletableFuture<TcpConnection> f = client.connect(null, B, 80, new Sink());
+        link.loop.advance(50);
+        TcpConnection c = get(f);
+        byte[] payload = pattern(3000);
+        c.write(payload);
+        // 半小时，远超 MAX_RETRIES 次重传的时间
+        link.loop.advance(30 * 60_000L);
+        assertEquals(TcpConnection.State.ESTABLISHED, c.state(), "对方一直回确认，零窗口不该断开");
+        long probes = got.stream().filter(g -> g.data.length == 1).count();
+        assertTrue(probes > TcpConnection.MAX_RETRIES, "探测发了 " + probes + " 次");
+        // 窗口开了：对方发一个窗口更新
+        window[0] = 65535;
+        got.clear();
+        long una = peer[1];
+        byte[] update = new TcpSegment(80, c.localPort(), peer[0], peer[1], TcpSegment.ACK, 65535, -1, new byte[0]).toPacket(B, A).encode();
+        client.receive(update);
+        link.loop.advance(1);
+        assertFalse(got.isEmpty(), "窗口开了马上就发，不等重传计时器");
+        assertEquals(una, got.get(0).seq, "先重发探测的那 1 字节（没确认的最早那段）");
+        link.loop.advance(5000);
+        assertEquals(3000, sentTotal(got), "窗口开了以后 3000 字节都发出去了");
+        assertEquals((una + 3000) & 0xFFFFFFFFL, peer[1], "对方按序全收到了");
+    }
+
+    private static long sentTotal(List<TcpSegment> segs) {
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        long n = 0;
+        for (TcpSegment g : segs) {
+            if (g.data.length > 0 && seen.add(g.seq)) {
+                n += g.data.length;
+            }
+        }
+        return n;
+    }
 }

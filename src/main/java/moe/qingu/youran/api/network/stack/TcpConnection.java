@@ -92,6 +92,9 @@ public final class TcpConnection {
     private long srtt = -1;
     private long rttvar;
     private int retries;
+    /** 零窗口后把没确认的数据放回待发（{@link #processAck}）：放回的部分到哪里为止，发它们时按重传算 */
+    private boolean rewound;
+    private long rewoundEnd;
     private EventLoop.Timer retransmitTimer;
     private EventLoop.Timer timeWaitTimer;
     private boolean closedNotified;
@@ -394,10 +397,39 @@ public final class TcpConnection {
             armTimer();
         }
         // 窗口更新（RFC 9293 第 3.10.7.4 节的 SND.WL1 / SND.WL2）
+        long oldWnd = sndWnd;
         if (ge(s.ack, sndUna) && (lt(sndWl1, s.seq) || (sndWl1 == s.seq && le(sndWl2, s.ack)))) {
             sndWnd = s.window;
             sndWl1 = s.seq;
             sndWl2 = s.ack;
+        }
+        if (ge(s.ack, sndUna) && !unacked.isEmpty() && !finAcked) {
+            if (sndWnd == 0) {
+                // 零窗口：对方还在回确认，探测没确认不算失败，不因此断开（RFC 1122 第 4.2.2.17 节、RFC 9293 第 3.8.6.1 节）；
+                // 探测间隔照旧按退避增长（封顶 RTO_MAX）
+                retries = 0;
+            } else if (oldWnd == 0) {
+                // 窗口开了：从没确认的地方（零窗口探测的那 1 字节）起马上重发，不等重传计时器；
+                // 没确认的数据放回待发的最前面，和后面的数据合成整段发（同 079 的网卡固件）
+                cancelRetransmit();
+                backoff = 0;
+                retransmissions++;
+                stack.tcpRetransmits++;
+                if (!finSent) {
+                    rewoundEnd = sndNxt;
+                    rewound = true;
+                    for (Iterator<Sent> back = unacked.descendingIterator(); back.hasNext(); ) {
+                        pending.addFirst(back.next().data);
+                    }
+                    unacked.clear();
+                    sndNxt = sndUna;
+                } else {
+                    Sent first = unacked.peekFirst();
+                    first.retransmitted = true;
+                    transmit(first);
+                    armTimer();
+                }
+            }
         }
         if (finAcked) {
             switch (state) {
@@ -583,7 +615,14 @@ public final class TcpConnection {
             }
             int n = (int) Math.min(Math.min(sndMss, pending.size()), can);
             Sent s = new Sent(sndNxt, pending.take(n), 0);
+            if (rewound) {
+                // 零窗口后重发的那部分：Karn 算法不拿它取样
+                s.retransmitted = lt(s.seq, rewoundEnd);
+            }
             sndNxt = (sndNxt + n) & MASK;
+            if (rewound && ge(sndNxt, rewoundEnd)) {
+                rewound = false;
+            }
             unacked.add(s);
             transmit(s);
         }
@@ -755,6 +794,20 @@ public final class TcpConnection {
 
         int size() {
             return size;
+        }
+
+        /** 放回最前面（零窗口后重发没确认的数据） */
+        void addFirst(byte[] b) {
+            if (b.length == 0) {
+                return;
+            }
+            if (head > 0) {
+                byte[] c = chunks.pollFirst();
+                chunks.addFirst(java.util.Arrays.copyOfRange(c, head, c.length));
+                head = 0;
+            }
+            chunks.addFirst(b);
+            size += b.length;
         }
 
         byte[] take(int n) {

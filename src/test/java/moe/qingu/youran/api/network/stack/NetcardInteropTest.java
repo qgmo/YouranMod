@@ -180,7 +180,7 @@ class NetcardInteropTest {
     /**
      * 零窗口：a（Java 栈）往 b 发 300 字节；b 的收缓冲 256 字节、程序先不读，窗口到 0。Java 栈的接收窗口固定 65535、不会通告 0，所以 b 用 Java 的
      * {@link TcpSegment} 编码照 RFC 9293 手工回（窗口为 0 时收到的数据不收、回 ACK；乱序的先存着、回重复 ACK）。
-     * Java 栈的零窗口探测是 1 字节新数据，窗口打开后从探测之后接着发，探测的那 1 字节等重传计时器补上（这一段记的就是这个样子）。
+     * Java 栈的零窗口探测是 1 字节新数据（079 发的是不带数据的 ACK，两种都合 RFC 9293）；窗口打开后从没确认的那 1 字节起马上合成整段重发。
      */
     static Scenario tcpZeroWindow() {
         Scenario sc = new Scenario("tcp_zero_window", A, B, "b", 256);
@@ -441,7 +441,7 @@ class NetcardInteropTest {
             for (String p : r.run()) {
                 all.add(sc.name + "：" + p);
             }
-            // 已知差异只该出现在零窗口那一段（Java 栈的零窗口探测是 1 字节新数据，见 Replayer#knownDifference）
+            // 已知差异只该出现在零窗口那一段（Java 栈的零窗口探测是 1 字节新数据、079 是空 ACK，见 Replayer#knownDifference）
             if (!r.known.isEmpty() && !sc.name.equals("tcp_zero_window")) {
                 all.add(sc.name + "：不该有的已知差异 " + r.known);
             }

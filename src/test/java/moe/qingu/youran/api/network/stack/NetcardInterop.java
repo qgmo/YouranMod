@@ -551,7 +551,7 @@ final class NetcardInterop {
             log.add("期望 " + e + "\n实际 " + a);
             if (!e.equals(a)) {
                 if (knownDifference(e, a)) {
-                    known.add("窗口打开后从探测之后接着发：期望 " + e + "，实际 " + a);
+                    known.add("零窗口探测的样子不同：期望 " + e + "，实际 " + a);
                 } else {
                     problems.add("回应不一样：\n  期望（" + subject + "）" + e + "\n  实际（Java）" + a);
                 }
@@ -561,10 +561,9 @@ final class NetcardInterop {
         }
 
         /**
-         * 已知差异（2.3.1.0 第 1 期互通时发现，记在实现记录里，等改 Java 栈时再定）：Java 栈的零窗口探测是 1 字节<b>新数据</b>（{@code TcpConnection#trySend}），
-         * 而且在对端通告 0 窗口时马上发、按重传计时器重发；窗口打开后接着探测<b>之后</b>的字节发，探测的那 1 字节等重传补。Go 的 netcard 探测发
-         * SND.UNA−1 的空 ACK，窗口打开后从 SND.UNA 发。对端（netcard 当接收方）两种都能处理（窗口为 0 时不收探测、回 ACK；乱序的先存着），
-         * 只是 Java 一侧窗口打开后要等一次重传。这里只在“这一段的数据加上之前发过的探测字节，与期望的数据逐字节一样、没有数据的包一样”时放过。
+         * 已知差异（2.3.1.0 第 1 期互通时发现）：Java 栈的零窗口探测是 1 字节<b>新数据</b>（{@code TcpConnection#trySend}），在对端通告 0 窗口时马上发、
+         * 按重传计时器重发；Go 的 netcard 探测发 SND.UNA−1 的空 ACK。两种都合 RFC 9293，对端两种都能处理。窗口打开后两边都从 SND.UNA 起马上合成整段发
+         * （Java 栈 11-27 起照这样改了）。这里只在“这一段的数据加上之前发过的探测字节，与期望的数据逐字节一样、没有数据的包一样”时放过。
          */
         boolean knownDifference(List<String> e, List<String> a) {
             if (act.probeBytes.isEmpty()) {
