@@ -2,6 +2,7 @@ package moe.qingu.youran.item;
 
 import moe.qingu.youran.api.pcb.BoardNbt;
 import moe.qingu.youran.api.pcb.NicSpec;
+import moe.qingu.youran.logic.litho.ChipModel;
 import moe.qingu.youran.logic.pcb.BoardType;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.client.util.ITooltipFlag;
@@ -17,15 +18,21 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /**
- * 个人电脑的 ISA 网卡（外设，种类 {@code nic_pc}；2.3.1.0 第 1 期）：打好孔的 ISA 扩展卡光板 + 网卡控制芯片，在工程师装配台“扩展卡”蓝图上装，
- * 一次一块。芯片的品质数据记进 NBT 的 {@code Board}（{@link BoardNbt}，{@code Type:"isa"}、{@code Ctrl}）；规格（同时连接数、缓冲区）
- * 不存，每次由芯片品质现算（{@link NicSpec}）。每块芯片都不一样，所以不能堆叠。
+ * 网卡（外设）：个人电脑的 ISA 网卡（种类 {@code nic_pc}；2.3.1.0 第 1 期）= 打好孔的 ISA 扩展卡光板 + 网卡控制芯片；普通电脑的网卡
+ * （种类 {@code nic_computer}；第 5 期）= 打好孔的 Z80 扩展卡光板 + 网卡控制芯片 + 一颗驱动 ROM（普通电脑网卡驱动 ROM 或 2764 EPROM）。
+ * 在工程师装配台“扩展卡”蓝图上装，一次一块。芯片的品质数据记进 NBT 的 {@code Board}（{@link BoardNbt}，{@code Type}、{@code Ctrl}、
+ * Z80 扩展卡另有 {@code Rom}）；规格（同时连接数、缓冲区）不存，每次由芯片品质现算（{@link NicSpec}）。每块芯片都不一样，所以不能堆叠。
  * <p>
- * 插进个人电脑的外设槽，电脑就接进游戏内网络（079 服务里是 I/O 300h、IRQ 3、INT F8h 的那块卡）。
+ * 插进电脑的外设槽，电脑就接进游戏内网络（079 服务里个人电脑是 I/O 300h、IRQ 3、INT F8h 的那块卡，普通电脑是 60h–67h 口的那块，
+ * 卡上的驱动 ROM 是一块只读的盘）。驱动 ROM 不对时网卡照常能用，只是那块盘照 ROM 里实际的东西显示。
  */
 public class ItemNicCard extends ItemPeripheral {
-    public ItemNicCard(String name, String kind) {
+    /** 用哪种光板（ISA 扩展卡、Z80 扩展卡） */
+    public final BoardType board;
+
+    public ItemNicCard(String name, String kind, BoardType board) {
         super(name, kind);
+        this.board = board;
         setMaxStackSize(1);
     }
 
@@ -42,7 +49,7 @@ public class ItemNicCard extends ItemPeripheral {
     public void getSubItems(CreativeTabs tab, NonNullList<ItemStack> items) {
         // 创造物品栏给一块装着标准品质网卡控制芯片的（同别的芯片的“标准”变种）
         if (isInCreativeTab(tab)) {
-            items.add(make(CreativeStandards.card(BoardType.ISA)));
+            items.add(make(CreativeStandards.card(board, ChipModel.NIC_CTRL)));
         }
     }
 

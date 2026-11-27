@@ -80,6 +80,19 @@ class ChipModelTest {
         assertEquals("tls_coproc", ChipModel.TLS_COPROC.layoutId());
     }
 
+    /** 普通电脑网卡驱动 ROM（2.3.1.0 第 5 期，计划附录 26）：元数据 14，8 KB 掩模 ROM，3 μm、6 层（负胶做得了，同 BIOS ROM 那一类），250 ns */
+    @Test
+    void z80NetDriverRom() {
+        assertEquals(14, ChipModel.ROM_Z80NET.meta);
+        assertSame(ChipModel.ROM_Z80NET, ChipModel.byMeta(14));
+        assertSame(ChipModel.ROM_Z80NET, ChipModel.byId("z80net_rom"));
+        assertEquals(3.0, ChipModel.ROM_Z80NET.nodeUm);
+        assertEquals(6, ChipModel.ROM_Z80NET.layers);
+        assertTrue(ChipModel.ROM_Z80NET.isRom());
+        assertEquals(250, ChipModel.accessNs(ChipModel.ROM_Z80NET.ratedKHz));
+        assertEquals("z80net_rom", ChipModel.ROM_Z80NET.layoutId());
+    }
+
     /** 额定 150 ns ≈ 6.67 MHz */
     @Test
     void ramRatedAccessTime() {

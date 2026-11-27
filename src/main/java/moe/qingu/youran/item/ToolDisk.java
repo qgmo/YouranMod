@@ -5,7 +5,8 @@ package moe.qingu.youran.item;
  * 只能在 MineBay 买（{@code compat.minebay.MineBayListings} 上架），代码里用 {@link ItemFloppyDisk#toolDisk} 生成。
  * <ul>
  *     <li>工具盘（服主 11-15）：BASIC、汇编、C、Forth 四张；网络工具盘（服主 11-27，第五张）；</li>
- *     <li>正版 ROM 镜像盘（服主 11-16）：普通电脑的监控程序（4 KB）、个人电脑的 BIOS（8 KB）、激光对准控制程序（8 KB），
+ *     <li>正版 ROM 镜像盘（服主 11-16）：普通电脑的监控程序（4 KB）、个人电脑的 BIOS（8 KB）、激光对准控制程序（8 KB）、
+ *     普通电脑网卡的驱动 ROM（8 KB，2.3.1.0 第 5 期），
  *     买到后玩家自己在电脑里用 EPROM 烧录器烧。</li>
  * </ul>
  */
@@ -25,7 +26,9 @@ public enum ToolDisk {
     /** 个人电脑的 BIOS（BIOS.ROM，8192 字节，和 079 服务的 F000:E000–FFFF 一样） */
     BIOS_ROM("bios", "PC-BIOS", true),
     /** 激光对准控制程序（ALIGN.ROM，8192 字节，和 {@link moe.qingu.youran.api.pcb.LaserAlignProgram} 的镜像一样） */
-    ALIGN_ROM("align", "ALIGNCTL", true);
+    ALIGN_ROM("align", "ALIGNCTL", true),
+    /** 普通电脑网卡的驱动 ROM（Z80NET.ROM，8192 字节，同 079 服务的 machine.NetROM；2.3.1.0 第 5 期：16 绿宝石、不限量，同另三张） */
+    Z80NET_ROM("z80net", "Z80NET", true);
 
     /** 079 服务里的镜像名 */
     public final String image;

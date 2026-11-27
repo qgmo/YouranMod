@@ -90,11 +90,17 @@ public final class CreativeStandards {
         return card(type, BoardNbt.controllers(type).length > 0 ? BoardNbt.controllers(type)[0] : null);
     }
 
-    /** 装齐了标准芯片的扩展卡，控制芯片是 ctrl（ISA 扩展卡：网卡控制芯片或加密协处理器；没有控制芯片的板子给 null） */
+    /**
+     * 装齐了标准芯片的扩展卡，控制芯片是 ctrl（ISA / Z80 扩展卡：网卡控制芯片或加密协处理器；没有控制芯片的板子给 null）。
+     * 要 ROM 的（普通电脑网卡）另装一颗这种板子的掩模 ROM（出厂的正版驱动）
+     */
     public static NBTTagCompound card(BoardType type, ChipModel ctrl) {
         java.util.List<BoardNbt.Part> parts = new java.util.ArrayList<>();
         if (ctrl != null) {
             parts.add(new BoardNbt.Part(ctrl, chip(ctrl)));
+            if (type == BoardType.Z80 && ctrl == ChipModel.NIC_CTRL) {
+                parts.add(new BoardNbt.Part(BoardNbt.romMask(type), chip(BoardNbt.romMask(type))));
+            }
         }
         for (ChipModel m : BoardNbt.fonts(type)) {
             parts.add(new BoardNbt.Part(m, chip(m)));

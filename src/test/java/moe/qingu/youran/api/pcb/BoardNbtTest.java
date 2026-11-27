@@ -74,6 +74,36 @@ class BoardNbtTest {
         assertNull(BoardNbt.install(b, rams(1)));
     }
 
+    /**
+     * Z80 扩展卡（2.3.1.0 第 5 期）：网卡控制芯片 + 驱动 ROM（掩模 ROM 是正版、EPROM 记烧进去的）才装齐（普通电脑网卡）；
+     * 加密协处理器不带 ROM 才装齐（普通电脑加密卡）；别的 ROM 不进这个座；ISA 扩展卡没有 ROM 座
+     */
+    @Test
+    void z80Cards() {
+        NBTTagCompound nic = BoardNbt.install(BoardNbt.empty(BoardType.Z80), Collections.singletonList(chip(ChipModel.NIC_CTRL, "N1")));
+        assertNotNull(nic);
+        assertTrue(BoardNbt.needsRom(nic));
+        assertFalse(BoardNbt.complete(nic), "网卡少一颗驱动 ROM");
+        assertNull(BoardNbt.install(nic, Collections.singletonList(chip(ChipModel.ROM_BIOS, "B"))), "BIOS 不进网卡的 ROM 座");
+        NBTTagCompound mask = BoardNbt.install(nic, Collections.singletonList(chip(ChipModel.ROM_Z80NET, "R")));
+        assertTrue(BoardNbt.complete(mask));
+        assertTrue(RomContent.genuine(BoardNbt.romContent(mask), BoardNbt.genuineRom(BoardType.Z80), -1, null));
+        assertEquals(ChipModel.NIC_CTRL, BoardNbt.controllerModel(mask));
+        NBTTagCompound eprom = BoardNbt.install(nic, Collections.singletonList(
+                new BoardNbt.Part(ChipModel.EPROM_2764, new NBTTagCompound(), true, RomContent.image(new byte[8192]), null)));
+        assertTrue(BoardNbt.complete(eprom), "EPROM 也收（任何内容都能装）");
+        assertEquals(8192, BoardNbt.romContent(eprom).getInteger(RomContent.TAG_LEN));
+        NBTTagCompound tls = BoardNbt.install(BoardNbt.empty(BoardType.Z80), Collections.singletonList(chip(ChipModel.TLS_COPROC, "T1")));
+        assertTrue(BoardNbt.complete(tls), "加密卡不带 ROM");
+        assertFalse(BoardNbt.needsRom(tls));
+        NBTTagCompound tlsRom = BoardNbt.install(tls, Collections.singletonList(chip(ChipModel.ROM_Z80NET, "R")));
+        assertFalse(tlsRom != null && BoardNbt.complete(tlsRom), "加密卡带 ROM 装不成");
+        NBTTagCompound isa = BoardNbt.install(BoardNbt.empty(BoardType.ISA), Collections.singletonList(chip(ChipModel.NIC_CTRL, "N2")));
+        assertTrue(BoardNbt.complete(isa));
+        assertNull(BoardNbt.install(isa, Collections.singletonList(chip(ChipModel.ROM_Z80NET, "R"))), "ISA 扩展卡没有 ROM 座");
+        assertEquals(5, BoardType.Z80.id);
+    }
+
     @Test
     void hanzi() {
         NBTTagCompound b = BoardNbt.empty(BoardType.HANZI);

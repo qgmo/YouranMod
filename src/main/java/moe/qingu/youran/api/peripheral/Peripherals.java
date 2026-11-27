@@ -47,6 +47,13 @@ public final class Peripherals {
      * 选项 ROM CA00，软中断 INT F9h
      */
     public static final String KIND_TLS_PC = "tls_pc";
+    /**
+     * 普通电脑（Z80）的网卡（2.3.1.0 第 5 期）：物品是 YouranMod 的 {@code nic_computer}，带 {@code Board} 数据（Z80 扩展卡：网卡控制芯片 +
+     * 驱动 ROM）。079 服务里占 Z80 扩展总线的端口 60h–67h；卡上的驱动 ROM 是一块只读的盘（NET.BBC 等），插上卡电脑就多一个盘符
+     */
+    public static final String KIND_NIC_COMPUTER = "nic_computer";
+    /** 普通电脑（Z80）的加密卡（2.3.1.0 第 5 期）：物品是 {@code tls_computer}，同 {@link #KIND_TLS_PC} 带卡号；079 服务里占端口 68h–6Fh */
+    public static final String KIND_TLS_COMPUTER = "tls_computer";
     /** 能力：这台电脑能报出自己的位置（定位模块） */
     public static final String CAP_LOCATION = "location";
     /** 能力：这台电脑能替它的操作者签操作者证明（身份模块，见 {@code api.network.identity.OperatorProofs}） */

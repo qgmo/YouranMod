@@ -84,6 +84,9 @@ public final class ModItems {
     public static moe.qingu.youran.item.ItemNicCard nicPc;
     /** 个人电脑的 ISA 加密卡（2.3.1.0 第 4 期；外设种类 tls_pc，不能堆叠，带卡号） */
     public static moe.qingu.youran.item.ItemTlsCard tlsPc;
+    /** 普通电脑的网卡与加密卡（2.3.1.0 第 5 期；外设种类 nic_computer / tls_computer，Z80 扩展卡光板，不能堆叠；加密卡带卡号） */
+    public static moe.qingu.youran.item.ItemNicCard nicComputer;
+    public static moe.qingu.youran.item.ItemTlsCard tlsComputer;
     /** 光刻（服主 11-15 / 11-16）：负胶链的环化橡胶、叠氮化钠粉；汞灯的玻璃管两档、钨棒、掺钍阴极棒、汞灯（配方见 recipe.LithoRecipes）；掩模、芯片设计图、芯片 */
     public static Item cyclizedRubber;
     public static Item sodiumAzideDust;
@@ -197,10 +200,18 @@ public final class ModItems {
         hanziCard = add(registry, new moe.qingu.youran.item.ItemHanziCard("hanzi_card", Peripherals.KIND_HANZI));
         Peripherals.register(floppyDrive);
         Peripherals.register(hanziCard);
-        nicPc = (moe.qingu.youran.item.ItemNicCard) add(registry, new moe.qingu.youran.item.ItemNicCard("nic_pc", Peripherals.KIND_NIC_PC));
+        nicPc = (moe.qingu.youran.item.ItemNicCard) add(registry, new moe.qingu.youran.item.ItemNicCard("nic_pc", Peripherals.KIND_NIC_PC,
+                moe.qingu.youran.logic.pcb.BoardType.ISA));
         Peripherals.register(nicPc);
-        tlsPc = (moe.qingu.youran.item.ItemTlsCard) add(registry, new moe.qingu.youran.item.ItemTlsCard("tls_pc", Peripherals.KIND_TLS_PC));
+        tlsPc = (moe.qingu.youran.item.ItemTlsCard) add(registry, new moe.qingu.youran.item.ItemTlsCard("tls_pc", Peripherals.KIND_TLS_PC,
+                moe.qingu.youran.logic.pcb.BoardType.ISA));
         Peripherals.register(tlsPc);
+        nicComputer = (moe.qingu.youran.item.ItemNicCard) add(registry, new moe.qingu.youran.item.ItemNicCard("nic_computer", Peripherals.KIND_NIC_COMPUTER,
+                moe.qingu.youran.logic.pcb.BoardType.Z80));
+        Peripherals.register(nicComputer);
+        tlsComputer = (moe.qingu.youran.item.ItemTlsCard) add(registry, new moe.qingu.youran.item.ItemTlsCard("tls_computer", Peripherals.KIND_TLS_COMPUTER,
+                moe.qingu.youran.logic.pcb.BoardType.Z80));
+        Peripherals.register(tlsComputer);
         Peripherals.register(locatorModule);
         Peripherals.register(identityModule);
         cyclizedRubber = add(registry, new moe.qingu.youran.item.ItemLangTooltip("cyclized_rubber", 64));

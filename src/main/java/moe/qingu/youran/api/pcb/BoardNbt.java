@@ -23,6 +23,8 @@ import java.util.List;
  * 家具电脑主板（{@code Type:"furniture"}，服主 11-16）只有 {@code Cpu}（YR-2000），没有 ROM、内存。
  * ISA 扩展卡（{@code Type:"isa"}，2.3.1.0 第 1 期）只有 {@code Ctrl}：网卡控制芯片（个人电脑网卡 {@code nic_pc}）或加密协处理器
  * （个人电脑加密卡 {@code tls_pc}，第 4 期）；卡的规格不存，由这颗芯片的品质现算（{@link NicSpec}、{@link TlsSpec}）。
+ * Z80 扩展卡（{@code Type:"z80"}，第 5 期）：{@code Ctrl} 是网卡控制芯片时另有 {@code Rom}（驱动 ROM：普通电脑网卡驱动 ROM 或 2764 EPROM，
+ * 内容同主板的 {@code Content}）——普通电脑网卡 {@code nic_computer}；{@code Ctrl} 是加密协处理器时没有 ROM——普通电脑加密卡 {@code tls_computer}。
  */
 public final class BoardNbt {
     public static final String TAG = "Board";
@@ -51,10 +53,25 @@ public final class BoardNbt {
         return t == BoardType.COMPUTER ? 6 : t == BoardType.PC ? 20 : 0;
     }
 
-    /** 这种主板的 ROM 槽认的掩模 ROM（EPROM 也认）；没有 ROM 槽（汉卡、家具电脑主板）时 null */
+    /**
+     * 这种板子的 ROM 座认的掩模 ROM（EPROM 也认）；没有 ROM 座（汉卡、家具电脑主板、ISA 扩展卡）时 null。Z80 扩展卡的 ROM 座是网卡的驱动 ROM
+     * （2.3.1.0 第 5 期；只有装网卡控制芯片的才要，见 {@link #needsRom}）
+     */
     @Nullable
     public static ChipModel romMask(BoardType t) {
-        return t == BoardType.COMPUTER ? ChipModel.ROM_MONITOR : t == BoardType.PC ? ChipModel.ROM_BIOS : null;
+        return t == BoardType.COMPUTER ? ChipModel.ROM_MONITOR : t == BoardType.PC ? ChipModel.ROM_BIOS : t == BoardType.Z80 ? ChipModel.ROM_Z80NET : null;
+    }
+
+    /**
+     * 装了这些芯片的板子要不要 ROM：主板要（监控程序、BIOS）；Z80 扩展卡装网卡控制芯片（普通电脑网卡）要一颗驱动 ROM，装加密协处理器（加密卡）
+     * 不要、也不能装（计划附录 26：加密卡的功能都在 NET.BBC 里）；别的板子没有 ROM 座
+     */
+    public static boolean needsRom(NBTTagCompound b) {
+        BoardType t = type(b);
+        if (t == null || romMask(t) == null) {
+            return false;
+        }
+        return t != BoardType.Z80 || controllerModel(b) == ChipModel.NIC_CTRL;
     }
 
     /**
@@ -74,9 +91,9 @@ public final class BoardNbt {
                 : new ChipModel[0];
     }
 
-    /** 这种板子能装的控制芯片（ISA 扩展卡：网卡控制芯片；以后的加密协处理器也加在这里）；别的板子没有 */
+    /** 这种板子能装的控制芯片（ISA 扩展卡、Z80 扩展卡：网卡控制芯片或加密协处理器，装哪种就是哪种卡）；别的板子没有 */
     public static ChipModel[] controllers(BoardType t) {
-        return t == BoardType.ISA ? new ChipModel[]{ChipModel.NIC_CTRL, ChipModel.TLS_COPROC} : new ChipModel[0];
+        return t == BoardType.ISA || t == BoardType.Z80 ? new ChipModel[]{ChipModel.NIC_CTRL, ChipModel.TLS_COPROC} : new ChipModel[0];
     }
 
     public static boolean hasController(NBTTagCompound b) {
@@ -149,7 +166,7 @@ public final class BoardNbt {
             return fontCount(b) == fonts(t).length;
         }
         if (controllers(t).length > 0) {
-            return hasController(b);
+            return hasController(b) && needsRom(b) == hasRom(b);
         }
         return (cpu(t) == null || hasCpu(b)) && (romMask(t) == null || hasRom(b)) && ram(b) == ramCount(t);
     }

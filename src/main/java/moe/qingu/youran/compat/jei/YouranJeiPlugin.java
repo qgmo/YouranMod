@@ -147,6 +147,8 @@ public final class YouranJeiPlugin implements IModPlugin {
         registry.addIngredientInfo(new ItemStack(ModItems.identityModule), VanillaTypes.ITEM, "youranmod.jei.identity_module.info");
         registry.addIngredientInfo(new ItemStack(ModItems.nicPc), VanillaTypes.ITEM, "youranmod.jei.nic_pc.info");
         registry.addIngredientInfo(new ItemStack(ModItems.tlsPc), VanillaTypes.ITEM, "youranmod.jei.tls_pc.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.nicComputer), VanillaTypes.ITEM, "youranmod.jei.nic_computer.info");
+        registry.addIngredientInfo(new ItemStack(ModItems.tlsComputer), VanillaTypes.ITEM, "youranmod.jei.tls_computer.info");
         // DUV 一档（服主 11-16）：怎么充气、怎么用；配比只给“预计输出”，不写最佳配比（要玩家自己调）
         registry.addIngredientInfo(new ItemStack(ModItems.arfLaserCavity), VanillaTypes.ITEM, "youranmod.jei.arf_laser_cavity.info");
         registry.addIngredientInfo(new ItemStack(ModItems.heneLaserTube), VanillaTypes.ITEM, "youranmod.jei.hene_laser_tube.info");

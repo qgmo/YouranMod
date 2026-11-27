@@ -3,7 +3,7 @@ package moe.qingu.youran.logic.pcb;
 import javax.annotation.Nullable;
 
 /**
- * 线路板的种类（服主 11-16）：每种一张线路底片（固定型号，底片不消耗）。普通电脑、个人电脑各一种主板，汉卡一种扩展卡，个人电脑的 ISA 扩展卡一种（网卡等）。
+ * 线路板的种类（服主 11-16）：每种一张线路底片（固定型号，底片不消耗）。普通电脑、个人电脑各一种主板，汉卡一种扩展卡，个人电脑的 ISA 扩展卡、普通电脑的 Z80 扩展卡各一种（网卡、加密卡）。
  * {@link #id} 是元数据（底片、板子、主板都按它区分），定了不改，新种类往后加。
  * <p>
  * 家具电脑主板（{@link #FURNITURE}）没有自己的线路：用打好孔的个人电脑光板，只装一片 YR-2000（不另做底片、光板，
@@ -25,7 +25,12 @@ public enum BoardType {
      * ISA 扩展卡（2.3.1.0 第 1 期）：个人电脑的扩展卡光板，网卡与以后的 HTTPS 加密卡共用（计划附录 10：线路板按总线分，
      * 装哪种控制芯片就是哪种卡；{@code PcbStage} 每道工序只有 8 个种类位置）。装网卡控制芯片是网卡 {@code nic_pc}，装加密协处理器是加密卡 {@code tls_pc}（第 4 期）
      */
-    ISA(4, "isa", false, null);
+    ISA(4, "isa", false, null),
+    /**
+     * Z80 扩展卡（2.3.1.0 第 5 期）：普通电脑的扩展卡光板，网卡与加密卡共用（计划附录 10：线路板按总线分）。装网卡控制芯片 + 一颗驱动 ROM
+     * （普通电脑网卡驱动 ROM 或 2764 EPROM）是普通电脑网卡 {@code nic_computer}，只装加密协处理器是普通电脑加密卡 {@code tls_computer}
+     */
+    Z80(5, "z80", false, null);
 
     public final int id;
     public final String name;
@@ -47,7 +52,7 @@ public enum BoardType {
         return blank == null ? this : blank;
     }
 
-    /** 有自己的线路（底片、涂胶曝光蚀刻打孔的各道工序）的种类：普通电脑、个人电脑、汉卡、ISA 扩展卡 */
+    /** 有自己的线路（底片、涂胶曝光蚀刻打孔的各道工序）的种类：普通电脑、个人电脑、汉卡、ISA 扩展卡、Z80 扩展卡 */
     public static BoardType[] circuits() {
         java.util.List<BoardType> l = new java.util.ArrayList<>();
         for (BoardType t : values()) {

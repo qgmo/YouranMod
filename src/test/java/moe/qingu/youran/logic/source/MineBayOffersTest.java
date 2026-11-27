@@ -31,7 +31,7 @@ class MineBayOffersTest {
     @Test
     void tiers() {
         for (ChipModel m : new ChipModel[]{ChipModel.Z80, ChipModel.DRAM_4164, ChipModel.ROM_MONITOR, ChipModel.ROM_BIOS, ChipModel.EPROM_2764,
-                ChipModel.FONT_ROM_1, ChipModel.FONT_ROM_2, ChipModel.FONT_ROM_3, ChipModel.FONT_ROM_4, ChipModel.ROM_LASER_ALIGN}) {
+                ChipModel.FONT_ROM_1, ChipModel.FONT_ROM_2, ChipModel.FONT_ROM_3, ChipModel.FONT_ROM_4, ChipModel.ROM_LASER_ALIGN, ChipModel.ROM_Z80NET}) {
             assertEquals(MineBayOffers.Tier.LOW, MineBayOffers.Tier.of(m), m.id);
         }
         assertEquals(MineBayOffers.Tier.MID, MineBayOffers.Tier.of(ChipModel.I8088));
@@ -63,7 +63,7 @@ class MineBayOffersTest {
         assertTrue(MineBayConfig.maskPriceLow < MineBayConfig.maskPriceMid && MineBayConfig.maskPriceMid < MineBayConfig.maskPriceHigh);
     }
 
-    /** 设计图便宜、不限量；底片四种不限量；ROM 镜像盘三种不限量；工具盘四张照服主 11-15、第五张网络工具盘照服主 11-27（每天补） */
+    /** 设计图便宜、不限量；底片五种不限量；ROM 镜像盘四种不限量（2.3.1.0 第 5 期加普通电脑网卡驱动 ROM，16 绿宝石）；工具盘四张照服主 11-15、第五张网络工具盘照服主 11-27（每天补） */
     @Test
     void othersUnlimitedExceptToolDisks() {
         int designs = 0, films = 0, roms = 0, tools = 0;
@@ -99,8 +99,8 @@ class MineBayOffersTest {
             }
         }
         assertEquals(ChipModel.values().length, designs);
-        assertEquals(4, films, "普通电脑、个人电脑、汉卡、ISA 扩展卡四种底片（家具电脑主板没有底片）");
-        assertEquals(3, roms);
+        assertEquals(5, films, "普通电脑、个人电脑、汉卡、ISA 扩展卡、Z80 扩展卡五种底片（家具电脑主板没有底片）");
+        assertEquals(4, roms);
         assertEquals(5, tools);
         int[] prices = new int[5], perMonth = new int[5];
         int i = 0;
@@ -133,6 +133,8 @@ class MineBayOffersTest {
         assertTrue(ids.contains("youranmod:rom_disk/monitor"));
         assertTrue(ids.contains("youranmod:rom_disk/bios"));
         assertTrue(ids.contains("youranmod:rom_disk/align"));
+        assertTrue(ids.contains("youranmod:rom_disk/z80net"));
+        assertTrue(ids.contains("youranmod:pcb_film/z80"));
         assertTrue(ids.contains("youranmod:tool_disk/basic"));
         assertTrue(ids.contains("youranmod:tool_disk/network"), "网络工具盘（079 服务的镜像 network）");
         assertTrue(MineBayOffers.CAT_CHIPMAKING_NAME.length() <= 8 && MineBayOffers.CAT_SOFTWARE_NAME.length() <= 8, "MineBay 分类名 1–8 个字");

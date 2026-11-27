@@ -21,7 +21,8 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /**
- * 个人电脑的 ISA 加密卡（外设，种类 {@code tls_pc}；2.3.1.0 第 4 期）：打好孔的 ISA 扩展卡光板 + 加密协处理器，在工程师装配台“扩展卡”蓝图上装，
+ * 加密卡（外设）：个人电脑的 ISA 加密卡（种类 {@code tls_pc}；2.3.1.0 第 4 期）= 打好孔的 ISA 扩展卡光板 + 加密协处理器；普通电脑的加密卡
+ * （种类 {@code tls_computer}；第 5 期）= 打好孔的 Z80 扩展卡光板 + 加密协处理器（不带 ROM）。在工程师装配台“扩展卡”蓝图上装，
  * 一次一块。芯片的品质数据记进 NBT 的 {@code Board}（{@link BoardNbt}，{@code Type:"isa"}、{@code Ctrl}）；规格不存，由芯片品质现算
  * （{@link TlsSpec}）。另有卡号 {@code CardId}：卡里的私钥（A 方式）与证书链按卡号存在游戏服务器，不进物品 NBT，卡换到哪台电脑都跟着走。
  * 卡号照软盘盘号的办法在服务端分配（{@link TlsCardIds}）。每块芯片都不一样，所以不能堆叠。
@@ -29,8 +30,12 @@ import java.util.List;
  * 插进个人电脑的外设槽，程序就能经 INT F9h 做 TLS（HTTPS）：卡是 TLS 引擎，不碰网络，字节由程序在网卡与它之间搬。
  */
 public class ItemTlsCard extends ItemPeripheral {
-    public ItemTlsCard(String name, String kind) {
+    /** 用哪种光板（ISA 扩展卡：个人电脑的 {@code tls_pc}；Z80 扩展卡：普通电脑的 {@code tls_computer}，2.3.1.0 第 5 期） */
+    public final BoardType board;
+
+    public ItemTlsCard(String name, String kind, BoardType board) {
         super(name, kind);
+        this.board = board;
         setMaxStackSize(1);
     }
 
@@ -82,7 +87,7 @@ public class ItemTlsCard extends ItemPeripheral {
     public void getSubItems(CreativeTabs tab, NonNullList<ItemStack> items) {
         // 创造物品栏给一块装着标准品质加密协处理器的（拿到物品栏里才分配卡号）
         if (isInCreativeTab(tab)) {
-            items.add(make(CreativeStandards.card(BoardType.ISA, ChipModel.TLS_COPROC)));
+            items.add(make(CreativeStandards.card(board, ChipModel.TLS_COPROC)));
         }
     }
 
