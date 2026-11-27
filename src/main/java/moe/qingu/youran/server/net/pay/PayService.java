@@ -404,7 +404,7 @@ final class PayService {
                 if ("no_operator".equals(description)) {
                     return "这台电脑现在没人操作，不能用游戏角色登录。";
                 }
-                return "这台电脑不能用游戏角色登录（或者认不出是哪台电脑），所以不能在这里登录 pay.yr、不能付款。";
+                return "这台电脑没有身份模块，不能用游戏角色登录，所以不能在这里登录 pay.yr、不能付款。";
             case "access_denied":
                 if ("timeout".equals(description)) {
                     return "确认框超时了，没有登录。";

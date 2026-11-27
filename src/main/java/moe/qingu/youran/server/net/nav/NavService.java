@@ -1190,7 +1190,7 @@ final class NavService {
     static String loginError(String error, String description) {
         switch (error) {
             case "login_unavailable":
-                return "no_operator".equals(description) ? "这台电脑现在没人操作。" : "这台电脑不能用游戏角色登录。";
+                return "no_operator".equals(description) ? "这台电脑现在没人操作。" : "这台电脑没有身份模块，不能用游戏角色登录。";
             case "access_denied":
                 if ("timeout".equals(description)) {
                     return "确认框超时了。";

@@ -397,7 +397,7 @@ public class IdYrClient {
     public static String loginErrorText(String error, String description) {
         switch (error) {
             case "login_unavailable":
-                return "no_operator".equals(description) ? "这台电脑现在没人操作，不能登录。" : "这台电脑不能用游戏角色登录。";
+                return "no_operator".equals(description) ? "这台电脑现在没人操作，不能登录。" : "这台电脑没有身份模块，不能用游戏角色登录。";
             case "access_denied":
                 if ("timeout".equals(description)) {
                     return "确认框超时了，没有登录。";
@@ -426,7 +426,7 @@ public class IdYrClient {
             case "no_operator":
                 return "这台电脑现在没人操作。";
             case "no_capability":
-                return "这台电脑弹不出 id.yr 的确认框。";
+                return "这台电脑没有身份模块，弹不出 id.yr 的确认框。";
             case "busy":
                 return "已经有一个确认框开着，先处理那个。";
             case "expired":
