@@ -27,7 +27,7 @@ import java.util.List;
  *     内存（4164，一次 1–5 颗）。装齐 = 普通电脑 Z80 + 6 颗 4164 + 监控程序 ROM，个人电脑 8088 + 20 颗 4164 + BIOS ROM；
  *     家具电脑主板（服主 11-16）= 打好孔的个人电脑光板 + 1 片 YR-2000，不插 ROM、内存，一次装齐；</li>
  *     <li>“扩展卡”（{@value #EXPANSION}）：打好孔的汉卡光板 + 字库 ROM 1–4 → 汉卡（一次装齐）；打好孔的 ISA 扩展卡光板 + 网卡控制芯片 →
- *     个人电脑网卡（2.3.1.0 第 1 期）。以后别的扩展卡也加在这张蓝图上：打好孔的那种光板 + 它的 ROM 等芯片 → 那种卡。</li>
+ *     个人电脑网卡（2.3.1.0 第 1 期）；打好孔的 ISA 扩展卡光板 + 加密协处理器 → 个人电脑加密卡（第 4 期）。以后别的扩展卡也加在这张蓝图上：打好孔的那种光板 + 它的 ROM 等芯片 → 那种卡。</li>
  * </ul>
  * 一次一块，芯片的品质数据都记进产物（{@link BoardNbt}），由 {@link BlueprintOutputs} 现算。
  */
@@ -87,6 +87,10 @@ public final class BoardAssembly {
         BlueprintCraftingRecipe.addRecipe(EXPANSION, ModItems.nicPc.make(BoardNbt.empty(BoardType.ISA)),
                 new ItemStack(ModItems.pcb, 1, PcbStage.punched(BoardType.ISA)), ModItems.chip.make(ChipModel.NIC_CTRL));
         n++;
+        // 个人电脑加密卡（2.3.1.0 第 4 期）：打好孔的 ISA 扩展卡光板 + 加密协处理器
+        BlueprintCraftingRecipe.addRecipe(EXPANSION, ModItems.tlsPc.make(BoardNbt.empty(BoardType.ISA)),
+                new ItemStack(ModItems.pcb, 1, PcbStage.punched(BoardType.ISA)), ModItems.chip.make(ChipModel.TLS_COPROC));
+        n++;
         YouranMod.LOG.info("已加沉浸工程装配台蓝图“主板”“扩展卡”：{} 条", n);
     }
 
@@ -135,8 +139,9 @@ public final class BoardAssembly {
             return ItemStack.EMPTY;
         }
         if (type == BoardType.ISA) {
-            // 装哪种控制芯片就是哪种卡（现在只有网卡）
-            return BoardNbt.controllerModel(done) == ChipModel.NIC_CTRL ? ModItems.nicPc.make(done) : ItemStack.EMPTY;
+            // 装哪种控制芯片就是哪种卡：网卡控制芯片 → 网卡，加密协处理器 → 加密卡
+            ChipModel ctrl = BoardNbt.controllerModel(done);
+            return ctrl == ChipModel.NIC_CTRL ? ModItems.nicPc.make(done) : ctrl == ChipModel.TLS_COPROC ? ModItems.tlsPc.make(done) : ItemStack.EMPTY;
         }
         if (type == BoardType.HANZI) {
             ItemStack card = new ItemStack(ModItems.hanziCard);

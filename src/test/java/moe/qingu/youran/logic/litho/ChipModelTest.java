@@ -23,8 +23,8 @@ class ChipModelTest {
     }
 
     /**
-     * 型号按物品元数据区分（服主 11-16）：每型一个元数据，不重、定了不改；除了 DUV 一档的 YR-2000（0.13 μm，要 ArF 光源 + 改良正胶），
-     * 都是负胶（2.5 μm）做得了的
+     * 型号按物品元数据区分（服主 11-16）：每型一个元数据，不重、定了不改；除了 DUV 一档的 YR-2000（0.13 μm，要 ArF 光源 + 改良正胶）
+     * 与加密协处理器（2 μm，要正胶、石英汞灯；服主 11-27），都是负胶（2.5 μm）做得了的
      */
     @Test
     void metasAreStableAndUnique() {
@@ -32,7 +32,7 @@ class ChipModelTest {
         for (ChipModel m : ChipModel.values()) {
             assertTrue(seen.add(m.meta), "元数据重复：" + m);
             assertSame(m, ChipModel.byMeta(m.meta));
-            assertTrue(m == ChipModel.YR2000 || m.nodeUm >= 2.5, "负胶做不了：" + m);
+            assertTrue(m == ChipModel.YR2000 || m == ChipModel.TLS_COPROC || m.nodeUm >= 2.5, "负胶做不了：" + m);
         }
         assertEquals(10, ChipModel.YR2000.meta);
         assertEquals(11, ChipModel.ROM_LASER_ALIGN.meta);
@@ -64,6 +64,20 @@ class ChipModelTest {
         assertFalse(ChipModel.NIC_CTRL.isCpu());
         assertFalse(ChipModel.NIC_CTRL.isRom());
         assertEquals("nic_ctrl", ChipModel.NIC_CTRL.layoutId());
+    }
+
+    /** 加密协处理器（2.3.1.0 第 4 期，服主 11-27 选 A）：元数据 13，2 μm、8 层（要正胶、石英汞灯），额定时钟 16 MHz，是控制芯片 */
+    @Test
+    void tlsCoprocessor() {
+        assertEquals(13, ChipModel.TLS_COPROC.meta);
+        assertSame(ChipModel.TLS_COPROC, ChipModel.byMeta(13));
+        assertSame(ChipModel.TLS_COPROC, ChipModel.byId("tls_coproc"));
+        assertEquals(2.0, ChipModel.TLS_COPROC.nodeUm);
+        assertEquals(8, ChipModel.TLS_COPROC.layers);
+        assertEquals(16000, ChipModel.TLS_COPROC.ratedKHz);
+        assertTrue(ChipModel.TLS_COPROC.isController());
+        assertFalse(ChipModel.TLS_COPROC.isCpu());
+        assertEquals("tls_coproc", ChipModel.TLS_COPROC.layoutId());
     }
 
     /** 额定 150 ns ≈ 6.67 MHz */

@@ -36,6 +36,7 @@ class MineBayOffersTest {
         }
         assertEquals(MineBayOffers.Tier.MID, MineBayOffers.Tier.of(ChipModel.I8088));
         assertEquals(MineBayOffers.Tier.MID, MineBayOffers.Tier.of(ChipModel.NIC_CTRL), "网卡控制芯片按中档（服主 11-27：同 8088）");
+        assertEquals(MineBayOffers.Tier.MID, MineBayOffers.Tier.of(ChipModel.TLS_COPROC), "加密协处理器按中档（服主 11-27）");
         assertEquals(MineBayOffers.Tier.HIGH, MineBayOffers.Tier.of(ChipModel.YR2000));
     }
 
@@ -54,7 +55,8 @@ class MineBayOffersTest {
             assertEquals("youranmod:photomask/" + o.model.id, o.id);
             assertNull(o.nameKey, "名字用物品自己的（各语言）");
             int expect = o.model == ChipModel.YR2000 ? MineBayConfig.maskPriceHigh
-                    : o.model == ChipModel.I8088 || o.model == ChipModel.NIC_CTRL ? MineBayConfig.maskPriceMid : MineBayConfig.maskPriceLow;
+                    : o.model == ChipModel.I8088 || o.model == ChipModel.NIC_CTRL || o.model == ChipModel.TLS_COPROC ? MineBayConfig.maskPriceMid
+                    : MineBayConfig.maskPriceLow;
             assertEquals(expect, o.price, o.id);
         }
         assertEquals(ChipModel.values().length, seen.size(), "全部型号都有掩模卖");

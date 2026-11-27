@@ -21,8 +21,8 @@ import java.util.List;
  * </pre>
  * 芯片 NBT 同光刻机出来的芯片（{@code item.ChipNbt}，带 {@code Model}）。
  * 家具电脑主板（{@code Type:"furniture"}，服主 11-16）只有 {@code Cpu}（YR-2000），没有 ROM、内存。
- * ISA 扩展卡（{@code Type:"isa"}，2.3.1.0 第 1 期）只有 {@code Ctrl}：网卡控制芯片（个人电脑网卡 {@code nic_pc}）；卡的规格不存，
- * 由这颗芯片的品质现算（{@link NicSpec}）。
+ * ISA 扩展卡（{@code Type:"isa"}，2.3.1.0 第 1 期）只有 {@code Ctrl}：网卡控制芯片（个人电脑网卡 {@code nic_pc}）或加密协处理器
+ * （个人电脑加密卡 {@code tls_pc}，第 4 期）；卡的规格不存，由这颗芯片的品质现算（{@link NicSpec}、{@link TlsSpec}）。
  */
 public final class BoardNbt {
     public static final String TAG = "Board";
@@ -76,7 +76,7 @@ public final class BoardNbt {
 
     /** 这种板子能装的控制芯片（ISA 扩展卡：网卡控制芯片；以后的加密协处理器也加在这里）；别的板子没有 */
     public static ChipModel[] controllers(BoardType t) {
-        return t == BoardType.ISA ? new ChipModel[]{ChipModel.NIC_CTRL} : new ChipModel[0];
+        return t == BoardType.ISA ? new ChipModel[]{ChipModel.NIC_CTRL, ChipModel.TLS_COPROC} : new ChipModel[0];
     }
 
     public static boolean hasController(NBTTagCompound b) {

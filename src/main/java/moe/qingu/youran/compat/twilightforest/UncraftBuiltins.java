@@ -10,8 +10,8 @@ public final class UncraftBuiltins {
 
     /** 本服的数据与障碍物品：不让拆，也不让别的配方把它们拆出来 */
     static final String[] OWN_ITEMS = {
-            // 芯片线：芯片（品质在 NBT）、EPROM（带芯片数据）、主板、汉卡与网卡（Board 数据）、光板（打孔有概率打坏）、底片、掩模（只能买或找）
-            "youranmod:chip", "youranmod:eprom", "youranmod:motherboard", "youranmod:hanzi_card", "youranmod:nic_pc", "youranmod:pcb", "youranmod:pcb_film",
+            // 芯片线：芯片（品质在 NBT）、EPROM（带芯片数据）、主板、汉卡、网卡与加密卡（Board 数据；加密卡另有卡号）、光板（打孔有概率打坏）、底片、掩模（只能买或找）
+            "youranmod:chip", "youranmod:eprom", "youranmod:motherboard", "youranmod:hanzi_card", "youranmod:nic_pc", "youranmod:tls_pc", "youranmod:pcb", "youranmod:pcb_film",
             "youranmod:photomask",
             // 晶圆（纯度、铸模在 NBT）与掺杂铸模
             "youranmod:silicon_wafer", "youranmod:precision_silicon_wafer", "youranmod:scrap_silicon_wafer",

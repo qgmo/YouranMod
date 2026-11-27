@@ -43,7 +43,9 @@ public final class CreativeStandards {
         in.model = model;
         in.waferNines = Purity.WAFER_GRADE_NINES;
         in.mold = WaferMold.GOLD;
-        in.resist = model.nodeUm < ResistType.POSITIVE.resolutionUm ? ResistType.IMPROVED_POSITIVE : ResistType.NEGATIVE;
+        // 负胶做不了的用正胶（加密协处理器 2 μm），正胶也做不了的用改良正胶（YR-2000）
+        in.resist = model.nodeUm < ResistType.POSITIVE.resolutionUm ? ResistType.IMPROVED_POSITIVE
+                : model.nodeUm < ResistType.NEGATIVE.resolutionUm ? ResistType.POSITIVE : ResistType.NEGATIVE;
         in.lampResolutionUm = model.nodeUm < ResistType.POSITIVE.resolutionUm ? ResistType.IMPROVED_POSITIVE.resolutionUm
                 : in.lampResolutionUm;
         in.pack = ChipPackage.IRON;
@@ -85,10 +87,14 @@ public final class CreativeStandards {
 
     /** 装齐了标准芯片的扩展卡（ISA 扩展卡：标准品质的网卡控制芯片） */
     public static NBTTagCompound card(BoardType type) {
+        return card(type, BoardNbt.controllers(type).length > 0 ? BoardNbt.controllers(type)[0] : null);
+    }
+
+    /** 装齐了标准芯片的扩展卡，控制芯片是 ctrl（ISA 扩展卡：网卡控制芯片或加密协处理器；没有控制芯片的板子给 null） */
+    public static NBTTagCompound card(BoardType type, ChipModel ctrl) {
         java.util.List<BoardNbt.Part> parts = new java.util.ArrayList<>();
-        for (ChipModel m : BoardNbt.controllers(type)) {
-            parts.add(new BoardNbt.Part(m, chip(m)));
-            break;
+        if (ctrl != null) {
+            parts.add(new BoardNbt.Part(ctrl, chip(ctrl)));
         }
         for (ChipModel m : BoardNbt.fonts(type)) {
             parts.add(new BoardNbt.Part(m, chip(m)));

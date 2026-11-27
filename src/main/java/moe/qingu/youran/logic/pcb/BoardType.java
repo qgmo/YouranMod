@@ -23,7 +23,7 @@ public enum BoardType {
     FURNITURE(3, "furniture", true, PC),
     /**
      * ISA 扩展卡（2.3.1.0 第 1 期）：个人电脑的扩展卡光板，网卡与以后的 HTTPS 加密卡共用（计划附录 10：线路板按总线分，
-     * 装哪种控制芯片就是哪种卡；{@code PcbStage} 每道工序只有 8 个种类位置）。现在只装网卡控制芯片，装出来是网卡 {@code nic_pc}
+     * 装哪种控制芯片就是哪种卡；{@code PcbStage} 每道工序只有 8 个种类位置）。装网卡控制芯片是网卡 {@code nic_pc}，装加密协处理器是加密卡 {@code tls_pc}（第 4 期）
      */
     ISA(4, "isa", false, null);
 

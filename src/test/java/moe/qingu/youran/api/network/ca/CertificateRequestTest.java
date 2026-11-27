@@ -87,6 +87,20 @@ class CertificateRequestTest {
         assertArrayEquals(pub("ec-p256.pub.pem", "EC").getEncoded(), r.subjectPublicKeyInfo());
     }
 
+    /**
+     * 079 服务里加密卡（个人电脑 tls_pc，Go 的 crypto/x509）出的 CSR（2.3.1.0 第 4 期验收）：卡用固定的测试密钥出、名字两个，
+     * 读得出、签名对、CN 是第一个名字、SAN 是全部名字、公钥就是卡的。资源与 079 服务 tlscard/testdata/interop 里的是同一份
+     */
+    @Test
+    void readsTlsCardCsr() throws Exception {
+        CertificateRequest r = CertificateRequest.parse(der("tlscard-p256.csr"));
+        assertEquals("SHA256withECDSA", r.signatureAlgorithm);
+        assertEquals("pc.test.yr", r.commonName);
+        assertEquals(Arrays.asList("pc.test.yr", "www.pc.test.yr"), r.dnsNames);
+        assertEquals(pub("tlscard-p256.pub.pem", "EC"), r.publicKey);
+        assertArrayEquals(pub("tlscard-p256.pub.pem", "EC").getEncoded(), r.subjectPublicKeyInfo());
+    }
+
     @Test
     void readsOpensslEcP384WithMixedCaseAndIdn() throws Exception {
         CertificateRequest r = CertificateRequest.parse(der("ec-p384.csr"));

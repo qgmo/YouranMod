@@ -82,6 +82,8 @@ public final class ModItems {
     public static Item hanziCard;
     /** 个人电脑的 ISA 网卡（2.3.1.0 第 1 期；外设种类 nic_pc，不能堆叠） */
     public static moe.qingu.youran.item.ItemNicCard nicPc;
+    /** 个人电脑的 ISA 加密卡（2.3.1.0 第 4 期；外设种类 tls_pc，不能堆叠，带卡号） */
+    public static moe.qingu.youran.item.ItemTlsCard tlsPc;
     /** 光刻（服主 11-15 / 11-16）：负胶链的环化橡胶、叠氮化钠粉；汞灯的玻璃管两档、钨棒、掺钍阴极棒、汞灯（配方见 recipe.LithoRecipes）；掩模、芯片设计图、芯片 */
     public static Item cyclizedRubber;
     public static Item sodiumAzideDust;
@@ -197,6 +199,8 @@ public final class ModItems {
         Peripherals.register(hanziCard);
         nicPc = (moe.qingu.youran.item.ItemNicCard) add(registry, new moe.qingu.youran.item.ItemNicCard("nic_pc", Peripherals.KIND_NIC_PC));
         Peripherals.register(nicPc);
+        tlsPc = (moe.qingu.youran.item.ItemTlsCard) add(registry, new moe.qingu.youran.item.ItemTlsCard("tls_pc", Peripherals.KIND_TLS_PC));
+        Peripherals.register(tlsPc);
         Peripherals.register(locatorModule);
         Peripherals.register(identityModule);
         cyclizedRubber = add(registry, new moe.qingu.youran.item.ItemLangTooltip("cyclized_rubber", 64));

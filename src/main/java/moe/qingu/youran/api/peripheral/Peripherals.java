@@ -41,6 +41,12 @@ public final class Peripherals {
      * IRQ 3、选项 ROM C800，软中断 INT F8h
      */
     public static final String KIND_NIC_PC = "nic_pc";
+    /**
+     * 个人电脑的 ISA 加密卡（2.3.1.0 第 4 期）：TLS 引擎，不碰网络（程序在网卡与它之间搬密文）。物品是 YouranMod 的 {@code tls_pc}，
+     * 带 {@code Board} 数据与卡号 {@code CardId}（{@code api.pcb.TlsSpec}），规格由加密协处理器的品质现算。079 服务里占 I/O 320h–32Fh、
+     * 选项 ROM CA00，软中断 INT F9h
+     */
+    public static final String KIND_TLS_PC = "tls_pc";
     /** 能力：这台电脑能报出自己的位置（定位模块） */
     public static final String CAP_LOCATION = "location";
     /** 能力：这台电脑能替它的操作者签操作者证明（身份模块，见 {@code api.network.identity.OperatorProofs}） */

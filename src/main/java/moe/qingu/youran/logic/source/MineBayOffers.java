@@ -37,7 +37,7 @@ public final class MineBayOffers {
 
     /**
      * 掩模的价格档次（服主 11-16）：Z80、4164、各种 ROM、2764 最便宜；8088 中等；YR-2000 最贵。
-     * 网卡控制芯片按中档（服主 11-27：同 8088，3 μm、7 层）
+     * 网卡控制芯片、加密协处理器按中档（服主 11-27：同 8088）
      */
     public enum Tier {
         LOW, MID, HIGH;
@@ -48,6 +48,7 @@ public final class MineBayOffers {
                     return HIGH;
                 case I8088:
                 case NIC_CTRL:
+                case TLS_COPROC:
                     return MID;
                 default:
                     return LOW;
