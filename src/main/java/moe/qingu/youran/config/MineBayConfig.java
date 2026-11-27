@@ -54,13 +54,14 @@ public final class MineBayConfig {
     @Config.RangeInt(min = 1, max = 1000000)
     public static int romDiskPrice = 16;
 
-    @Config.Comment("工具盘的价格（服主 11-15 定）：BASIC 盘、汇编盘、C 语言盘、Forth 盘，依次。")
+    @Config.Comment({"工具盘的价格（服主 11-15 定）：BASIC 盘、汇编盘、C 语言盘、Forth 盘，依次；第五个是网络工具盘（服主 11-27 定）。",
+            "旧配置文件里只有四个数时，网络工具盘用默认值。"})
     @Config.RequiresMcRestart
-    public static int[] toolDiskPrices = {16, 24, 48, 12};
+    public static int[] toolDiskPrices = {16, 24, 48, 12, 16};
 
-    @Config.Comment({"工具盘每月几张（服主 11-15 定），依次同上。按月上限、每天补上限的 1/30（连续补），卖完就要等慢慢补回来。"})
+    @Config.Comment({"工具盘每月几张（服主 11-15 定；网络工具盘服主 11-27 定），依次同上。按月上限、每天补上限的 1/30（连续补），卖完就要等慢慢补回来。"})
     @Config.RequiresMcRestart
-    public static int[] toolDiskPerMonth = {14, 7, 7, 7};
+    public static int[] toolDiskPerMonth = {14, 7, 7, 7, 14};
 
     private MineBayConfig() {
     }

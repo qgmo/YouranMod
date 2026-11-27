@@ -17,7 +17,8 @@ import java.util.List;
  *     <li>芯片设计图：便宜、不限量；</li>
  *     <li>线路底片：普通电脑、个人电脑、汉卡、ISA 扩展卡四种，不限量；</li>
  *     <li>正版 ROM 镜像软盘：监控程序、BIOS、激光对准控制程序，价格中等、不限量；</li>
- *     <li>工具盘：四张（服主 11-15：价格 16、24、48、12，每月 14、7、7、7，每天补）。</li>
+ *     <li>工具盘：BASIC、汇编、C、Forth 四张（服主 11-15：价格 16、24、48、12，每月 14、7、7、7，每天补）；
+ *     网络工具盘（服主 11-27：16 绿宝石、每月 14 张，同 BASIC 盘）。</li>
  * </ul>
  * 编号定了不要改（玩家购物车里记的是它）。
  */
@@ -62,7 +63,7 @@ public final class MineBayOffers {
     /** 价格与数量（来自配置；不合格的收进范围） */
     public static final class Prices {
         public final int maskLow, maskMid, maskHigh, maskPerMonth, design, film, romDisk;
-        /** 按 {@link ToolDisk} 里工具盘的顺序（BASIC、汇编、C、Forth） */
+        /** 按 {@link ToolDisk} 里工具盘的顺序（BASIC、汇编、C、Forth、网络） */
         public final int[] toolPrices, toolPerMonth;
 
         public Prices(int maskLow, int maskMid, int maskHigh, int maskPerMonth, int design, int film, int romDisk, int[] toolPrices, int[] toolPerMonth) {
@@ -97,9 +98,9 @@ public final class MineBayOffers {
     /** 有线路底片的板子（{@link BoardType#circuits()}：普通电脑、个人电脑、汉卡、ISA 扩展卡）；家具电脑主板没有底片、光板，不卖它的底片 */
     public static final List<BoardType> FILM_BOARDS = Collections.unmodifiableList(java.util.Arrays.asList(BoardType.circuits()));
 
-    /** 工具盘的价格、每月几张（服主 11-15）：BASIC、汇编、C、Forth */
-    public static final int[] DEFAULT_TOOL_PRICES = {16, 24, 48, 12};
-    public static final int[] DEFAULT_TOOL_PER_MONTH = {14, 7, 7, 7};
+    /** 工具盘的价格、每月几张（服主 11-15）：BASIC、汇编、C、Forth；网络工具盘（服主 11-27） */
+    public static final int[] DEFAULT_TOOL_PRICES = {16, 24, 48, 12, 16};
+    public static final int[] DEFAULT_TOOL_PER_MONTH = {14, 7, 7, 7, 14};
 
     /** 一件商品 */
     public static final class Offer {

@@ -4,13 +4,13 @@ package moe.qingu.youran.item;
  * 预先装好内容的软盘：盘里装着 079 服务的一张镜像（YouranSCP 的 {@code cmd/mkfloppies} 做的），物品 NBT 只记镜像名。
  * 只能在 MineBay 买（{@code compat.minebay.MineBayListings} 上架），代码里用 {@link ItemFloppyDisk#toolDisk} 生成。
  * <ul>
- *     <li>工具盘（服主 11-15）：BASIC、汇编、C、Forth 四张；</li>
+ *     <li>工具盘（服主 11-15）：BASIC、汇编、C、Forth 四张；网络工具盘（服主 11-27，第五张）；</li>
  *     <li>正版 ROM 镜像盘（服主 11-16）：普通电脑的监控程序（4 KB）、个人电脑的 BIOS（8 KB）、激光对准控制程序（8 KB），
  *     买到后玩家自己在电脑里用 EPROM 烧录器烧。</li>
  * </ul>
  */
 public enum ToolDisk {
-    /** GW-BASIC 盘（GW-BASIC + 示例，含网卡收发） */
+    /** GW-BASIC 盘（GW-BASIC + 示例，含两台电脑经网卡互发） */
     BASIC("basic", "GW-BASIC", false),
     /** 汇编盘（MSA + DEBUG） */
     ASM("asm", "ASSEMBLY", false),
@@ -18,6 +18,8 @@ public enum ToolDisk {
     C("c", "SMALL-C", false),
     /** Forth 盘（F83） */
     FORTH("forth", "F83", false),
+    /** 网络工具盘（服主 11-27）：网卡的 DOS 驱动 SOCK.SYS、PING、说明、BASIC 与 C 的联网示例 */
+    NETWORK("network", "NETWORK", false),
     /** 普通电脑的监控程序（MONITOR.ROM，4096 字节，和 079 服务的 {@code rom/monitor.bin} 一样） */
     MONITOR_ROM("monitor", "MONITOR", true),
     /** 个人电脑的 BIOS（BIOS.ROM，8192 字节，和 079 服务的 F000:E000–FFFF 一样） */
