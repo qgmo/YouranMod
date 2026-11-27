@@ -5,7 +5,7 @@ package moe.qingu.youran.api.network;
  * 其他模组可以给自己的维度换一种划分（{@link YouranNetworkApi#registerDimensionNetwork}）。
  * <p>
  * 方法在网络线程上调用（{@link #route}），也可能在主线程上调用（{@link #encode}），实现要无状态或线程安全；
- * 不要在这里读写世界：设备在不在、能不能收由 {@link Routing} 查设备表。
+ * 不要在这里读写世界：那一格插没插着网卡、能不能收由 {@link Routing} 查插着的网卡表。
  */
 public abstract class DimensionNetwork {
     /**
@@ -17,8 +17,8 @@ public abstract class DimensionNetwork {
     public abstract BlockSlot decode(long bits56);
 
     /**
-     * 路由器：把发往本维度 {@code bits56} 的包交给那一格的设备。默认实现：解出坐标，交给设备表；
-     * 那里没有能收包的设备（没登记、区块没加载、没通电、没接网卡）时回“目标不可达（地址不可达）”。
+     * 路由器：把发往本维度 {@code bits56} 的包交给那一格插着的网卡。默认实现：按本维度的划分解出是哪一格，交给那一格的网卡；
+     * 那里没插着网卡、网卡收不了（{@link NetworkInterface#receive} 返回 false）时回“目标不可达（地址不可达）”。
      * 1–255 号槽位现在都没有路由器，也回地址不可达。
      */
     public void route(Routing routing, byte[] packet, long bits56) {
@@ -72,7 +72,7 @@ public abstract class DimensionNetwork {
         /** 本维度的维度 ID（Minecraft 的） */
         int dimension();
 
-        /** 交给本维度 (x, y, z) 上的设备；那里没有能收包的设备时返回 false */
+        /** 交给本维度 (x, y, z) 上插着的网卡；没插着、网卡收不了时返回 false */
         boolean deliverToDevice(int x, int y, int z, byte[] packet);
 
         /** 回 ICMPv6 目标不可达给发包的人 */

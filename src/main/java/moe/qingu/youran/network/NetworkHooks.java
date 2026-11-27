@@ -1,5 +1,6 @@
 package moe.qingu.youran.network;
 
+import moe.qingu.youran.api.network.YouranNetworkApi;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -10,6 +11,7 @@ public final class NetworkHooks {
     private static final Logger LOG = LogManager.getLogger("YouranMod");
 
     private static volatile NetworkBackend backend;
+    private static volatile NicAccess nicAccess;
     private static ServerNetworkModule module;
     private static boolean moduleLoaded;
 
@@ -23,6 +25,29 @@ public final class NetworkHooks {
 
     public static void setBackend(NetworkBackend b) {
         backend = b;
+    }
+
+    /** 网卡与玩家客户端之间的中转；网络没在运行时是什么都不做的 {@link ClientRelay#NONE} */
+    public static ClientRelay relay() {
+        NetworkBackend b = backend;
+        ClientRelay r = b == null ? null : b.relay();
+        return r == null ? ClientRelay.NONE : r;
+    }
+
+    /** {@code api.network} 包类初始化时交过来 */
+    public static void setNicAccess(NicAccess access) {
+        if (nicAccess == null) {
+            nicAccess = access;
+        }
+    }
+
+    /** 给网卡装、拿端口（服务端网络内部用） */
+    public static NicAccess nicAccess() {
+        if (nicAccess == null) {
+            // 触发 api.network 的类初始化（它在静态块里交过来）
+            YouranNetworkApi.isRunning();
+        }
+        return nicAccess;
     }
 
     /** 已经加载过的服务端网络模块（不触发加载）；没有为 null */

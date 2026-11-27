@@ -1,12 +1,12 @@
 package moe.qingu.youran.network;
 
+import com.mojang.authlib.GameProfile;
 import moe.qingu.youran.api.network.ConfirmRequest;
 import moe.qingu.youran.api.network.ConfirmResult;
-import moe.qingu.youran.api.network.DeviceLocation;
-import moe.qingu.youran.api.network.location.LocationResult;
 import moe.qingu.youran.api.network.Ipv6Address;
-import moe.qingu.youran.api.network.NetworkDevices;
-import moe.qingu.youran.api.network.SourceIdentity;
+import moe.qingu.youran.api.network.NetworkInterface;
+import moe.qingu.youran.api.network.identity.OperatorResult;
+import moe.qingu.youran.api.network.location.LocationResult;
 import net.minecraft.entity.player.EntityPlayerMP;
 
 import java.util.Collection;
@@ -18,8 +18,20 @@ import java.util.concurrent.CompletableFuture;
  * 两端共用的类（api、网络包）只通过这个接口找它。
  */
 public interface NetworkBackend {
-    /** 设备表（主线程用） */
-    NetworkDevices devices();
+    /**
+     * 把网卡插到维度 {@code dimension} 的 (x, y, z)，用这一格的 0 号地址；没有地址、这一格已经插着别的网卡时返回 null（不顶掉旧的）。
+     * 任意线程。调用方（{@code YouranNetworkApi.plug}）拿着网卡的锁，并负责把返回的端口装到网卡上
+     */
+    NicPort plug(NetworkInterface nic, int dimension, int x, int y, int z);
+
+    /** 拔掉这个端口（{@code YouranNetworkApi.unplug} 已经把它从网卡上拿下）。任意线程 */
+    void unplug(NicPort port);
+
+    /** 这一格（0 号）的地址；没有地址为 null。不要求插着网卡 */
+    Ipv6Address addressAt(int dimension, int x, int y, int z);
+
+    /** 网卡与玩家客户端之间的中转（{@code ClientRelayNic} 用） */
+    ClientRelay relay();
 
     /** 登记过的主机的地址；没有为 null */
     Ipv6Address hostAddress(String key);
@@ -39,11 +51,10 @@ public interface NetworkBackend {
     moe.qingu.youran.api.network.ca.CertificateAuthority certificateAuthority();
 
     /**
-     * 玩家客户端发来的原始包（在 Netty 线程上调用；实现马上转给网络线程，不碰世界）。
-     * 消息不是原始包或长度不对时 {@code packet} 为 null，{@code messageLength} 是消息的字节数。
-     * {@code playerNic} 为 true 时是玩家临时地址的包（PLAYER_PACKET），否则是他操作的设备的包（PACKET）。
+     * 玩家客户端发来的原始包（在 Netty 线程上调用；实现马上转给网络线程，不碰世界）。{@code port} 是网口号（0 是玩家自己的网口）。
+     * 消息不是原始包或长度不对时 {@code packet} 为 null、{@code port} 为 -1，{@code messageLength} 是消息的字节数。
      */
-    void onClientPacket(EntityPlayerMP player, byte[] packet, int messageLength, boolean playerNic);
+    void onClientPacket(EntityPlayerMP player, int port, byte[] packet, int messageLength);
 
     /** 玩家现在的临时地址；没有（不在线、网络没在运行）为 null。任意线程 */
     Ipv6Address playerAddress(UUID player);
@@ -57,24 +68,21 @@ public interface NetworkBackend {
     /** 世界存档目录（默认注册局存注册信息用） */
     java.io.File worldDirectory();
 
-    /** 这个地址是设备表里一台设备的地址时，它在哪；否则 null。任意线程（不读世界） */
-    DeviceLocation deviceLocation(Ipv6Address address);
-
-    /** 按来源地址认人（设备或玩家临时地址）；认不出为 null。任意线程（不读世界） */
-    SourceIdentity identify(Ipv6Address address);
-
-    /** 系统确认框：问来源 {@code source} 的操作者（{@code source} 为 null 时直接问在线玩家 {@code player}）。任意线程；future 在主线程上完成 */
-    CompletableFuture<ConfirmResult> confirm(Ipv6Address source, UUID player, ConfirmRequest request);
+    /** 系统确认框：直接问在线玩家 {@code player}。任意线程；future 在主线程上完成 */
+    CompletableFuture<ConfirmResult> confirm(UUID player, ConfirmRequest request);
 
     /** 主线程：客户端对确认框的回应 */
     void onConfirmAnswer(EntityPlayerMP player, long id, boolean approve);
 
-    /** 给设备签位置（先问操作者）。任意线程；future 在主线程上完成 */
-    CompletableFuture<LocationResult> signLocation(Ipv6Address device, String site, String nonce);
+    /** 给网卡的地址签位置（先问 {@code player}）。任意线程；future 在主线程上完成 */
+    CompletableFuture<LocationResult> signLocation(NetworkInterface nic, GameProfile player, int dimension, int x, int y, int z, String site, String nonce);
 
-    /** 主线程：客户端请位置（按他现在操作的设备签），结果发回给他 */
-    void onLocationRequest(EntityPlayerMP player, int requestId, String site, String nonce);
+    /** 给网卡的地址签操作者证明（先问 {@code player}）。任意线程；future 在主线程上完成 */
+    CompletableFuture<OperatorResult> signOperator(NetworkInterface nic, GameProfile player, String site, String nonce);
 
     /** 定位模块的签名公钥；没有为 null */
     java.security.PublicKey locationKey();
+
+    /** 身份模块（操作者证明）的签名公钥；没有为 null */
+    java.security.PublicKey operatorKey();
 }

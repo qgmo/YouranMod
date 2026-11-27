@@ -1,15 +1,10 @@
 package moe.qingu.youran.client.network;
 
 import moe.qingu.youran.YouranMod;
-import moe.qingu.youran.api.network.ClientNic;
-import moe.qingu.youran.api.network.Ipv6Address;
-import moe.qingu.youran.api.network.packet.Ipv6Packet;
-import moe.qingu.youran.api.network.stack.DnsResolver;
+import moe.qingu.youran.api.network.ClientHost;
 import moe.qingu.youran.api.network.stack.ExecutorEventLoop;
-import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.net.NicChannel;
-import moe.qingu.youran.net.NicMessages;
-import moe.qingu.youran.network.ClientNicState;
+import moe.qingu.youran.network.ClientHostState;
 import net.minecraft.network.NetworkManager;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
@@ -17,22 +12,18 @@ import net.minecraftforge.fml.common.network.FMLNetworkEvent;
 import net.minecraftforge.fml.relauncher.Side;
 
 import java.security.SecureRandom;
-import java.util.Arrays;
 
 /**
- * 客户端的网卡（{@link ClientNic} 的实现）：自己的网络线程“YouranMod 网络（客户端）”，上面跑接着的设备的协议栈。
- * 服务器发来的网卡消息在 Netty 线程上收到，直接交给这个线程；协议栈发出的包直接交给到服务器的连接（不经主线程）。
- * 断开服务器时协议栈关掉、线程停下。
+ * 客户端这台主机（{@link ClientHost} 的实现）：自己的网络线程“YouranMod 网络（客户端）”，上面跑唯一的协议栈（{@link ClientHostState}）。
+ * 服务器发来的网卡消息在 Netty 线程上收到，直接交给这个线程；协议栈发出的包（带网口号）直接交给到服务器的连接（不经主线程）。
+ * 断开服务器时网口都去掉、协议栈关掉、线程停下。
  */
 @Mod.EventBusSubscriber(value = Side.CLIENT, modid = YouranMod.MODID)
 public final class ClientNetwork {
     static final String THREAD_NAME = "YouranMod 网络（客户端）";
     private static volatile NetworkManager connection;
     private static ExecutorEventLoop loop;
-    /** 只在 loop 线程上改 */
-    private static SessionImpl session;
-    /** 玩家临时地址的网卡（只在 loop 线程上改） */
-    private static SessionImpl playerSession;
+    private static ClientHostState state;
 
     private ClientNetwork() {
     }
@@ -51,13 +42,20 @@ public final class ClientNetwork {
     public static void onDisconnected(FMLNetworkEvent.ClientDisconnectionFromServerEvent event) {
         connection = null;
         ExecutorEventLoop l;
+        ClientHostState s;
         synchronized (ClientNetwork.class) {
             l = loop;
+            s = state;
             loop = null;
+            state = null;
         }
         if (l != null) {
-            l.execute(ClientNetwork::detachInLoop);
-            l.execute(ClientNetwork::detachPlayerInLoop);
+            l.execute(() -> {
+                if (ClientHostState.current() == s) {
+                    ClientHostState.install(null);
+                }
+                s.close();
+            });
             if (l.shutdown(2000)) {
                 YouranMod.LOG.info("已断开服务器，客户端网络线程已结束");
             } else {
@@ -66,206 +64,27 @@ public final class ClientNetwork {
         }
     }
 
+    /** 这次连接的事件循环与主机状态（第一次收到网卡消息时建） */
     private static synchronized ExecutorEventLoop loop() {
         if (loop == null || loop.isShutdown()) {
-            loop = new ExecutorEventLoop(THREAD_NAME);
+            ExecutorEventLoop l = new ExecutorEventLoop(THREAD_NAME);
+            ClientHostState s = new ClientHostState(l, new SecureRandom(), m -> NicChannel.sendToServer(connection, m));
+            loop = l;
+            state = s;
+            l.execute(() -> ClientHostState.install(s));
         }
         return loop;
     }
 
     /** Netty 线程上：服务器发来的网卡消息 */
     public static void onServerMessage(byte[] b) {
-        switch (b[0]) {
-            case NicMessages.PACKET: {
-                if (b.length < 1 + Ipv6Packet.HEADER) {
-                    return;
-                }
-                byte[] raw = Arrays.copyOfRange(b, 1, b.length);
-                ExecutorEventLoop l = currentLoop();
-                if (l != null) {
-                    l.execute(() -> {
-                        if (session != null) {
-                            session.stack.receive(raw);
-                        }
-                    });
-                }
-                break;
-            }
-            case NicMessages.PLAYER_PACKET: {
-                if (b.length < 1 + Ipv6Packet.HEADER) {
-                    return;
-                }
-                byte[] raw = Arrays.copyOfRange(b, 1, b.length);
-                ExecutorEventLoop l = currentLoop();
-                if (l != null) {
-                    l.execute(() -> {
-                        if (playerSession != null) {
-                            playerSession.stack.receive(raw);
-                        }
-                    });
-                }
-                break;
-            }
-            case NicMessages.PLAYER_ATTACH: {
-                if (b.length < 37) {
-                    return;
-                }
-                int gen = NicMessages.getInt(b, 1);
-                Ipv6Address address = Ipv6Address.read(b, 5);
-                Ipv6Address resolver = Ipv6Address.read(b, 21);
-                loop().execute(() -> attachPlayerInLoop(gen, address, resolver));
-                break;
-            }
-            case NicMessages.PLAYER_DETACH: {
-                if (b.length < 5) {
-                    return;
-                }
-                int gen = NicMessages.getInt(b, 1);
-                ExecutorEventLoop l = currentLoop();
-                if (l != null) {
-                    l.execute(() -> {
-                        if (playerSession != null && playerSession.generation == gen) {
-                            detachPlayerInLoop();
-                        }
-                    });
-                }
-                break;
-            }
-            case NicMessages.ATTACH: {
-                if (b.length < 53) {
-                    return;
-                }
-                int gen = NicMessages.getInt(b, 1);
-                Ipv6Address address = Ipv6Address.read(b, 5);
-                Ipv6Address resolver = Ipv6Address.read(b, 21);
-                Ipv6Address ntp = Ipv6Address.read(b, 37);
-                loop().execute(() -> attachInLoop(gen, address, resolver, ntp));
-                break;
-            }
-            case NicMessages.DETACH: {
-                if (b.length < 5) {
-                    return;
-                }
-                int gen = NicMessages.getInt(b, 1);
-                ExecutorEventLoop l = currentLoop();
-                if (l != null) {
-                    l.execute(() -> {
-                        if (session != null && session.generation == gen) {
-                            detachInLoop();
-                        }
-                    });
-                }
-                break;
-            }
-            default:
-                break;
+        ExecutorEventLoop l = loop();
+        ClientHostState s;
+        synchronized (ClientNetwork.class) {
+            s = state;
         }
-    }
-
-    private static synchronized ExecutorEventLoop currentLoop() {
-        return loop;
-    }
-
-    private static void attachInLoop(int gen, Ipv6Address address, Ipv6Address resolver, Ipv6Address ntp) {
-        detachInLoop();
-        ExecutorEventLoop l = currentLoop();
-        if (l == null) {
-            return;
-        }
-        NetStack stack = new NetStack(l, ClientNetwork::sendToServer, new SecureRandom());
-        stack.addAddress(address);
-        session = new SessionImpl(gen, address, resolver, ntp, stack);
-        YouranMod.LOG.info("游戏内网络：网卡接上了，设备地址 {}，递归解析器 {}", address, resolver);
-        ClientNicState.attached(session);
-    }
-
-    private static void detachInLoop() {
-        SessionImpl s = session;
-        if (s == null) {
-            return;
-        }
-        session = null;
-        s.closed = true;
-        s.stack.close();
-        YouranMod.LOG.info("游戏内网络：网卡断开了（设备地址 {}）", s.address);
-        ClientNicState.detached(s);
-    }
-
-    private static void sendToServer(byte[] packet) {
-        NicChannel.sendToServer(connection, NicMessages.packet(packet));
-    }
-
-    private static void attachPlayerInLoop(int gen, Ipv6Address address, Ipv6Address resolver) {
-        detachPlayerInLoop();
-        ExecutorEventLoop l = currentLoop();
-        if (l == null) {
-            return;
-        }
-        NetStack stack = new NetStack(l, p -> NicChannel.sendToServer(connection, NicMessages.playerPacket(p)), new SecureRandom());
-        stack.addAddress(address);
-        playerSession = new SessionImpl(gen, address, resolver, null, stack);
-        YouranMod.LOG.info("游戏内网络：分到了玩家临时地址 {}（受限：只能连 DNS 和服务器放行的主机）", address);
-        ClientNicState.setPlayer(playerSession);
-    }
-
-    private static void detachPlayerInLoop() {
-        SessionImpl s = playerSession;
-        if (s == null) {
-            return;
-        }
-        playerSession = null;
-        s.closed = true;
-        s.stack.close();
-        ClientNicState.setPlayer(null);
-        YouranMod.LOG.info("游戏内网络：玩家临时地址 {} 收回了", s.address);
-    }
-
-    private static final class SessionImpl implements ClientNic.Session {
-        final int generation;
-        final Ipv6Address address;
-        final Ipv6Address resolver;
-        final Ipv6Address ntp;
-        final NetStack stack;
-        final DnsResolver dns;
-        volatile boolean closed;
-
-        SessionImpl(int generation, Ipv6Address address, Ipv6Address resolver, Ipv6Address ntp, NetStack stack) {
-            this.generation = generation;
-            this.address = address;
-            this.resolver = resolver;
-            this.ntp = ntp;
-            this.stack = stack;
-            this.dns = new DnsResolver(stack, resolver);
-        }
-
-        @Override
-        public Ipv6Address address() {
-            return address;
-        }
-
-        @Override
-        public Ipv6Address resolverAddress() {
-            return resolver;
-        }
-
-        @Override
-        public Ipv6Address ntpAddress() {
-            return ntp;
-        }
-
-        @Override
-        public NetStack stack() {
-            return stack;
-        }
-
-        @Override
-        public DnsResolver dns() {
-            return dns;
-        }
-
-        @Override
-        public boolean isClosed() {
-            return closed;
+        if (s != null) {
+            l.execute(() -> s.onMessage(b));
         }
     }
 }

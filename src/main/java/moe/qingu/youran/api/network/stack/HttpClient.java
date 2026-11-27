@@ -179,13 +179,18 @@ public final class HttpClient {
 
     /** 先用 {@code resolver} 查主机名，再取页面（GET；https 只信任 QinguMoe CA） */
     public static CompletableFuture<Response> fetch(NetStack stack, DnsResolver resolver, String url, long timeoutMillis) {
+        return fetch(stack, null, resolver, url, timeoutMillis);
+    }
+
+    /** 同上，从网口 {@code via} 连（null 为按源地址选择规则，默认网口）；查名字用的 {@code resolver} 由调用方给（一般也绑这个网口） */
+    public static CompletableFuture<Response> fetch(NetStack stack, NetStack.Interface via, DnsResolver resolver, String url, long timeoutMillis) {
         Url u = Url.parse(url);
         if (u == null) {
             CompletableFuture<Response> f = new CompletableFuture<>();
             f.completeExceptionally(new NetworkException(NetworkException.Reason.LIMIT, "不认识的网址：" + url));
             return f;
         }
-        return send(stack, resolver, u, "GET", null, null, timeoutMillis, null);
+        return send(stack, via, resolver, u, "GET", null, null, timeoutMillis, null);
     }
 
     /**
@@ -198,6 +203,12 @@ public final class HttpClient {
      */
     public static CompletableFuture<Response> send(NetStack stack, DnsResolver resolver, Url url, String method, Map<String, String> headers,
                                                    byte[] body, long timeoutMillis, TlsTrust trust) {
+        return send(stack, null, resolver, url, method, headers, body, timeoutMillis, trust);
+    }
+
+    /** 同上，从网口 {@code via} 连（null 为按源地址选择规则，默认网口；网口去掉时以 {@link NetworkException.Reason#CLOSED} 结束） */
+    public static CompletableFuture<Response> send(NetStack stack, NetStack.Interface via, DnsResolver resolver, Url url, String method,
+                                                   Map<String, String> headers, byte[] body, long timeoutMillis, TlsTrust trust) {
         CompletableFuture<Response> f = new CompletableFuture<>();
         EventLoop.Timer timer = stack.loop.schedule(() -> f.completeExceptionally(
                 new NetworkException(NetworkException.Reason.TIMEOUT, "取页面超时")), timeoutMillis);
@@ -221,7 +232,7 @@ public final class HttpClient {
                         "解析 " + url.host + " 失败（DNS 响应码 " + r.rcode + "）"));
                 return;
             }
-            request(stack, r.addresses.get(0), url, method, headers, body, trust == null ? TlsTrust.qinguMoe() : trust, f);
+            request(stack, via, r.addresses.get(0), url, method, headers, body, trust == null ? TlsTrust.qinguMoe() : trust, f);
         });
         return f;
     }
@@ -234,7 +245,7 @@ public final class HttpClient {
         f.whenComplete((r, e) -> timer.cancel());
         Url u = new Url(host, port, path, false);
         String request = requestText("GET", path, host, null, null);
-        connectPlain(stack, address, u, request.getBytes(StandardCharsets.ISO_8859_1), f);
+        connectPlain(stack, null, address, u, request.getBytes(StandardCharsets.ISO_8859_1), f);
         return f;
     }
 
@@ -269,8 +280,8 @@ public final class HttpClient {
         return sb.toString();
     }
 
-    private static void request(NetStack stack, Ipv6Address address, Url url, String method, Map<String, String> headers, byte[] body,
-                                TlsTrust trust, CompletableFuture<Response> f) {
+    private static void request(NetStack stack, NetStack.Interface via, Ipv6Address address, Url url, String method, Map<String, String> headers,
+                                byte[] body, TlsTrust trust, CompletableFuture<Response> f) {
         byte[] head;
         try {
             head = requestText(method, url.path, url.hostHeader(), headers, body).getBytes(StandardCharsets.ISO_8859_1);
@@ -285,12 +296,12 @@ public final class HttpClient {
             System.arraycopy(body, 0, all, head.length, body.length);
         }
         if (!url.secure) {
-            connectPlain(stack, address, url, all, f);
+            connectPlain(stack, via, address, url, all, f);
             return;
         }
         byte[] request = all;
         ResponseReader reader = new ResponseReader(f, address, url.port);
-        TlsConnection.connect(stack, address, url.port, url.host, trust, new TlsConnection.Listener() {
+        TlsConnection.connect(stack, via, address, url.port, url.host, trust, new TlsConnection.Listener() {
             @Override
             public void onOpen(TlsConnection connection) {
                 reader.tls = connection.info();
@@ -325,9 +336,9 @@ public final class HttpClient {
         });
     }
 
-    private static void connectPlain(NetStack stack, Ipv6Address address, Url url, byte[] request, CompletableFuture<Response> f) {
+    private static void connectPlain(NetStack stack, NetStack.Interface via, Ipv6Address address, Url url, byte[] request, CompletableFuture<Response> f) {
         ResponseReader reader = new ResponseReader(f, address, url.port);
-        stack.connect(null, address, url.port, new TcpConnection.Listener() {
+        TcpConnection.Listener listener = new TcpConnection.Listener() {
             @Override
             public void onData(TcpConnection connection, byte[] data) {
                 reader.data(data);
@@ -342,7 +353,8 @@ public final class HttpClient {
             public void onClosed(TcpConnection connection, NetworkException error) {
                 reader.closed(error);
             }
-        }).whenComplete((c, err) -> {
+        };
+        (via != null ? stack.connectVia(via, address, url.port, listener) : stack.connect(null, address, url.port, listener)).whenComplete((c, err) -> {
             if (err != null) {
                 f.completeExceptionally(err);
                 return;

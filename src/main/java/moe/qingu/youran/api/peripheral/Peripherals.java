@@ -30,8 +30,15 @@ public final class Peripherals {
      * 物品是 YouranMod 的 {@code eprom_programmer}；模拟器里不占资源（烧录由游戏服务器读磁盘文件、写 EPROM 的数据）
      */
     public static final String KIND_PROGRAMMER = "eprom_programmer";
+    /**
+     * 身份模块（服主 11-27：一键登录用的外设，和定位模块并列；给网站、id.yr 签操作者证明，没有 I/O 端口，能力 {@link #CAP_IDENTITY}）。
+     * 物品是 YouranMod 的 {@code identity_module}
+     */
+    public static final String KIND_IDENTITY = "identity";
     /** 能力：这台电脑能报出自己的位置（定位模块） */
     public static final String CAP_LOCATION = "location";
+    /** 能力：这台电脑能替它的操作者签操作者证明（身份模块，见 {@code api.network.identity.OperatorProofs}） */
+    public static final String CAP_IDENTITY = "identity";
 
     private static final Map<String, Item> BY_KIND = new LinkedHashMap<>();
 

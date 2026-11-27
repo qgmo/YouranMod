@@ -26,6 +26,7 @@ import java.util.List;
  * 软驱        C 钴改性磁粉 C / IC2 电动机 铁活板门 IC2 电动机 / C 电路板 C
  * EPROM 烧录器 C 拉杆或沉浸工程断路刀闸 C / 电路板 IC2 低压变压器或沉浸工程变压器 电路板 / C IC2 绝缘铜质导线 C
  * 定位模块    P 指南针 P / 电路板 EPROM（空白的就行） 电路板 / P IC2 绝缘铜质导线 P
+ * 身份模块    P 命名牌 P / 电路板 EPROM（空白的就行） 电路板 / P IC2 绝缘铜质导线 P（服主 11-27 临时配方：同定位模块，只把指南针换成命名牌，免得在工作台上撞）
  * </pre>
  * 没装 IC2 或沉浸工程时，缺了必需材料的配方不加。
  */
@@ -72,6 +73,9 @@ public final class PeripheralRecipes {
         if (copperCable != null) {
             cased(registry, "locator_module", ModItems.locatorModule, new String[]{"CKC", "BEB", "CWC"},
                     'K', new ItemStack(Items.COMPASS), 'B', circuit, 'E', new ItemStack(ModItems.eprom), 'W', copperCable);
+            // 身份模块：同定位模块，指南针换成命名牌（以后进电脑制造流水线）
+            cased(registry, "identity_module", ModItems.identityModule, new String[]{"CKC", "BEB", "CWC"},
+                    'K', new ItemStack(Items.NAME_TAG), 'B', circuit, 'E', new ItemStack(ModItems.eprom), 'W', copperCable);
         }
     }
 

@@ -1,6 +1,6 @@
 package moe.qingu.youran.api.network.location;
 
-/** 请位置签名的结果（{@link LocationProofs#sign}、{@link ClientLocation#request}） */
+/** 请位置签名的结果（{@link LocationProofs#sign}） */
 public final class LocationResult {
     public enum Status {
         /** 签好了，{@link #proof} 是证明全文 */
@@ -9,17 +9,17 @@ public final class LocationResult {
         DENIED("denied"),
         /** 操作者没回应 */
         TIMEOUT("timeout"),
-        /** 还没回应时操作者变了（离开电脑、下线、换人） */
+        /** 还没回应时被问的玩家下线了 */
         OPERATOR_CHANGED("operator_changed"),
-        /** 这台设备没装定位模块 */
+        /** 这台电脑没装定位模块（电脑模组判断，不签时用这个代号告诉网站） */
         NO_LOCATOR("no_locator"),
-        /** 不是设备、设备现在没人操作 */
+        /** 没有操作者（玩家不在线、电脑现在没人操作） */
         NO_OPERATOR("no_operator"),
         /** 操作者已经有一个确认框开着，或请得太快 */
         BUSY("busy"),
         /** 网站域名或随机数的格式不对 */
         BAD_REQUEST("bad_request"),
-        /** 网络没在运行、没有签名密钥、服务器正在关 */
+        /** 网络没在运行、网卡没插着、没有签名密钥、服务器正在关 */
         UNAVAILABLE("unavailable");
 
         /** 写进表单字段、给网站看的代号 */

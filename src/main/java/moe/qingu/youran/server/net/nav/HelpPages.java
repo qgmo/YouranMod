@@ -100,8 +100,8 @@ final class HelpPages {
     }
 
     private static String report() {
-        return "<p>每条广告旁边有“举报”。点开选原因，可以补充一句，提交就行，不用登录。</p>\n"
-                + "<p>同一台电脑对同一条广告只算一次。管理员会尽快处理。</p>\n";
+        return "<p>每条广告旁边有“举报”。先用游戏角色登录，再选原因，可以补充一句，提交就行。</p>\n"
+                + "<p>同一个人对同一条广告只算一次。管理员会尽快处理。</p>\n";
     }
 
     private static String canvas() {

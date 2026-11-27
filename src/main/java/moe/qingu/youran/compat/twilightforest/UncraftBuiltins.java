@@ -29,8 +29,8 @@ public final class UncraftBuiltins {
     static final String[] BLOCKED_INPUTS = {
             // 电脑（主板数据、芯片品质）：拆了拿回一块没有数据的主板
             "scp:computer", "scp:personal_computer", "cfm:computer",
-            // 本服的外设：定位模块里装着 EPROM（也由“不让拆出来”挡住）
-            "youranmod:locator_module",
+            // 本服的外设：定位模块、身份模块里装着 EPROM（也由“不让拆出来”挡住）
+            "youranmod:locator_module", "youranmod:identity_module",
             // IC2 升级：弹出、抽入、流体弹出、流体抽入、红石反相有“4 锡板 + 1 活塞（拉杆、树脂提取器与电动机）→ 1 个”和
             // “4 致密锡板 + 1 活塞 → 9 个”两种做法，按 9 个做、一个个拆，白得 8 个活塞；超频器三条（1 万 / 3 万 / 6 万冷却单元 → 2 / 6 / 12 个）
             // 导线、电路与冷却单元的比例不同，同样能按非配方比例换

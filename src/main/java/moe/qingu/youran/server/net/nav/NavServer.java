@@ -4,7 +4,6 @@ import com.google.gson.JsonObject;
 import moe.qingu.youran.api.network.HostContext;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.SiteInfo;
-import moe.qingu.youran.api.network.SourceIdentity;
 import moe.qingu.youran.api.network.YouranNetworkApi;
 import moe.qingu.youran.api.network.http.HttpResponse;
 import moe.qingu.youran.api.network.http.HttpServer;
@@ -350,11 +349,5 @@ public final class NavServer implements NavService.Env {
     public String checkoutUrl(String orderId) {
         OrderInfo o = PayApi.order(orderId);
         return o == null ? null : o.checkoutUrl;
-    }
-
-    @Override
-    public String identify(Ipv6Address source) {
-        SourceIdentity id = YouranNetworkApi.identify(source);
-        return id == null ? null : id.operatorName;
     }
 }

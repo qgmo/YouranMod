@@ -64,6 +64,21 @@ public final class UdpSocket {
         }
     }
 
+    /** 绑着的网口去掉了：关掉并告诉 {@link Handler#onClosed} */
+    void closeWith(NetworkException reason) {
+        if (closed) {
+            return;
+        }
+        closeQuietly();
+        if (handler != null) {
+            try {
+                handler.onClosed(this, reason);
+            } catch (Throwable t) {
+                NetStack.LOG.error("UDP 回调出错", t);
+            }
+        }
+    }
+
     void deliver(Ipv6Address from, int fromPort, Ipv6Address to, byte[] data) {
         if (!closed && handler != null) {
             try {
@@ -90,6 +105,10 @@ public final class UdpSocket {
 
         /** 发出去的数据报收到 ICMPv6 差错（如端口不可达）。默认不管 */
         default void onError(UdpSocket socket, Ipv6Address destination, int icmpType, int icmpCode, Ipv6Address reporter) {
+        }
+
+        /** 不是自己关的、被关掉了（绑着的网口去掉了，见 {@link NetStack#removeInterface}）。默认不管 */
+        default void onClosed(UdpSocket socket, NetworkException reason) {
         }
     }
 }

@@ -75,6 +75,8 @@ public final class ModItems {
     public static Item scrapSiliconWafer;
     /** 定位模块（位置外设，服主 11-15）：装进电脑的卡槽，网站经操作者同意后能拿到签了名的位置 */
     public static Item locatorModule;
+    /** 身份模块（服主 11-27：一键登录用的外设，和定位模块并列） */
+    public static Item identityModule;
     /** 外设（服主 11-15；接口见 api.peripheral）：5.25 英寸软驱（个人电脑出厂带一个）、汉卡（普通电脑出厂带一块） */
     public static Item floppyDrive;
     public static Item hanziCard;
@@ -184,11 +186,15 @@ public final class ModItems {
         // 定位模块也是外设（服主 11-15）：没有 I/O 端口，装上就有“位置”能力
         locatorModule = add(registry, new ItemPeripheral(moe.qingu.youran.api.network.location.LocatorModule.NAME,
                 Peripherals.KIND_LOCATOR, Peripherals.CAP_LOCATION).withCasings());
+        // 身份模块（服主 11-27）：装上才能替操作者签操作者证明（一键登录），同样没有 I/O 端口
+        identityModule = add(registry, new ItemPeripheral(moe.qingu.youran.api.network.identity.IdentityModule.NAME,
+                Peripherals.KIND_IDENTITY, Peripherals.CAP_IDENTITY).withCasings());
         floppyDrive = add(registry, new ItemPeripheral("floppy_drive", Peripherals.KIND_FLOPPY).withCasings());
         hanziCard = add(registry, new moe.qingu.youran.item.ItemHanziCard("hanzi_card", Peripherals.KIND_HANZI));
         Peripherals.register(floppyDrive);
         Peripherals.register(hanziCard);
         Peripherals.register(locatorModule);
+        Peripherals.register(identityModule);
         cyclizedRubber = add(registry, new moe.qingu.youran.item.ItemLangTooltip("cyclized_rubber", 64));
         sodiumAzideDust = add(registry, new moe.qingu.youran.item.ItemLangTooltip("sodium_azide_dust", 64));
         glassTube = (moe.qingu.youran.item.ItemTube) add(registry, new moe.qingu.youran.item.ItemTube("glass_tube",

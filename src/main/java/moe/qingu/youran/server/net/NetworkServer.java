@@ -3,23 +3,24 @@ package moe.qingu.youran.server.net;
 import moe.qingu.youran.api.network.ConfirmRequest;
 import moe.qingu.youran.api.network.ConfirmResult;
 import moe.qingu.youran.api.network.DefaultDimensionNetwork;
-import moe.qingu.youran.api.network.DeviceCapability;
 import moe.qingu.youran.api.network.DomainNames;
-import moe.qingu.youran.api.network.location.LocationProof;
+import com.mojang.authlib.GameProfile;
+import moe.qingu.youran.api.network.ClientRelayNic;
+import moe.qingu.youran.api.network.NetworkInterface;
+import moe.qingu.youran.api.network.identity.OperatorResult;
 import moe.qingu.youran.api.network.location.LocationResult;
+import moe.qingu.youran.network.ClientRelay;
+import moe.qingu.youran.network.NicPort;
+import moe.qingu.youran.server.net.identity.OperatorService;
+import moe.qingu.youran.server.net.identity.OperatorSigner;
 import moe.qingu.youran.net.ConfirmMessages;
-import moe.qingu.youran.net.LocationMessages;
 import moe.qingu.youran.net.YouranNetwork;
 import moe.qingu.youran.server.net.location.LocationService;
 import moe.qingu.youran.server.net.location.LocationSigner;
-import moe.qingu.youran.server.net.service.captcha.SourceLimiter;
-import moe.qingu.youran.api.network.DeviceLocation;
 import moe.qingu.youran.api.network.DimensionNetwork;
 import moe.qingu.youran.api.network.HostContext;
 import moe.qingu.youran.api.network.Ipv6Address;
-import moe.qingu.youran.api.network.NetworkDevices;
 import moe.qingu.youran.api.network.NetworkLayout;
-import moe.qingu.youran.api.network.SourceIdentity;
 import moe.qingu.youran.api.network.YouranNetworkApi;
 import moe.qingu.youran.api.network.packet.Ipv6Packet;
 import moe.qingu.youran.api.network.stack.ExecutorEventLoop;
@@ -98,6 +99,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     static final String LOCATION_NAME = moe.qingu.youran.api.network.location.LocationProofs.DOMAIN;
     /** 定位模块的签名密钥文件（相对服务器根目录） */
     static final String LOCATION_KEY_FILE = "config/youranmod-location-key.pem";
+    /** 身份模块（操作者证明）的公钥与核对（operator.yr，服主 11-27） */
+    static final String HOST_OPERATOR = "youranmod:operator";
+    static final String OPERATOR_NAME = moe.qingu.youran.api.network.identity.OperatorProofs.DOMAIN;
+    /** 身份模块的签名密钥文件（相对服务器根目录；与定位模块的分开） */
+    static final String OPERATOR_KEY_FILE = "config/youranmod-operator-key.pem";
     /** 聚合付款服务（pay.yr，服主 11-15） */
     static final String HOST_PAY = "youranmod:pay";
     static final String PAY_NAME = moe.qingu.youran.api.pay.PayApi.DOMAIN;
@@ -119,10 +125,12 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private ExecutorEventLoop loop;
     private AllocationTable table;
     private AddressBook book;
-    private DeviceTable devices;
+    /** 插着的网卡 */
+    private NicTable nics;
     private Router router;
-    private NicGateway nic;
-    private TestDevices testDevices;
+    /** 网卡与玩家客户端之间的中转（ClientRelayNic） */
+    private ClientRelays relays;
+    private TestNics testNics;
     private NetworkEvents events;
     private RejectLog rejects;
     private RecursiveResolver resolver;
@@ -135,14 +143,12 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private ConfirmPrompts prompts;
     /** 主线程上的拒绝日志（{@link #rejects} 只给网络线程用） */
     private RejectLog mainRejects;
-    /** 定位模块的签名密钥；没有（读不了）为 null */
-    private volatile LocationSigner locationSigner;
+    /** 定位模块、身份模块的签名（主线程） */
+    private ProofDesk proofs;
     /** pay.yr 的账本与给模组的接口；没开（配置关掉、读不了账本）为 null */
     private moe.qingu.youran.server.net.pay.PayServer pay;
     /** 浏览器主页 180.yr、广告平台、帮助（服主 11-15）；没开为 null */
     private moe.qingu.youran.server.net.nav.NavServer nav;
-    /** 每个玩家请位置的频率（主线程） */
-    private final SourceLimiter locationLimit = new SourceLimiter(0.5, 3, 4096);
     /** .yr、.com 的注册局，YouranMod 自己网站的 DNS（网络线程上建好；没建起来为 null） */
     private volatile DefaultRegistrar yrRegistrar;
     private volatile DefaultRegistrar comRegistrar;
@@ -215,6 +221,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_TEST, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_CAPTCHA, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_LOCATION, -1, dc));
+        hostRequests.add(new AllocationTable.Request(HOST_OPERATOR, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_CA, -1, dc));
         if (moe.qingu.youran.server.net.pay.PayConfig.enabled) {
             hostRequests.add(new AllocationTable.Request(HOST_PAY, -1, dc));
@@ -253,10 +260,12 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         loop = new ExecutorEventLoop(THREAD_NAME);
         ca = new CaService(intermediate, caProblem[0], loop, System::currentTimeMillis, new SecureRandom());
         rejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
-        devices = new DeviceTable(book, new Bridge());
-        router = new Router(loop, book, devices, routerAddress);
-        nic = new NicGateway(loop, devices, router, rejects, NetworkConfig.devicePacketsPerSecond, NetworkConfig.deviceBytesPerSecond);
-        testDevices = new TestDevices(devices, loop, resolverAddress);
+        AddressBook addressBook = book;
+        nics = new NicTable(addressBook::coordinateAddress, loop, rejects, p -> router.forward(p),
+                NetworkConfig.devicePacketsPerSecond, NetworkConfig.deviceBytesPerSecond, this::unplugged);
+        router = new Router(loop, book, nics, routerAddress);
+        relays = new ClientRelays(loop, rejects, () -> resolverAddress, () -> ntpAddress);
+        testNics = new TestNics(loop, resolverAddress);
         if (!NetworkConfig.playerAddresses) {
             LOG.info("游戏内网络：玩家临时地址在配置里关掉了（network.playerAddresses=false）");
         } else if (!Long.valueOf(NetworkLayout.PLAYERS_DATACENTER).equals(activeDc.get(YouranNetworkApi.PLAYERS_DATACENTER))) {
@@ -266,7 +275,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                     NetworkConfig.playerPacketsPerSecond, NetworkConfig.playerBytesPerSecond,
                     NetworkConfig.playerInboundPacketsPerSecond, NetworkConfig.playerInboundBytesPerSecond);
             router.setPlayers(players);
-            nic.setPlayers(players);
         }
         Map<String, NetworkRegistry.HostDecl> declByKey = new LinkedHashMap<>();
         for (NetworkRegistry.HostDecl h : hostDecls) {
@@ -278,9 +286,11 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             System.setProperty("java.awt.headless", "true");
         }
         captcha = new CaptchaService(CaptchaStore.createDefault(), System::currentTimeMillis, CaptchaService.newDrawer());
-        locationSigner = loadLocationKey(server);
         mainRejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
         prompts = new ConfirmPrompts(new PromptEnv(), new SecureRandom());
+        proofs = new ProofDesk(new ProofEnv());
+        proofs.locationSigner = loadLocationKey(server);
+        proofs.operatorSigner = loadOperatorKey(server);
         startCaptchaLocal(captcha);
         if (moe.qingu.youran.server.net.pay.PayConfig.enabled) {
             pay = moe.qingu.youran.server.net.pay.PayServer.start(server);
@@ -297,7 +307,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         loop.execute(() -> startHosts(hostAddresses, declByKey, activeDcCopy));
         loop.execute(this::scheduleOverflowLog);
 
-        events = new NetworkEvents(devices, testDevices, this::playerLoggedIn, this::playerLoggedOut, this::serverTick);
+        events = new NetworkEvents(this::playerLoggedIn, this::playerLoggedOut, this::serverTick);
         MinecraftForge.EVENT_BUS.register(events);
         event.registerServerCommand(new NetCommand(this));
         LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机 {} 个；递归解析器 {}，NTP {}{}",
@@ -332,7 +342,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         p.attach(player.getUniqueID(), player.getName(), new PlayerNics.Link() {
             @Override
             public void deliver(byte[] packet) {
-                moe.qingu.youran.net.NicChannel.sendToClient(conn, moe.qingu.youran.net.NicMessages.playerPacket(packet));
+                moe.qingu.youran.net.NicChannel.sendToClient(conn, moe.qingu.youran.net.NicMessages.packet(moe.qingu.youran.net.NicMessages.PLAYER_PORT, packet));
             }
 
             @Override
@@ -367,10 +377,35 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
     }
 
+    /** 读身份模块的签名密钥；第一次开服时生成。读不了时返回 null（不签名，一键登录不可用） */
+    private static OperatorSigner loadOperatorKey(MinecraftServer server) {
+        File f = server.getFile(OPERATOR_KEY_FILE);
+        try {
+            OperatorSigner.Loaded l = OperatorSigner.loadOrCreate(f.toPath());
+            if (l.created) {
+                LOG.info("游戏内网络：第一次开服，生成了身份模块的签名密钥 {}（公钥编号 {}；私钥不要外传，不要放进仓库）", f, l.signer.keyId());
+            } else {
+                LOG.info("游戏内网络：身份模块的签名密钥公钥编号 {}", l.signer.keyId());
+            }
+            return l.signer;
+        } catch (Exception e) {
+            LOG.error("游戏内网络：读不了身份模块的签名密钥 {}，操作者证明不可用（文件没有动；坏了的话移走它，下次开服会生成新的）：{}", f, e.toString());
+            return null;
+        }
+    }
+
     private void playerLoggedOut(UUID player) {
         ConfirmPrompts cp = prompts;
         if (cp != null) {
             cp.playerLeft(player);
+        }
+        TestNics tn = testNics;
+        if (tn != null) {
+            tn.onPlayerLeft(player);
+        }
+        ClientRelays r = relays;
+        if (r != null) {
+            r.playerLeft(player);
         }
         PlayerNics p = players;
         if (p != null) {
@@ -483,10 +518,15 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         if (cs != null && captchaStack != null) {
             cs.start(captchaStack, siteTls(HOST_CAPTCHA, captchaStack, Collections.singletonList(CAPTCHA_NAME)));
         }
-        LocationSigner signer = locationSigner;
+        LocationSigner signer = proofs == null ? null : proofs.locationSigner;
         NetStack locationStack = hostStacks.get(HOST_LOCATION);
         if (signer != null && locationStack != null) {
             new LocationService(signer, System::currentTimeMillis).start(locationStack, siteTls(HOST_LOCATION, locationStack, Collections.singletonList(LOCATION_NAME)));
+        }
+        OperatorSigner opSigner = proofs == null ? null : proofs.operatorSigner;
+        NetStack operatorStack = hostStacks.get(HOST_OPERATOR);
+        if (opSigner != null && operatorStack != null) {
+            new OperatorService(opSigner, System::currentTimeMillis).start(operatorStack, siteTls(HOST_OPERATOR, operatorStack, Collections.singletonList(OPERATOR_NAME)));
         }
         moe.qingu.youran.server.net.pay.PayServer ps = pay;
         NetStack payStack = hostStacks.get(HOST_PAY);
@@ -560,6 +600,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         records.put(CAPTCHA_NAME, hosts.get(HOST_CAPTCHA));
         records.put(LOCATION_NAME, hosts.get(HOST_LOCATION));
+        records.put(OPERATOR_NAME, hosts.get(HOST_OPERATOR));
         records.put(CA_NAME, hosts.get(HOST_CA));
         if (pay != null) {
             records.put(PAY_NAME, hosts.get(HOST_PAY));
@@ -648,11 +689,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             MinecraftForge.EVENT_BUS.unregister(events);
             events = null;
         }
-        if (testDevices != null) {
-            testDevices.clear();
+        if (testNics != null) {
+            testNics.clear();
         }
-        if (devices != null) {
-            devices.clear();
+        if (relays != null) {
+            relays.clear();
+        }
+        if (nics != null) {
+            nics.clear();
         }
         if (players != null) {
             players.clear();
@@ -669,7 +713,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             prompts.clear();
             prompts = null;
         }
-        locationSigner = null;
+        proofs = null;
         for (RawHostPort r : rawHosts.values()) {
             r.close();
         }
@@ -704,10 +748,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         sitesDns = null;
         hostStacks.clear();
         router = null;
-        nic = null;
+        relays = null;
         players = null;
-        devices = null;
-        testDevices = null;
+        nics = null;
+        testNics = null;
         resolver = null;
         book = null;
         server = null;
@@ -718,8 +762,35 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     // ---- NetworkBackend ----
 
     @Override
-    public NetworkDevices devices() {
-        return devices;
+    public NicPort plug(NetworkInterface nic, int dimension, int x, int y, int z) {
+        NicTable t = nics;
+        return t == null ? null : t.plug(nic, dimension, x, y, z);
+    }
+
+    @Override
+    public void unplug(NicPort port) {
+        NicTable t = nics;
+        if (t != null) {
+            t.unplug(port);
+        }
+    }
+
+    /** 一张网卡拔掉了（任意线程）：接着玩家客户端的断开 */
+    private void unplugged(NicTable.Port port) {
+        if (port.nic instanceof ClientRelayNic) {
+            ((ClientRelayNic) port.nic).disconnect();
+        }
+    }
+
+    @Override
+    public Ipv6Address addressAt(int dimension, int x, int y, int z) {
+        AddressBook b = book;
+        return b == null ? null : b.coordinateAddress(dimension, x, y, z);
+    }
+
+    @Override
+    public ClientRelay relay() {
+        return relays;
     }
 
     @Override
@@ -779,17 +850,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
     }
 
-    @Override
-    public DeviceLocation deviceLocation(Ipv6Address address) {
-        AddressBook b = book;
-        DeviceTable d = devices;
-        return b == null || d == null ? null : d.locate(b, address);
-    }
-
     // ---- 系统确认框 ----
 
     @Override
-    public CompletableFuture<ConfirmResult> confirm(Ipv6Address source, UUID player, ConfirmRequest request) {
+    public CompletableFuture<ConfirmResult> confirm(UUID player, ConfirmRequest request) {
         MinecraftServer s = server;
         ConfirmPrompts p = prompts;
         if (s == null || p == null) {
@@ -804,7 +868,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             if (out.isCancelled()) {
                 return;
             }
-            CompletableFuture<ConfirmResult> f = source != null ? confirmSource(p, source, request) : confirmPlayer(p, player, request);
+            CompletableFuture<ConfirmResult> f = confirmPlayer(p, player, request);
             f.whenComplete((r, e) -> out.complete(r != null ? r : new ConfirmResult(ConfirmResult.Outcome.UNAVAILABLE, null, null)));
             // 调用方撤回：框还开着就关掉（下一 tick，或同一个人再弹框时）
             out.whenComplete((r, e) -> {
@@ -816,35 +880,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         return out;
     }
 
-    /** 主线程：问这个来源的当前操作者 */
-    private CompletableFuture<ConfirmResult> confirmSource(ConfirmPrompts p, Ipv6Address source, ConfirmRequest request) {
-        AddressBook b = book;
-        DeviceTable dt = devices;
-        DeviceTable.Device d = b == null || dt == null ? null : dt.deviceAt(b, source);
-        if (d != null) {
-            return confirmDevice(p, d, request);
-        }
-        PlayerNics pn = players;
-        Map.Entry<UUID, String> owner = pn == null ? null : pn.owner(source);
-        if (owner == null) {
-            return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
-        }
-        UUID id = owner.getKey();
-        return p.open(id, owner.getValue(), () -> source.equals(pn.address(id)) ? id : null, request);
-    }
-
-    /** 主线程：问设备现在的操作者；设备拿掉、断电、换人时作废 */
-    private CompletableFuture<ConfirmResult> confirmDevice(ConfirmPrompts p, DeviceTable.Device d, ConfirmRequest request) {
-        DeviceTable.Operator op = d.operator();
-        if (op == null || !d.powered) {
-            return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
-        }
-        return p.open(op.id, op.name, () -> d.removed || !d.powered ? null : d.operatorId(), request);
-    }
-
+    /** 主线程：问一个在线玩家；他下线时作废 */
     private CompletableFuture<ConfirmResult> confirmPlayer(ConfirmPrompts p, UUID player, ConfirmRequest request) {
         MinecraftServer s = server;
-        EntityPlayerMP e = s == null ? null : s.getPlayerList().getPlayerByUUID(player);
+        EntityPlayerMP e = s == null || player == null ? null : s.getPlayerList().getPlayerByUUID(player);
         if (e == null) {
             return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
         }
@@ -893,125 +932,72 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         return prompts;
     }
 
-    // ---- 定位模块 ----
+    // ---- 定位模块、身份模块 ----
+
+    /** 签名台要的东西（主线程） */
+    private final class ProofEnv implements ProofDesk.Env {
+        @Override
+        public long nowMillis() {
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public CompletableFuture<ConfirmResult> confirm(UUID player, ConfirmRequest request) {
+            ConfirmPrompts p = prompts;
+            if (p == null) {
+                return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.UNAVAILABLE, null, null));
+            }
+            return confirmPlayer(p, player, request);
+        }
+    }
 
     @Override
     public java.security.PublicKey locationKey() {
-        LocationSigner s = locationSigner;
+        ProofDesk d = proofs;
+        LocationSigner s = d == null ? null : d.locationSigner;
+        return s == null ? null : s.publicKey();
+    }
+
+    @Override
+    public java.security.PublicKey operatorKey() {
+        ProofDesk d = proofs;
+        OperatorSigner s = d == null ? null : d.operatorSigner;
         return s == null ? null : s.publicKey();
     }
 
     LocationSigner locationSigner() {
-        return locationSigner;
+        ProofDesk d = proofs;
+        return d == null ? null : d.locationSigner;
     }
 
     @Override
-    public CompletableFuture<LocationResult> signLocation(Ipv6Address device, String site, String nonce) {
+    public CompletableFuture<LocationResult> signLocation(NetworkInterface nic, GameProfile player, int dimension, int x, int y, int z, String site, String nonce) {
+        return onMain(d -> d.location(nic, player, dimension, x, y, z, site, nonce), LocationResult.of(LocationResult.Status.UNAVAILABLE));
+    }
+
+    @Override
+    public CompletableFuture<OperatorResult> signOperator(NetworkInterface nic, GameProfile player, String site, String nonce) {
+        return onMain(d -> d.operator(nic, player, site, nonce), OperatorResult.of(OperatorResult.Status.UNAVAILABLE));
+    }
+
+    /** 转到主线程上交给签名台；网络没在运行、服务器正在关时以 {@code unavailable} 完成 */
+    private <T> CompletableFuture<T> onMain(java.util.function.Function<ProofDesk, CompletableFuture<T>> task, T unavailable) {
         MinecraftServer s = server;
-        if (s == null || prompts == null) {
-            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.UNAVAILABLE));
+        ProofDesk d = proofs;
+        if (s == null || d == null) {
+            return CompletableFuture.completedFuture(unavailable);
         }
-        CompletableFuture<LocationResult> out = new CompletableFuture<>();
+        CompletableFuture<T> out = new CompletableFuture<>();
+        mainThreadTasks.add(out);
+        out.whenComplete((v, e) -> mainThreadTasks.remove(out));
         s.addScheduledTask(() -> {
-            AddressBook b = book;
-            DeviceTable dt = devices;
-            DeviceTable.Device d = b == null || dt == null ? null : dt.deviceAt(b, device);
-            if (d == null) {
-                out.complete(LocationResult.of(LocationResult.Status.NO_OPERATOR));
+            if (proofs != d) {
+                out.complete(unavailable);
                 return;
             }
-            signOnMain(d, site, nonce).whenComplete((r, e) -> out.complete(r != null ? r : LocationResult.of(LocationResult.Status.UNAVAILABLE)));
+            task.apply(d).whenComplete((r, e) -> out.complete(r != null ? r : unavailable));
         });
         return out;
-    }
-
-    @Override
-    public void onLocationRequest(EntityPlayerMP player, int requestId, String site, String nonce) {
-        DeviceTable dt = devices;
-        if (!locationLimit.tryAcquire(player.getUniqueID().toString(), System.currentTimeMillis())) {
-            YouranNetwork.CHANNEL.sendTo(new LocationMessages.Reply(requestId, LocationResult.Status.BUSY.code, null), player);
-            return;
-        }
-        // 他现在接着的那台设备（网卡接在他客户端上的）
-        DeviceTable.Device d = dt == null ? null : dt.byPlayer(player.getUniqueID());
-        CompletableFuture<LocationResult> f = d == null || d.removed
-                ? CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.NO_OPERATOR))
-                : signOnMain(d, site, nonce);
-        f.whenComplete((r, e) -> {
-            LocationResult res = r != null ? r : LocationResult.of(LocationResult.Status.UNAVAILABLE);
-            if (player.connection != null) {
-                YouranNetwork.CHANNEL.sendTo(new LocationMessages.Reply(requestId, res.status.code, res.proof), player);
-            }
-        });
-    }
-
-    /** 主线程：核对、问操作者、签名 */
-    CompletableFuture<LocationResult> signOnMain(DeviceTable.Device d, String site, String nonce) {
-        String s = site == null ? null : DomainNames.tryToAscii(site.trim().toLowerCase(java.util.Locale.ROOT));
-        if (s == null || !LocationProof.SITE.matcher(s).matches() || nonce == null || !LocationProof.NONCE.matcher(nonce).matches()) {
-            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.BAD_REQUEST));
-        }
-        LocationSigner signer = locationSigner;
-        ConfirmPrompts p = prompts;
-        if (signer == null || p == null) {
-            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.UNAVAILABLE));
-        }
-        if (!d.hasCapability(DeviceCapability.LOCATION)) {
-            return CompletableFuture.completedFuture(LocationResult.of(LocationResult.Status.NO_LOCATOR));
-        }
-        // 固定文字用翻译键，按操作者客户端的语言显示（服务端写好的中文是客户端没有这个键时的退路）
-        ConfirmRequest req = new ConfirmRequest(
-                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.title", "获取这台电脑的位置"), s, Arrays.asList(
-                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.position",
-                        "这台电脑的位置：维度 " + d.key.dimension + "，坐标 " + d.key.x + ", " + d.key.y + ", " + d.key.z,
-                        d.key.dimension, d.key.x, d.key.y, d.key.z),
-                moe.qingu.youran.api.network.ConfirmText.translate("youranmod.confirm.location.address", "这台电脑的游戏内地址")),
-                ConfirmRequest.DEFAULT_TIMEOUT_SECONDS, ConfirmRequest.Purpose.SHARE);
-        return confirmDevice(p, d, req).thenApply(r -> {
-            switch (r.outcome) {
-                case APPROVED:
-                    if (d.removed || !d.hasCapability(DeviceCapability.LOCATION)) {
-                        return LocationResult.of(d.removed ? LocationResult.Status.OPERATOR_CHANGED : LocationResult.Status.NO_LOCATOR);
-                    }
-                    try {
-                        LocationProof proof = signer.sign(d.key.dimension, d.key.x, d.key.y, d.key.z, d.address,
-                                System.currentTimeMillis() / 1000, s, nonce);
-                        LOG.info("游戏内网络：{} 同意把 {} 的位置给 {}", r.playerName, d.label(), s);
-                        return new LocationResult(LocationResult.Status.OK, proof.text());
-                    } catch (Exception e) {
-                        LOG.error("游戏内网络：位置签名失败", e);
-                        return LocationResult.of(LocationResult.Status.UNAVAILABLE);
-                    }
-                case DENIED:
-                    return LocationResult.of(LocationResult.Status.DENIED);
-                case TIMEOUT:
-                    return LocationResult.of(LocationResult.Status.TIMEOUT);
-                case OPERATOR_CHANGED:
-                    return LocationResult.of(LocationResult.Status.OPERATOR_CHANGED);
-                case BUSY:
-                    return LocationResult.of(LocationResult.Status.BUSY);
-                case NO_OPERATOR:
-                    return LocationResult.of(LocationResult.Status.NO_OPERATOR);
-                default:
-                    return LocationResult.of(LocationResult.Status.UNAVAILABLE);
-            }
-        });
-    }
-
-    @Override
-    public SourceIdentity identify(Ipv6Address address) {
-        AddressBook b = book;
-        DeviceTable d = devices;
-        if (b == null || d == null || address == null) {
-            return null;
-        }
-        SourceIdentity id = d.identify(b, address);
-        if (id != null) {
-            return id;
-        }
-        PlayerNics p = players;
-        Map.Entry<UUID, String> owner = p == null ? null : p.owner(address);
-        return owner == null ? null : new SourceIdentity(SourceIdentity.Kind.PLAYER, address, null, null, owner.getKey(), owner.getValue());
     }
 
     @Override
@@ -1020,10 +1006,9 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     }
 
     @Override
-    public void onClientPacket(EntityPlayerMP player, byte[] packet, int messageLength, boolean playerNic) {
+    public void onClientPacket(EntityPlayerMP player, int port, byte[] packet, int messageLength) {
         ExecutorEventLoop l = loop;
-        NicGateway g = nic;
-        if (l == null || g == null) {
+        if (l == null) {
             return;
         }
         UUID id = player.getUniqueID();
@@ -1036,15 +1021,35 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         l.execute(() -> {
             q.decrementAndGet();
-            if (playerNic) {
-                g.fromPlayerNic(id, name, packet);
-            } else {
-                g.fromPlayer(id, name, packet, messageLength);
-            }
+            clientPacket(id, name, port, packet, messageLength);
         });
     }
 
-    // ---- 给命令与设备表用 ----
+    /** 网络线程：玩家客户端从网口 {@code port} 发来的包（0 号是他自己的网口，别的是接着的网卡） */
+    void clientPacket(UUID id, String name, int port, byte[] packet, int messageLength) {
+        RejectLog r = rejects;
+        if (packet == null) {
+            r.reject("玩家 " + name, messageLength > moe.qingu.youran.net.NicMessages.MAX_MESSAGE
+                    ? "消息超过 " + moe.qingu.youran.net.NicMessages.MAX_MESSAGE + " 字节（" + messageLength + " 字节），包超过 1280 字节"
+                    : "不是原始包消息或长度不对（" + messageLength + " 字节）", loop.nowMillis());
+            return;
+        }
+        if (port == moe.qingu.youran.net.NicMessages.PLAYER_PORT) {
+            PlayerNics p = players;
+            if (p == null) {
+                r.reject("玩家 " + name, "玩家临时地址没开（network.playerAddresses=false）", loop.nowMillis());
+                return;
+            }
+            p.fromPlayer(id, name, packet);
+            return;
+        }
+        ClientRelays c = relays;
+        if (c != null) {
+            c.fromClient(id, name, port, packet);
+        }
+    }
+
+    // ---- 给命令用 ----
 
     ExecutorEventLoop loop() {
         return loop;
@@ -1066,12 +1071,20 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         return router;
     }
 
-    TestDevices testDevices() {
-        return testDevices;
+    TestNics testNics() {
+        return testNics;
     }
 
-    DeviceTable deviceTable() {
-        return devices;
+    NicTable nicTable() {
+        return nics;
+    }
+
+    ClientRelays relays() {
+        return relays;
+    }
+
+    ProofDesk proofs() {
+        return proofs;
     }
 
     RecursiveResolver resolver() {
@@ -1080,10 +1093,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
 
     RejectLog rejects() {
         return rejects;
-    }
-
-    NicGateway nic() {
-        return nic;
     }
 
     PlayerNics players() {
@@ -1100,42 +1109,6 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
 
     boolean running() {
         return loop != null;
-    }
-
-    /** 设备表要的东西 */
-    final class Bridge implements DeviceTable.Hooks {
-        @Override
-        public boolean isLoaded(int dimension, int x, int y, int z) {
-            return DeviceTable.isLoadedInWorld(dimension, x, y, z);
-        }
-
-        @Override
-        public Ipv6Address resolverAddress() {
-            return resolverAddress;
-        }
-
-        @Override
-        public Ipv6Address ntpAddress() {
-            return ntpAddress;
-        }
-
-        @Override
-        public EntityPlayerMP player(UUID id) {
-            MinecraftServer s = server;
-            return s == null ? null : s.getPlayerList().getPlayerByUUID(id);
-        }
-
-        @Override
-        public void fromDevice(DeviceTable.Device d, byte[] packet) {
-            ExecutorEventLoop l = loop;
-            NicGateway g = nic;
-            if (l == null || g == null) {
-                return;
-            }
-            // 排进队列，不在调用方（可能就是网络线程上的端点）里递归；超长的包不复制，反正会被拒绝
-            byte[] copy = packet.length <= Ipv6Packet.MAX_PACKET ? packet.clone() : packet;
-            l.execute(() -> g.fromDevice(d, copy));
-        }
     }
 
     /** 机房主机的运行环境 */

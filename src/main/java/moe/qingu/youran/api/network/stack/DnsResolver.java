@@ -18,10 +18,18 @@ public final class DnsResolver {
     static final int ATTEMPTS = 3;
 
     private final NetStack stack;
+    /** 从哪个网口问；null 为按源地址选择规则（默认网口） */
+    private final NetStack.Interface via;
     private final Ipv6Address server;
 
     public DnsResolver(NetStack stack, Ipv6Address server) {
+        this(stack, null, server);
+    }
+
+    /** 从网口 {@code via} 问（网口去掉时还没回来的查询报错）；{@code via} 为 null 同 {@link #DnsResolver(NetStack, Ipv6Address)} */
+    public DnsResolver(NetStack stack, NetStack.Interface via, Ipv6Address server) {
         this.stack = stack;
+        this.via = via;
         this.server = server;
     }
 
@@ -82,23 +90,32 @@ public final class DnsResolver {
         int id = stack.random.nextInt(0x10000);
         DnsMessage q = DnsMessage.query(id, name, type, true);
         byte[] bytes = q.encode();
-        stack.openUdp(null, 0, (socket, from, fromPort, to, data) -> {
-            if (!from.equals(server) || fromPort != DnsMessage.PORT) {
-                return;
+        UdpSocket.Handler handler = new UdpSocket.Handler() {
+            @Override
+            public void onDatagram(UdpSocket socket, Ipv6Address from, int fromPort, Ipv6Address to, byte[] data) {
+                if (!from.equals(server) || fromPort != DnsMessage.PORT) {
+                    return;
+                }
+                DnsMessage m;
+                try {
+                    m = DnsMessage.parse(data);
+                } catch (MalformedPacketException e) {
+                    return;
+                }
+                if (m.id != id || !m.response || m.questions.size() != 1
+                        || !DnsMessage.canonical(m.question().name).equals(DnsMessage.canonical(name)) || m.question().type != type) {
+                    return;
+                }
+                socket.close();
+                f.complete(m);
             }
-            DnsMessage m;
-            try {
-                m = DnsMessage.parse(data);
-            } catch (MalformedPacketException e) {
-                return;
+
+            @Override
+            public void onClosed(UdpSocket socket, NetworkException reason) {
+                f.completeExceptionally(reason);
             }
-            if (m.id != id || !m.response || m.questions.size() != 1
-                    || !DnsMessage.canonical(m.question().name).equals(DnsMessage.canonical(name)) || m.question().type != type) {
-                return;
-            }
-            socket.close();
-            f.complete(m);
-        }).whenComplete((socket, err) -> {
+        };
+        (via != null ? stack.openUdpVia(via, 0, handler) : stack.openUdp(null, 0, handler)).whenComplete((socket, err) -> {
             if (err != null) {
                 f.completeExceptionally(err);
                 return;

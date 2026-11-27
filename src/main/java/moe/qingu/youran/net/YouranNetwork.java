@@ -20,8 +20,7 @@ public final class YouranNetwork {
         CHANNEL.registerMessage(ConfirmMessages.ShowHandler.class, ConfirmMessages.Show.class, 1, Side.CLIENT);
         CHANNEL.registerMessage(ConfirmMessages.CloseHandler.class, ConfirmMessages.Close.class, 2, Side.CLIENT);
         CHANNEL.registerMessage(ConfirmMessages.AnswerHandler.class, ConfirmMessages.Answer.class, 3, Side.SERVER);
-        CHANNEL.registerMessage(LocationMessages.RequestHandler.class, LocationMessages.Request.class, 4, Side.SERVER);
-        CHANNEL.registerMessage(LocationMessages.ReplyHandler.class, LocationMessages.Reply.class, 5, Side.CLIENT);
+        // 4、5 原来是客户端请位置（服主 11-27 起由电脑模组自己请签名，见 api.network.location.LocationProofs），空着不用
         // 光刻机界面（2.1.0 光刻）
         CHANNEL.registerMessage(LithoMessages.SyncHandler.class, LithoMessages.Sync.class, 6, Side.CLIENT);
         CHANNEL.registerMessage(LithoMessages.ActionHandler.class, LithoMessages.Action.class, 7, Side.SERVER);

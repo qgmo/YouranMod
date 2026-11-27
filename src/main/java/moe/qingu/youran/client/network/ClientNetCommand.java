@@ -1,8 +1,10 @@
 package moe.qingu.youran.client.network;
 
-import moe.qingu.youran.api.network.ClientNic;
+import moe.qingu.youran.api.network.ClientHost;
 import moe.qingu.youran.api.network.Ipv6Address;
+import moe.qingu.youran.api.network.stack.DnsResolver;
 import moe.qingu.youran.api.network.stack.HttpClient;
+import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NetworkException;
 import moe.qingu.youran.api.network.stack.NtpClient;
 import moe.qingu.youran.api.network.stack.PingResult;
@@ -18,8 +20,9 @@ import java.time.Instant;
 import java.util.concurrent.CompletionException;
 
 /**
- * 客户端测试命令 /ynetc：用本机（客户端）上的协议栈 ping、查 DNS、取网页、对时，验证“网卡”这条路。
- * 只有服务器把这个玩家接到某台设备上（如 /ynet device bind）以后才能用。谁都能用（只动自己客户端上的协议栈）。
+ * 客户端测试命令 /ynetc：用本机（客户端）上的协议栈 ping、查 DNS、取网页、对时，验证客户端的网口。
+ * {@code status} 列出现在的网口；{@code -i <网口号>} 绑一个网口（如 /ynet device bind 接上的测试网卡），不绑的走默认网口（玩家自己的）。
+ * 谁都能用（只动自己客户端上的协议栈）。
  */
 public final class ClientNetCommand extends CommandBase {
     private static final long TIMEOUT_MS = 15_000;
@@ -44,35 +47,70 @@ public final class ClientNetCommand extends CommandBase {
         return true;
     }
 
+    /** 用哪个网口：绑了（-i）就是它，否则不绑（走默认网口），DNS 问默认网口（玩家自己的网口）的递归解析器 */
+    private static final class Via {
+        final NetStack stack;
+        final NetStack.Interface iface;
+        final DnsResolver dns;
+        final Ipv6Address ntp;
+
+        Via(NetStack stack, NetStack.Interface iface, DnsResolver dns, Ipv6Address ntp) {
+            this.stack = stack;
+            this.iface = iface;
+            this.dns = dns;
+            this.ntp = ntp;
+        }
+    }
+
     @Override
     public void execute(MinecraftServer server, ICommandSender sender, String[] args) throws CommandException {
-        // /ynetc player ...：用玩家临时地址那块（受限的）网卡
-        boolean player = args.length > 0 && args[0].equals("player");
-        if (player) {
-            args = java.util.Arrays.copyOfRange(args, 1, args.length);
+        // /ynetc -i <网口号> ...：绑这个网口
+        int bind = -1;
+        if (args.length >= 2 && args[0].equals("-i")) {
+            bind = parseInt(args[1], 0, 255);
+            args = java.util.Arrays.copyOfRange(args, 2, args.length);
         }
-        ClientNic.Session s = player ? ClientNic.player() : ClientNic.current();
         String sub = args.length > 0 ? args[0] : "status";
-        if (s == null) {
-            say(player ? "youranmod.net.client.no_player_address" : "youranmod.net.client.detached");
+        NetStack stack = ClientHost.stack();
+        if (sub.equals("status")) {
+            java.util.List<ClientHost.Port> ports = ClientHost.ports();
+            if (ports.isEmpty()) {
+                say("youranmod.net.client.no_ports");
+            }
+            for (ClientHost.Port p : ports) {
+                say("youranmod.net.client.port", p.id(), p.name(), p.address(), p.resolverAddress(), p.ntpAddress());
+            }
             return;
         }
+        Via v;
+        if (bind >= 0) {
+            ClientHost.Port p = ClientHost.port(bind);
+            if (p == null || p.isRemoved()) {
+                say("youranmod.net.client.no_port", bind);
+                return;
+            }
+            v = new Via(p.stack(), p.iface(), p.dns(), p.ntpAddress());
+        } else {
+            ClientHost.Port p = ClientHost.playerPort();
+            if (stack == null || p == null) {
+                say("youranmod.net.client.no_default");
+                return;
+            }
+            v = new Via(stack, null, new DnsResolver(stack, p.resolverAddress()), p.ntpAddress());
+        }
         switch (sub) {
-            case "status":
-                say("youranmod.net.client.status", s.address(), s.resolverAddress(), s.ntpAddress());
-                break;
             case "ping": {
                 if (args.length < 2) {
                     throw new WrongUsageException("youranmod.net.client.usage");
                 }
                 String target = args[1];
                 int count = args.length > 2 ? parseInt(args[2], 1, 20) : 4;
-                s.dns().resolveAaaa(target).whenComplete((r, err) -> {
+                v.dns.resolveAaaa(target).whenComplete((r, err) -> {
                     if (err != null || r.addresses.isEmpty()) {
                         say("youranmod.net.client.failed", err != null ? message(err) : "NXDOMAIN " + target);
                         return;
                     }
-                    ping(s, r.addresses.get(0), 0, count);
+                    ping(v, r.addresses.get(0), 0, count);
                 });
                 break;
             }
@@ -81,7 +119,7 @@ public final class ClientNetCommand extends CommandBase {
                     throw new WrongUsageException("youranmod.net.client.usage");
                 }
                 String name = args[1];
-                s.dns().resolveAaaa(name).whenComplete((r, err) -> {
+                v.dns.resolveAaaa(name).whenComplete((r, err) -> {
                     if (err != null) {
                         say("youranmod.net.client.failed", message(err));
                     } else {
@@ -94,7 +132,7 @@ public final class ClientNetCommand extends CommandBase {
                 if (args.length < 2) {
                     throw new WrongUsageException("youranmod.net.client.usage");
                 }
-                HttpClient.fetch(s.stack(), s.dns(), args[1], TIMEOUT_MS).whenComplete((r, err) -> {
+                HttpClient.fetch(v.stack, v.iface, v.dns, args[1], TIMEOUT_MS).whenComplete((r, err) -> {
                     if (err != null) {
                         say("youranmod.net.client.failed", message(err));
                         return;
@@ -109,11 +147,11 @@ public final class ClientNetCommand extends CommandBase {
                 break;
             }
             case "ntp":
-                if (s.ntpAddress() == null) {
+                if (v.ntp == null) {
                     say("youranmod.net.client.failed", "NTP");
                     break;
                 }
-                NtpClient.query(s.stack(), s.ntpAddress()).whenComplete((r, err) -> {
+                NtpClient.query(v.stack, v.iface, v.ntp).whenComplete((r, err) -> {
                     if (err != null) {
                         say("youranmod.net.client.failed", message(err));
                     } else {
@@ -126,8 +164,8 @@ public final class ClientNetCommand extends CommandBase {
         }
     }
 
-    private static void ping(ClientNic.Session s, Ipv6Address addr, int i, int count) {
-        s.stack().ping(null, addr, 56, 2000).whenComplete((r, err) -> {
+    private static void ping(Via v, Ipv6Address addr, int i, int count) {
+        (v.iface != null ? v.stack.pingVia(v.iface, addr, 56, 2000) : v.stack.ping(null, addr, 56, 2000)).whenComplete((r, err) -> {
             if (err != null) {
                 say("youranmod.net.client.failed", message(err));
                 return;
@@ -141,8 +179,8 @@ public final class ClientNetCommand extends CommandBase {
             } else {
                 say("youranmod.net.client.ping.timeout", i + 1);
             }
-            if (i + 1 < count && !s.isClosed()) {
-                s.stack().loop().schedule(() -> ping(s, addr, i + 1, count), 1000);
+            if (i + 1 < count && !v.stack.isClosed() && (v.iface == null || !v.iface.isRemoved())) {
+                v.stack.loop().schedule(() -> ping(v, addr, i + 1, count), 1000);
             }
         });
     }

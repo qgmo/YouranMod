@@ -61,8 +61,20 @@ public final class LocationSigner {
 
     /** 读密钥文件；文件不存在时生成并写进去。文件存在但读不了时抛出（不覆盖） */
     public static Loaded loadOrCreate(Path file) throws IOException, GeneralSecurityException {
+        boolean[] created = new boolean[1];
+        KeyPair pair = loadOrCreatePair(file, COMMENT, created);
+        return new Loaded(new LocationSigner(pair), created[0]);
+    }
+
+    static final String COMMENT = "# YouranMod 定位模块的签名密钥（ECDSA P-256）。私钥不要外传；换掉这个文件等于换密钥，网站要重新取公钥。\n";
+
+    /**
+     * 签名密钥文件的通用读写（定位模块、身份模块各一份，存法相同）：两段 PEM，前面一行注释 {@code comment}。
+     * 文件不存在时生成并写进去（{@code created[0]} 置 true）；存在但读不了时抛出（不覆盖）
+     */
+    public static KeyPair loadOrCreatePair(Path file, String comment, boolean[] created) throws IOException, GeneralSecurityException {
         if (Files.exists(file)) {
-            return new Loaded(new LocationSigner(read(new String(Files.readAllBytes(file), StandardCharsets.US_ASCII))), false);
+            return read(new String(Files.readAllBytes(file), StandardCharsets.US_ASCII));
         }
         KeyPair pair = generate(new SecureRandom());
         Path dir = file.toAbsolutePath().getParent();
@@ -70,25 +82,32 @@ public final class LocationSigner {
             Files.createDirectories(dir);
         }
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-        Files.write(tmp, write(pair).getBytes(StandardCharsets.US_ASCII));
+        Files.write(tmp, write(pair, comment).getBytes(StandardCharsets.US_ASCII));
         try {
             Files.setPosixFilePermissions(tmp, EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
         } catch (UnsupportedOperationException | IOException e) {
             // Windows 等没有 POSIX 权限的文件系统：照常写
         }
         Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
-        return new Loaded(new LocationSigner(pair), true);
+        if (created != null && created.length > 0) {
+            created[0] = true;
+        }
+        return pair;
     }
 
     /** 两段 PEM */
     public static String write(KeyPair pair) {
+        return write(pair, COMMENT);
+    }
+
+    static String write(KeyPair pair, String comment) {
         Base64.Encoder enc = Base64.getMimeEncoder(64, new byte[]{'\n'});
-        return "# YouranMod 定位模块的签名密钥（ECDSA P-256）。私钥不要外传；换掉这个文件等于换密钥，网站要重新取公钥。\n"
+        return comment
                 + "-----BEGIN PRIVATE KEY-----\n" + enc.encodeToString(pair.getPrivate().getEncoded()) + "\n-----END PRIVATE KEY-----\n"
                 + LocationProof.publicKeyPem(pair.getPublic());
     }
 
-    static KeyPair read(String text) throws GeneralSecurityException {
+    public static KeyPair read(String text) throws GeneralSecurityException {
         Matcher pr = PRIVATE.matcher(text);
         Matcher pu = PUBLIC.matcher(text);
         if (!pr.find() || !pu.find()) {

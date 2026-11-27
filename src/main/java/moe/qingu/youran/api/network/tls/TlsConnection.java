@@ -105,6 +105,12 @@ public final class TlsConnection {
      * 握手完成时 future 完成；失败时以 {@link NetworkException} 结束（证书问题是 {@link NetworkException.Reason#CERTIFICATE}）。
      */
     public static CompletableFuture<TlsConnection> connect(NetStack stack, Ipv6Address address, int port, String host, TlsTrust trust, Listener listener) {
+        return connect(stack, null, address, port, host, trust, listener);
+    }
+
+    /** 同上，从网口 {@code via} 连（null 为按源地址选择规则，默认网口） */
+    public static CompletableFuture<TlsConnection> connect(NetStack stack, NetStack.Interface via, Ipv6Address address, int port, String host, TlsTrust trust,
+                                                         Listener listener) {
         CompletableFuture<TlsConnection> f = new CompletableFuture<>();
         TlsConnection c;
         try {
@@ -130,7 +136,7 @@ public final class TlsConnection {
             return f;
         }
         c.openFuture = f;
-        stack.connect(null, address, port, c.new TcpSide()).whenComplete((tcp, err) -> {
+        (via != null ? stack.connectVia(via, address, port, c.new TcpSide()) : stack.connect(null, address, port, c.new TcpSide())).whenComplete((tcp, err) -> {
             if (err != null) {
                 f.completeExceptionally(err);
                 return;

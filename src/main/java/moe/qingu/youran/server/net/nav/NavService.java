@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
  * <pre>
  * 180.yr            GET /  主页；GET /s?q=  搜索；GET /logo.png；GET /ad/编号.png（只给在播的）
  * platform.180.yr   GET /  价格与我的广告；GET|POST /buy  投放；GET /ad/编号  一条广告；POST /ad/编号/again  用同样的内容重新下单；
- *                   GET|POST /report  举报；GET /admin、POST /admin/remove、/admin/ban、/admin/unban  管理；
+ *                   GET|POST /report  举报（要先用 id.yr 登录，记下举报人）；GET /admin、POST /admin/remove、/admin/ban、/admin/unban  管理；
  *                   GET /login、/login/callback、POST /logout  用 id.yr 游戏角色一键登录；
  *                   POST /account/security  打开、关闭“操作前必须验证身份”；GET /verified/编号  id.yr 验证身份后跳回来；
  *                   POST /verified/编号/again  没通过时“重新验证”
@@ -94,9 +94,6 @@ final class NavService {
 
         /** 收款单的付款页网址；查不到为 null */
         String checkoutUrl(String orderId);
-
-        /** 来源地址认出来的操作者名字；认不出为 null */
-        String identify(Ipv6Address source);
     }
 
     static final class Session {
@@ -203,7 +200,7 @@ final class NavService {
     private final SourceLimiter loginLimit = new SourceLimiter(0.5, 10, 8192);
     private final SourceLimiter buyLimit = new SourceLimiter(0.2, 5, 8192);
     private final SourceLimiter reportLimit = new SourceLimiter(1 / 60.0, 5, 8192);
-    /** 举报过的（来源 + 广告），同一来源同一条只记一次 */
+    /** 举报过的（举报人 + 广告），同一个人同一条只记一次 */
     private final Set<String> reported = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
     NavService(AdBook book, AdStore store, NavDirectory directory, Env env, IdYrClient id, byte[] logo, long idleMs) {
@@ -684,9 +681,14 @@ final class NavService {
         if (a == null || (a.state != AdBook.State.LIVE && !canSee(s, a))) {
             return page(404, frame("举报", s, scheme, "<p>这条广告已经不在了。</p>"));
         }
+        if (s == null) {
+            // 举报要记下是谁（服主 11-27）：先用 id.yr 登录，登录完回到这里（还没填东西）
+            return redirect("/login?next=" + IdYrClient.enc("/report?ad=" + a.id));
+        }
         StringBuilder b = new StringBuilder("<h1>举报广告 #").append(a.id).append("</h1>\n<p>").append(NavPages.preview(a)).append("</p>")
                 .append("<p class=\"gray\">链接到 ").append(NavPages.esc(NavPages.domainOf(a.link))).append("</p>\n")
-                .append("<form method=\"post\" action=\"/report\"><div><input type=\"hidden\" name=\"ad\" value=\"").append(a.id).append("\" /></div>")
+                .append("<form method=\"post\" action=\"/report\"><div><input type=\"hidden\" name=\"ad\" value=\"").append(a.id)
+                .append("\" /><input type=\"hidden\" name=\"csrf\" value=\"").append(NavPages.esc(s.csrf)).append("\" /></div>")
                 .append("<table class=\"form\"><tr><th>原因</th><td><select name=\"reason\">");
         for (String reason : REASONS) {
             b.append("<option>").append(NavPages.esc(reason)).append("</option>");
@@ -699,7 +701,14 @@ final class NavService {
     static final String[] REASONS = {"违法违规", "色情低俗", "骗人、虚假", "恶意链接", "其他"};
 
     private HttpResponse report(HttpRequest r, Session s, String scheme, long now) {
+        if (s == null) {
+            return page(401, frame("没有登录", null, scheme, "<p class=\"err\">举报要先登录（记下是谁举报的）。请先<a href=\"/login\">登录</a>，"
+                    + "再点浏览器的“后退”回来提交（填的内容还在）。</p>"));
+        }
         Map<String, String> f = r.form();
+        if (!s.csrf.equals(f.get("csrf"))) {
+            return page(403, frame("页面过期了", s, scheme, "<p class=\"err\">页面过期了。点浏览器的“后退”回去，刷新后再提交。</p>"));
+        }
         AdBook.Ad a = parseAd(f.get("ad"));
         if (a == null || a.state != AdBook.State.LIVE && a.state != AdBook.State.QUEUED) {
             return page(404, frame("举报", s, scheme, "<p>这条广告已经不在了。</p>"));
@@ -716,15 +725,15 @@ final class NavService {
             return page(422, frame("举报", s, scheme, "<p class=\"err\">" + NavPages.esc(e.getMessage()) + "（点“后退”修改）</p>"));
         }
         String source = String.valueOf(r.remoteAddress);
-        String key = source + " " + a.id;
+        String key = s.player + " " + a.id;
         if (reported.contains(key)) {
             return ok(frame("举报", s, scheme, "<p class=\"ok\">已经举报过了，谢谢。</p><p><a href=\"" + NavPages.esc(NavPages.url(scheme, NAV, "/")) + "\">回 180</a></p>"));
         }
         if (!reportLimit.tryAcquire(source, now)) {
             return page(429, frame("举报", s, scheme, "<p class=\"err\">举报太频繁了，过一会再试。</p>"));
         }
-        String who = env.identify(r.remoteAddress);
-        String by = (who == null ? "" : who + " ") + "@" + source;
+        // 举报人：id.yr 登录给的角色，加上这次的来源地址
+        String by = s.name + "（" + s.player + "）@" + source;
         if (book.report(a, (known ? reason : "其他") + (detail.isEmpty() ? "" : "：" + detail), by, now)) {
             if (reported.size() > 100_000) {
                 reported.clear();

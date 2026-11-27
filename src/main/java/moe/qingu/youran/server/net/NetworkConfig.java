@@ -6,7 +6,7 @@ import net.minecraftforge.common.config.Config;
 /** 游戏内网络（服务器内网）的配置，在 config/youranmod.cfg 的 network 节。只在服务端（完整包里有）。 */
 @Config(modid = ServerConfig.KEY, name = ServerConfig.FILE, category = "network")
 public final class NetworkConfig {
-    @Config.Comment({"是否运行游戏内网络（路由器、DNS、NTP、测试网站、设备网卡）。关掉后设备都连不上。默认 true。"})
+    @Config.Comment({"是否运行游戏内网络（路由器、DNS、NTP、测试网站、网卡）。关掉后电脑都连不上。默认 true。"})
     @Config.RequiresMcRestart
     public static boolean enabled = true;
 
@@ -16,17 +16,17 @@ public final class NetworkConfig {
     @Config.RequiresMcRestart
     public static int[] wifiDimensions = {0, -1, 1};
 
-    @Config.Comment({"每台设备每秒最多发多少个包（玩家客户端发来的和服务端端点发的都算）。超过的丢掉并记日志。默认 200。"})
+    @Config.Comment({"每张网卡每秒最多发多少个包（家具电脑这类接玩家客户端的网卡、服务端模拟的网卡都算）。超过的丢掉并记日志。默认 200。"})
     @Config.RangeInt(min = 1)
     @Config.RequiresMcRestart
     public static int devicePacketsPerSecond = 200;
 
-    @Config.Comment({"每台设备每秒最多发多少字节（按 IPv6 包长算）。超过的丢掉并记日志。默认 131072（128 KiB/s）。"})
+    @Config.Comment({"每张网卡每秒最多发多少字节（按 IPv6 包长算）。超过的丢掉并记日志。默认 131072（128 KiB/s）。"})
     @Config.RangeInt(min = 1280)
     @Config.RequiresMcRestart
     public static int deviceBytesPerSecond = 131072;
 
-    @Config.Comment({"同一类被丢掉的包（同一个玩家或设备、同一个原因）最多每隔多少秒记一条日志，中间的只计数。默认 10。"})
+    @Config.Comment({"同一类被丢掉的包（同一个玩家或网卡、同一个原因）最多每隔多少秒记一条日志，中间的只计数。默认 10。"})
     @Config.RangeInt(min = 1)
     @Config.RequiresMcRestart
     public static int rejectLogIntervalSeconds = 10;

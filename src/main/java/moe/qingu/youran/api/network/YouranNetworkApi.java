@@ -1,11 +1,11 @@
 package moe.qingu.youran.api.network;
 
+import moe.qingu.youran.api.network.ca.CertificateAuthority;
 import moe.qingu.youran.network.NetworkBackend;
 import moe.qingu.youran.network.NetworkHooks;
 import moe.qingu.youran.network.NetworkRegistry;
-import moe.qingu.youran.api.network.ca.CertificateAuthority;
-
-
+import moe.qingu.youran.network.NicAccess;
+import moe.qingu.youran.network.NicPort;
 
 /**
  * 服务器内网（游戏内 IPv6 网络）给其他模组的入口。
@@ -14,9 +14,11 @@ import moe.qingu.youran.api.network.ca.CertificateAuthority;
  * 用“模组 ID + 名字”登记的机房、主机，第一次按顺序分一个空闲的，以后同一个名字拿到的地址不变；
  * 指定了具体地址、又和别的名字已分到的冲突时拒绝并记日志。开服以后再登记的要到下次开服才生效。
  * <p>
- * <b>运行时</b>（{@link #devices()} 等）：只在服务端、网络运行时有用；客户端上、关服后、YouranMod 客户端包里返回 null。
+ * <b>运行时</b>（{@link #plug} 等）：只在服务端、网络运行时有用；客户端上、关服后、YouranMod 客户端包里返回 null。
  * <p>
- * 设备上的协议栈（客户端）见 {@code api.network.stack.NetStack} 与 {@code client.network.ClientNetwork}。
+ * <b>网卡</b>：设备接进网络的唯一途径是网卡（{@link NetworkInterface}）。电脑模组写自己的网卡子类，方块加载时 {@link #plug} 到它那一格、
+ * 卸载或拆掉时 {@link #unplug}；网络不跟区块加载。协议栈在玩家客户端上的电脑用 YouranMod 自带的 {@link ClientRelayNic}。
+ * 客户端上的协议栈见 {@link ClientHost}。
  * <p>
  * 域名不在这里登记：网络运行后向注册局注册（见 {@code api.network.dns}），自己跑 DNS（{@code api.network.dns.DnsServer}）。
  */
@@ -25,6 +27,38 @@ public final class YouranNetworkApi {
     public static final String YOURANMOD_DATACENTER = "youranmod:main";
     /** 玩家临时地址的 /96（玩法 /64 的最后一个，序号 {@link NetworkLayout#PLAYERS_DATACENTER}）；不能在里面登记主机 */
     public static final String PLAYERS_DATACENTER = "youranmod:players";
+
+    static {
+        // 服务端网络内部给网卡装、拿端口的入口（玩家网口、关服时拔掉所有网卡）；端口字段只在这个包里能改
+        NetworkHooks.setNicAccess(new NicAccess() {
+            @Override
+            public boolean attach(NetworkInterface nic, NicPort port) {
+                synchronized (nic) {
+                    if (nic.port != null) {
+                        return false;
+                    }
+                    nic.port = port;
+                    return true;
+                }
+            }
+
+            @Override
+            public boolean detach(NetworkInterface nic, NicPort port) {
+                synchronized (nic) {
+                    if (nic.port != port || port == null) {
+                        return false;
+                    }
+                    nic.port = null;
+                    return true;
+                }
+            }
+
+            @Override
+            public NicPort portOf(NetworkInterface nic) {
+                return nic.port;
+            }
+        });
+    }
 
     private YouranNetworkApi() {
     }
@@ -104,10 +138,39 @@ public final class YouranNetworkApi {
         return NetworkHooks.backend() != null;
     }
 
-    /** 设备表（服务端主线程用）；网络没在运行时为 null */
-    public static NetworkDevices devices() {
+    /**
+     * 把网卡插到维度 {@code dimension} 的 (x, y, z)，用这一格的 0 号地址。任意线程。
+     * 返回分到的地址；这个维度没有全局 Wi-Fi、坐标超出范围、这一格已经插着别的网卡、这张网卡已经插着、网络没在运行时返回 null。
+     */
+    public static Ipv6Address plug(NetworkInterface nic, int dimension, int x, int y, int z) {
+        synchronized (nic) {
+            NetworkBackend b = NetworkHooks.backend();
+            if (b == null || nic.port != null) {
+                return null;
+            }
+            NicPort p = b.plug(nic, dimension, x, y, z);
+            nic.port = p;
+            return p == null ? null : p.address();
+        }
+    }
+
+    /** 拔掉；没插着时什么都不做。任意线程 */
+    public static void unplug(NetworkInterface nic) {
+        NicPort p;
+        synchronized (nic) {
+            p = nic.port;
+            nic.port = null;
+        }
         NetworkBackend b = NetworkHooks.backend();
-        return b == null ? null : b.devices();
+        if (p != null && b != null) {
+            b.unplug(p);
+        }
+    }
+
+    /** 这一格（0 号）的地址；没有地址为 null。不要求插着网卡 */
+    public static Ipv6Address addressAt(int dimension, int x, int y, int z) {
+        NetworkBackend b = NetworkHooks.backend();
+        return b == null ? null : b.addressAt(dimension, x, y, z);
     }
 
     /** 登记过的主机的地址；没有或网络没在运行时为 null */
@@ -159,34 +222,6 @@ public final class YouranNetworkApi {
     public static CertificateAuthority certificateAuthority() {
         NetworkBackend b = NetworkHooks.backend();
         return b == null ? null : b.certificateAuthority();
-    }
-
-    /**
-     * 服务端：这个地址是设备表里一台设备（家具电脑等）的地址时，返回它在哪个维度、哪一格；不是（玩家临时地址、机房主机、
-     * 那一格上没有登记设备、不在这个服务器内网里）或网络没在运行时返回 null。按地址结构直接算（坐标路由里的地址就是坐标），
-     * 再查一次设备表，不读世界；任意线程都可以调用（例如在网络线程上按 TCP 来源地址查）。
-     * <p>
-     * 路由器已经保证设备发出的包源地址就是设备地址（只收当前操作者的、源地址必须对），所以按来源查到的位置可以信。
-     */
-    public static DeviceLocation deviceLocation(Ipv6Address address) {
-        NetworkBackend b = NetworkHooks.backend();
-        return b == null || address == null ? null : b.deviceLocation(address);
-    }
-
-    /**
-     * 服务端：按来源地址认人（“运营商一键登录”的那一层，服主 11-15）。给一个 IPv6 来源地址（例如 TCP 连接的对方地址），返回：
-     * <ul>
-     * <li>它是设备表里一台设备（家具电脑、SCP 电脑等）的地址时：哪个维度哪一格、设备声明的能力（{@link DeviceCapability}，
-     * 如有没有一键登录能力）、现在操作它的玩家（网卡接着玩家客户端时是那个玩家，否则是电脑模组用 {@link DeviceHandle#setOperator} 告诉的）；</li>
-     * <li>它是玩家临时地址（{@link PlayerAddresses}）时：直接就是那个玩家（{@link SourceIdentity.Kind#PLAYER}，没有位置）；</li>
-     * <li>都不是（机房主机、没登记设备的格子、不在这个服务器内网里）或网络没在运行时：null。</li>
-     * </ul>
-     * 不读世界，只查主线程在变化时更新的表（快照），任意线程都可以调用（例如在网络线程上处理请求时）。
-     * 来源可以信：路由器只收设备当前操作者发来的包、源地址必须是设备地址。
-     */
-    public static SourceIdentity identify(Ipv6Address address) {
-        NetworkBackend b = NetworkHooks.backend();
-        return b == null || address == null ? null : b.identify(address);
     }
 
     /** NTP 服务器的地址 */

@@ -1,11 +1,15 @@
 package moe.qingu.youran.server.net;
 
 import moe.qingu.youran.api.network.Ipv6Address;
+import moe.qingu.youran.api.network.NetworkInterface;
 import moe.qingu.youran.api.network.NetworkLayout;
 import moe.qingu.youran.api.network.packet.Icmpv6Message;
 import moe.qingu.youran.api.network.packet.Ipv6Packet;
 import moe.qingu.youran.api.network.stack.EventLoop;
 import moe.qingu.youran.net.NicMessages;
+import moe.qingu.youran.network.NetworkHooks;
+import moe.qingu.youran.network.NicAccess;
+import moe.qingu.youran.network.NicPort;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -25,7 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * 玩家临时地址（服主 11-14）：玩法 /64 里的最后一个 /96（{@link NetworkLayout#PLAYERS_DATACENTER}）。
  * 玩家上线时分一个随机的 /128（每次上线都重新随机，同一时刻不重复），下线收回，不进存档。
- * 协议栈跑在玩家自己的客户端上（同设备网卡的方案 A），这里是服务端路由器上的一道防火墙，规则只在服务端执行：
+ * 协议栈跑在玩家自己的客户端上（客户端的 0 号网口，服主 11-27：一个协议栈、多个网口）。每个玩家在服务端是一张网卡（{@link PlayerNic}），
+ * 它的端口带一道防火墙，规则只在服务端执行：
  * <ul>
  * <li>源地址必须是这个玩家自己的临时地址；</li>
  * <li>往外只许：递归解析器的 UDP 53（DNS），以及“放行的目标主机”的 TCP 80 / 443，且 TCP 只能由玩家这边发起（第一个段是 SYN）；</li>
@@ -80,14 +85,12 @@ final class PlayerNics {
 
     /** 任意线程读：玩家 → 临时地址 */
     private final Map<UUID, Ipv6Address> addresses = new ConcurrentHashMap<>();
-    /** 任意线程读：玩家 → 名字（有临时地址的才有） */
-    private final Map<UUID, String> names = new ConcurrentHashMap<>();
     /** 已经分出去的主机号（分配时用 putIfAbsent 保证不重复；网络线程上拿掉网卡以后才放回） */
     private final Map<Long, UUID> parts = new ConcurrentHashMap<>();
 
     // ---- 只在网络线程上 ----
-    private final Map<UUID, Nic> byPlayer = new HashMap<>();
-    private final Map<Long, Nic> byPart = new HashMap<>();
+    private final Map<UUID, PlayerNic> byPlayer = new HashMap<>();
+    private final Map<Long, PlayerNic> byPart = new HashMap<>();
 
     // 统计（网络线程上改，读的时候不加锁，只用来显示）
     volatile long outAccepted;
@@ -120,17 +123,20 @@ final class PlayerNics {
         } while (part == 0 || part == 0xFFFFFFFFL || parts.putIfAbsent(part, player) != null);
         Ipv6Address address = layout.playerAddress(part);
         int gen = generations.incrementAndGet();
-        Nic n = new Nic(player, name, address, part, link, gen);
+        PlayerNic n = new PlayerNic(player, name, address, part, link, gen);
+        NicAccess access = NetworkHooks.nicAccess();
+        if (access != null) {
+            access.attach(n, n.port);
+        }
         addresses.put(player, address);
-        names.put(player, name);
         loop.execute(() -> {
-            Nic old = byPlayer.put(player, n);
+            PlayerNic old = byPlayer.put(player, n);
             if (old != null) {
                 closeInLoop(old);
             }
             byPart.put(n.part, n);
         });
-        link.control(NicMessages.playerAttach(gen, address, resolver));
+        link.control(NicMessages.portUp(NicMessages.PLAYER_PORT, NicMessages.KIND_PLAYER, address, resolver, null));
         return address;
     }
 
@@ -140,24 +146,27 @@ final class PlayerNics {
         if (a == null) {
             return;
         }
-        names.remove(player);
         long part = NetworkLayout.hostPartOf(a);
         loop.execute(() -> {
-            Nic n = byPart.get(part);
+            PlayerNic n = byPart.get(part);
             if (n != null && n.player.equals(player)) {
                 byPart.remove(part);
                 if (byPlayer.get(player) == n) {
                     byPlayer.remove(player);
                 }
                 closeInLoop(n);
-                n.link.control(NicMessages.playerDetach(n.generation));
+                n.link.control(NicMessages.portDown(NicMessages.PLAYER_PORT));
             }
             parts.remove(part, player);
         });
     }
 
-    private void closeInLoop(Nic n) {
+    private void closeInLoop(PlayerNic n) {
         n.closed = true;
+        NicAccess access = NetworkHooks.nicAccess();
+        if (access != null) {
+            access.detach(n, n.port);
+        }
         n.flows.clear();
         n.grants.clear();
         byPart.remove(n.part, n);
@@ -167,8 +176,10 @@ final class PlayerNics {
     /** 关服：全部收回（不发消息，连接都要断了） */
     void clear() {
         addresses.clear();
-        names.clear();
         loop.execute(() -> {
+            for (PlayerNic n : new ArrayList<>(byPlayer.values())) {
+                closeInLoop(n);
+            }
             byPlayer.clear();
             byPart.clear();
             parts.clear();
@@ -177,19 +188,6 @@ final class PlayerNics {
 
     Ipv6Address address(UUID player) {
         return addresses.get(player);
-    }
-
-    /** 临时地址 → 现在用着它的玩家（UUID 与名字）；不是谁的临时地址时为 null。任意线程 */
-    Map.Entry<UUID, String> owner(Ipv6Address a) {
-        if (a == null || !layout.isPlayerAddress(a)) {
-            return null;
-        }
-        UUID id = parts.get(NetworkLayout.hostPartOf(a));
-        if (id == null || !a.equals(addresses.get(id))) {
-            return null;
-        }
-        String name = names.get(id);
-        return name == null ? null : new java.util.AbstractMap.SimpleImmutableEntry<>(id, name);
     }
 
     int online() {
@@ -215,7 +213,7 @@ final class PlayerNics {
         Set<Ipv6Address> fixed = Collections.unmodifiableSet(set);
         long ttl = Math.min(ttlMillis, MAX_TTL_MILLIS);
         loop.execute(() -> {
-            Nic n = byPlayer.get(player);
+            PlayerNic n = byPlayer.get(player);
             if (n == null || n.closed) {
                 return;
             }
@@ -231,7 +229,7 @@ final class PlayerNics {
 
     void revoke(UUID player, String purpose) {
         loop.execute(() -> {
-            Nic n = byPlayer.get(player);
+            PlayerNic n = byPlayer.get(player);
             if (n != null) {
                 n.grants.remove(purpose);
             }
@@ -240,27 +238,37 @@ final class PlayerNics {
 
     // ---- 往外（网络线程）：玩家客户端发来的包 ----
 
+    /** 玩家客户端 0 号网口发来的包：从他的网卡发出去（{@link PlayerNic#fromClient}，经端口的防火墙） */
     void fromPlayer(UUID player, String name, byte[] p) {
-        long now = loop.nowMillis();
-        Nic n = byPlayer.get(player);
-        String source = "玩家 " + name + " 的临时地址";
+        PlayerNic n = byPlayer.get(player);
         if (n == null || n.closed) {
-            reject(source, "没有临时地址", now);
+            reject("玩家 " + name + " 的临时地址", "没有临时地址", loop.nowMillis());
             return;
+        }
+        n.fromClient(p);
+    }
+
+    /** 端口的校验与防火墙（网络线程上，{@link PlayerPort#send}）；收下了返回 true */
+    private boolean outboundPacket(PlayerNic n, byte[] p) {
+        long now = loop.nowMillis();
+        String source = "玩家 " + n.name + " 的临时地址";
+        if (n.closed) {
+            reject(source, "没有临时地址", now);
+            return false;
         }
         String bad = basicCheck(p);
         if (bad != null) {
             reject(source, bad, now);
-            return;
+            return false;
         }
         Ipv6Address src = Ipv6Packet.sourceOf(p);
         if (!src.equals(n.address)) {
             reject(source, "源地址 " + src + " 不是他的临时地址 " + n.address, now);
-            return;
+            return false;
         }
         if (!n.out.tryAcquire(p.length, now)) {
             reject(source, "超过速率上限（每秒 " + outPackets + " 个包、" + outBytes + " 字节）", now);
-            return;
+            return false;
         }
         Verdict v = outbound(n, p, now);
         if (v != Verdict.OK) {
@@ -270,13 +278,14 @@ final class PlayerNics {
             if (v.reply) {
                 router.unreachable(p, Icmpv6Message.UNREACH_PROHIBITED);
             }
-            return;
+            return false;
         }
         outAccepted++;
         router.forward(p);
+        return true;
     }
 
-    private Verdict outbound(Nic n, byte[] p, long now) {
+    private Verdict outbound(PlayerNic n, byte[] p, long now) {
         int nh = p[6] & 0xFF;
         int plen = payloadLength(p);
         Ipv6Address dst = Ipv6Packet.destinationOf(p);
@@ -352,7 +361,7 @@ final class PlayerNics {
     void deliver(byte[] p) {
         long now = loop.nowMillis();
         Ipv6Address dst = Ipv6Packet.destinationOf(p);
-        Nic n = byPart.get(NetworkLayout.hostPartOf(dst));
+        PlayerNic n = byPart.get(NetworkLayout.hostPartOf(dst));
         if (n == null || n.closed || !n.address.equals(dst)) {
             router.unreachable(p, Icmpv6Message.UNREACH_ADDRESS);
             return;
@@ -373,11 +382,14 @@ final class PlayerNics {
             rejects.reject("发给" + n.label() + "的包", "超过速率上限（每秒 " + inPackets + " 个包、" + inBytes + " 字节）", now);
             return;
         }
+        if (!n.receive(p)) {
+            router.unreachable(p, Icmpv6Message.UNREACH_ADDRESS);
+            return;
+        }
         inDelivered++;
-        n.link.deliver(p);
     }
 
-    private Verdict inbound(Nic n, byte[] p, long now) {
+    private Verdict inbound(PlayerNic n, byte[] p, long now) {
         int nh = p[6] & 0xFF;
         int plen = payloadLength(p);
         Ipv6Address src = Ipv6Packet.sourceOf(p);
@@ -468,7 +480,7 @@ final class PlayerNics {
     List<String> describe() {
         List<String> out = new ArrayList<>();
         long now = loop.nowMillis();
-        for (Nic n : byPlayer.values()) {
+        for (PlayerNic n : byPlayer.values()) {
             n.pruneGrants(now);
             StringBuilder sb = new StringBuilder();
             sb.append(n.name).append(' ').append(n.address).append("  连接 ").append(n.flows.size());
@@ -483,7 +495,7 @@ final class PlayerNics {
 
     /** 测试用：玩家现在放行的主机（网络线程上调用） */
     Set<Ipv6Address> allowedHosts(UUID player) {
-        Nic n = byPlayer.get(player);
+        PlayerNic n = byPlayer.get(player);
         Set<Ipv6Address> out = new HashSet<>();
         if (n != null) {
             n.pruneGrants(loop.nowMillis());
@@ -496,8 +508,27 @@ final class PlayerNics {
 
     /** 测试用：玩家现在的连接数 */
     int flowCount(UUID player) {
-        Nic n = byPlayer.get(player);
+        PlayerNic n = byPlayer.get(player);
         return n == null ? 0 : n.flows.size();
+    }
+
+    /** 玩家网卡的端口：往外的校验与防火墙（只在网络线程上调用 {@link #send}） */
+    final class PlayerPort implements NicPort {
+        private final PlayerNic nic;
+
+        PlayerPort(PlayerNic nic) {
+            this.nic = nic;
+        }
+
+        @Override
+        public Ipv6Address address() {
+            return nic.address;
+        }
+
+        @Override
+        public boolean send(byte[] packet) {
+            return outboundPacket(nic, packet);
+        }
     }
 
     private static final class Verdict {
@@ -592,26 +623,46 @@ final class PlayerNics {
         }
     }
 
-    private final class Nic {
+    /**
+     * 一个玩家自己的网卡（客户端的 0 号网口在服务端的那一头）：收到的包（过了往里的防火墙）交给他的客户端，
+     * 他客户端发来的包从这张网卡发出去，端口（{@link PlayerPort}）上过往外的防火墙。
+     */
+    final class PlayerNic extends NetworkInterface {
         final UUID player;
         final String name;
         final Ipv6Address address;
         final long part;
         final Link link;
         final int generation;
+        final PlayerPort port = new PlayerPort(this);
         final RateLimiter out = new RateLimiter(outPackets, outBytes);
         final RateLimiter in = new RateLimiter(inPackets, inBytes);
         final Map<String, Grant> grants = new LinkedHashMap<>();
         final Map<FlowKey, Flow> flows = new HashMap<>();
         boolean closed;
 
-        Nic(UUID player, String name, Ipv6Address address, long part, Link link, int generation) {
+        PlayerNic(UUID player, String name, Ipv6Address address, long part, Link link, int generation) {
             this.player = player;
             this.name = name;
             this.address = address;
             this.part = part;
             this.link = link;
             this.generation = generation;
+        }
+
+        /** 网络线程：过了往里的防火墙的包，交给客户端的 0 号网口 */
+        @Override
+        public boolean receive(byte[] packet) {
+            if (closed) {
+                return false;
+            }
+            link.deliver(packet);
+            return true;
+        }
+
+        /** 网络线程：客户端 0 号网口发来的包 */
+        void fromClient(byte[] packet) {
+            send(packet);
         }
 
         String label() {

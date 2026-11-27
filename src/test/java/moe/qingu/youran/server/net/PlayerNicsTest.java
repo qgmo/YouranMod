@@ -62,32 +62,11 @@ class PlayerNicsTest {
         dcs.put("youranmod:main", 0L);
         dcs.put("youranmod:players", NetworkLayout.PLAYERS_DATACENTER);
         AddressBook book = new AddressBook(layout, dims, dcs, Collections.<String, Ipv6Address>emptyMap());
-        DeviceTable devices = new DeviceTable(book, new DeviceTable.Hooks() {
-            @Override
-            public boolean isLoaded(int dimension, int x, int y, int z) {
-                return true;
-            }
-
-            @Override
-            public Ipv6Address resolverAddress() {
-                return resolverAddr;
-            }
-
-            @Override
-            public Ipv6Address ntpAddress() {
-                return null;
-            }
-
-            @Override
-            public EntityPlayerMP player(UUID id) {
-                return null;
-            }
-
-            @Override
-            public void fromDevice(DeviceTable.Device d, byte[] packet) {
-            }
+        Router[] holder = new Router[1];
+        NicTable devices = new NicTable(book::coordinateAddress, loop, rejects, p -> holder[0].forward(p), 20, 20 * 1280, p -> {
         });
         router = new Router(loop, book, devices, routerAddr);
+        holder[0] = router;
         // 往外每秒 20 个包，往里每秒 400 个
         players = new PlayerNics(loop, layout, router, rejects, resolverAddr, random, 20, 20 * 1280, 400, 400 * 1280);
         router.setPlayers(players);
@@ -183,9 +162,11 @@ class PlayerNicsTest {
             assertTrue(layout.isPlayerAddress(c.address), c.address.toString());
             assertTrue(c.address.inPrefix(layout.playersPrefix(), 96));
             assertTrue(seen.add(c.address), "同一时刻不重复");
-            assertEquals(NicMessages.PLAYER_ATTACH, c.control.get(0)[0]);
-            assertEquals(c.address, Ipv6Address.read(c.control.get(0), 5));
-            assertEquals(resolverAddr, Ipv6Address.read(c.control.get(0), 21));
+            assertEquals(NicMessages.PORT_UP, c.control.get(0)[0], "上线：客户端多了 0 号网口");
+            assertEquals(NicMessages.PLAYER_PORT, c.control.get(0)[1]);
+            assertEquals(NicMessages.KIND_PLAYER, c.control.get(0)[2]);
+            assertEquals(c.address, Ipv6Address.read(c.control.get(0), 3));
+            assertEquals(resolverAddr, Ipv6Address.read(c.control.get(0), 19));
             assertEquals(c.address, players.address(c.id));
         }
         assertEquals(20, players.online());
@@ -193,7 +174,8 @@ class PlayerNicsTest {
         players.detach(c.id);
         loop.drain();
         assertNull(players.address(c.id), "下线收回");
-        assertEquals(NicMessages.PLAYER_DETACH, c.control.get(1)[0]);
+        assertEquals(NicMessages.PORT_DOWN, c.control.get(1)[0], "下线：去掉 0 号网口");
+        assertEquals(NicMessages.PLAYER_PORT, c.control.get(1)[1]);
         assertEquals(19, players.online());
         // 收回以后发给旧地址的：地址不可达
         PingResult r = ping(web, c.address);

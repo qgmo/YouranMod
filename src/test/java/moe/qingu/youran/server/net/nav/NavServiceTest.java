@@ -102,11 +102,6 @@ class NavServiceTest {
         public String checkoutUrl(String orderId) {
             return "http://pay.yr/c/" + orderId;
         }
-
-        @Override
-        public String identify(Ipv6Address source) {
-            return source.equals(PC) ? "Carol" : null;
-        }
     }
 
     final FakeEnv env = new FakeEnv();
@@ -339,22 +334,35 @@ class NavServiceTest {
     }
 
     @Test
-    void reportOncePerComputer() throws Exception {
+    void reportNeedsIdLoginOncePerPerson() throws Exception {
         AdBook.Ad a = book.draft(AdSlot.SQUARE, alice, "Alice", 1, "", "http://a.yr/", 0, 1);
         book.paid(a, "pay_1", 0, 1);
-        assertTrue(text(get("platform.180.yr", "/report?ad=1", null)).contains("举报广告 #1"));
-        HttpResponse r = post("platform.180.yr", "/report", "ad=1&reason=" + enc("骗人、虚假") + "&detail=" + enc("链接是假的"), null, PC);
+        // 没登录：举报页先跳去用 id.yr 登录，登录完回到这条广告的举报页（服主 11-27：举报照旧记举报人，不再按来源地址认人）
+        HttpResponse login = get("platform.180.yr", "/report?ad=1", null);
+        assertEquals(303, login.status);
+        assertEquals("/login?next=" + enc("/report?ad=1"), login.headers.get("Location"));
+        UUID carol = UUID.fromString("00000000-0000-0000-0000-0000000000c0");
+        NavService.Session s = service.addSession(carol, "Carol", System.currentTimeMillis());
+        assertTrue(text(get("platform.180.yr", "/report?ad=1", s)).contains("举报广告 #1"));
+        // 提交时登录过期了：不记，叫他登录后点“后退”回来提交（填的还在）
+        HttpResponse expired = post("platform.180.yr", "/report", "ad=1&reason=x", null, PC);
+        assertEquals(401, expired.status);
+        assertTrue(text(expired).contains("填的内容还在"));
+        assertEquals(403, post("platform.180.yr", "/report", "ad=1&reason=x&csrf=wrong", s, PC).status);
+        assertEquals(0, a.reports.size());
+        HttpResponse r = post("platform.180.yr", "/report", "ad=1&csrf=" + s.csrf + "&reason=" + enc("骗人、虚假") + "&detail=" + enc("链接是假的"), s, PC);
         assertTrue(text(r).contains("收到了"));
         assertEquals(1, a.reports.size());
         assertEquals("骗人、虚假：链接是假的", a.reports.get(0).reason);
-        assertTrue(a.reports.get(0).by.startsWith("Carol @"));
-        // 同一台电脑再报：不再记
-        assertTrue(text(post("platform.180.yr", "/report", "ad=1&reason=x", null, PC)).contains("已经举报过了"));
-        // 别的电脑：记，原因不认识的算“其他”
-        post("platform.180.yr", "/report", "ad=1&reason=whatever", null, PC2);
+        assertEquals("Carol（" + carol + "）@" + PC, a.reports.get(0).by, "记 id.yr 给的角色与来源地址");
+        // 同一个人再报（换了电脑也一样）：不再记
+        assertTrue(text(post("platform.180.yr", "/report", "ad=1&reason=x&csrf=" + s.csrf, s, PC2)).contains("已经举报过了"));
+        // 别人：记，原因不认识的算“其他”
+        NavService.Session d = service.addSession(UUID.fromString("00000000-0000-0000-0000-0000000000d0"), "Dave", System.currentTimeMillis());
+        post("platform.180.yr", "/report", "ad=1&reason=whatever&csrf=" + d.csrf, d, PC);
         assertEquals(2, a.reports.size());
         assertEquals("其他", a.reports.get(1).reason);
-        assertEquals(404, post("platform.180.yr", "/report", "ad=99&reason=x", null, PC2).status);
+        assertEquals(404, post("platform.180.yr", "/report", "ad=99&reason=x&csrf=" + d.csrf, d, PC2).status);
     }
 
     @Test
@@ -408,7 +416,7 @@ class NavServiceTest {
         book.paid(a, "pay_1", 0, 1);
         book.report(a, "其他：<x>", "Bob", 1);
         for (Object[] p : new Object[][]{{"platform.180.yr", "/", null}, {"platform.180.yr", "/", s}, {"platform.180.yr", "/buy?slot=banner", s},
-                {"platform.180.yr", "/ad/1", s}, {"platform.180.yr", "/admin", root}, {"platform.180.yr", "/report?ad=1", null},
+                {"platform.180.yr", "/ad/1", s}, {"platform.180.yr", "/admin", root}, {"platform.180.yr", "/report?ad=1", s},
                 {"help.180.yr", "/", null}, {"help.180.yr", "/home", null}, {"help.180.yr", "/ads", null}, {"help.180.yr", "/rules", null},
                 {"help.180.yr", "/report", null}, {"help.180.yr", "/canvas", null}, {"help.180.yr", "/verify", null}, {"180.yr", "/", null}}) {
             HttpResponse r = get((String) p[0], (String) p[1], (NavService.Session) p[2]);

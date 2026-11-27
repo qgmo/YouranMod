@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Random;
 
 /**
- * /48 路由器（网络线程上）。按目的地址交给：坐标路由（第 0 号 /64 → 维度 /72 → 维度路由器 → 设备）、
+ * /48 路由器（网络线程上）。按目的地址交给：坐标路由（第 0 号 /64 → 维度 /72 → 维度路由器 → 那一格插着的网卡）、
  * 玩法子路由器（第 1 号 /64 → 机房 /96 → 主机 /128 的协议栈或原始主机；最后一个 /96 是玩家临时地址，交给 {@link PlayerNics} 过滤）、上行口（/48 以外）。
  * 跳数在这里减一（整个 /48 算一跳），用完回“超时”；到不了的回“目标不可达”（ICMPv6 差错按 RFC 4443 限速）。
  * <p>
@@ -22,7 +22,7 @@ import java.util.Random;
 public final class Router {
     private final EventLoop loop;
     private final AddressBook book;
-    private final DeviceTable devices;
+    private final NicTable nics;
     private final Ipv6Address routerAddress;
     private final Map<Integer, DimRouting> dimensions = new HashMap<>();
     private final Map<Long, Map<Long, HostPort>> datacenters = new HashMap<>();
@@ -44,10 +44,10 @@ public final class Router {
     volatile long simulatedDrops;
     volatile long simulatedDelays;
 
-    Router(EventLoop loop, AddressBook book, DeviceTable devices, Ipv6Address routerAddress) {
+    Router(EventLoop loop, AddressBook book, NicTable nics, Ipv6Address routerAddress) {
         this.loop = loop;
         this.book = book;
-        this.devices = devices;
+        this.nics = nics;
         this.routerAddress = routerAddress;
         for (AddressBook.Dim d : book.byDimension.values()) {
             dimensions.put(d.index, new DimRouting(d));
@@ -213,16 +213,10 @@ public final class Router {
 
         @Override
         public boolean deliverToDevice(int x, int y, int z, byte[] packet) {
-            DeviceTable.Device d = devices.byPosition(info.dimension, x, y, z);
-            if (d == null || d.blockedReason() != null || !d.address.equals(Ipv6Packet.destinationOf(packet))) {
-                return false;
-            }
-            DeviceTable.Attachment a = d.attachment;
-            if (a == null) {
+            if (!nics.deliver(info.dimension, x, y, z, packet)) {
                 return false;
             }
             deliveredToDevices++;
-            a.deliver(packet);
             return true;
         }
 

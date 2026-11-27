@@ -5,8 +5,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.ResourceLocation;
 
 /**
- * 定位模块这个物品（{@code youranmod:locator_module}）。电脑模组在界面里给它留一个卡槽，装上时给设备声明
- * {@code DeviceCapability.LOCATION}，拿出来时去掉。
+ * 定位模块这个物品（{@code youranmod:locator_module}）：装在电脑外设槽里才能签位置证明（{@link LocationProofs}）；
+ * 装没装由电脑模组自己判断（外设能力 {@code location}，见 {@code api.peripheral.Peripherals}）。
  */
 public final class LocatorModule {
     /** 注册名（不带模组 ID） */

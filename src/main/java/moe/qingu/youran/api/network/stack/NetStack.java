@@ -11,6 +11,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,15 @@ import java.util.function.Consumer;
  * future 与回调都在事件循环线程上完成，调用方要动别的线程的东西（如 Minecraft 主线程）时自己转过去。
  * 全部异步：发出就返回，不等回应。
  * <p>
- * 收包：外面把原始 IPv6 包交给 {@link #receive(byte[])}；发包：交给构造时给的 {@link PacketOutput}。
+ * <b>网口</b>（{@link Interface}，服主 11-27：一个协议栈、多个网口，同真实系统）：每个网口有编号、名字、自己的地址、自己的出口
+ * （{@link PacketOutput}）、DNS 与 NTP 配置，随时可以增减。包从源地址所在的那个网口发出去；收包时目的地址要是收到它的那个网口的地址
+ * （强主机模式）。机房主机这类只有一个网口的，用 {@link #NetStack(EventLoop, PacketOutput, Random)}（建好一个网口，{@link #addAddress} 加在它上面）。
+ * <p>
+ * <b>源地址怎么选</b>（RFC 6724 的最简版）：套接字绑了网口（{@code …Via}）就用那个网口的地址；绑了源地址就用它；都没绑时用默认网口
+ * （{@link #setDefaultInterface}）的地址。网口去掉时，绑在它上面（源地址是它的地址）的 TCP 连接以 {@link NetworkException.Reason#CLOSED} 报错、
+ * UDP 套接字关掉、还没回来的 ping 报错。
+ * <p>
+ * 收包：外面把原始 IPv6 包交给 {@link #receive(byte[])}（不分网口）或 {@link Interface#receive(byte[])}。
  * 目的地址不是本机地址的包丢掉；坏包（长度、版本、校验和不对）丢掉。
  */
 public final class NetStack {
@@ -36,9 +45,13 @@ public final class NetStack {
     static final int EPHEMERAL_MAX = 65535;
 
     final EventLoop loop;
-    private final PacketOutput output;
     final Random random;
-    private final Set<Ipv6Address> addresses = new LinkedHashSet<>();
+    /** 网口（按加进来的先后）；只在事件循环线程上改 */
+    private final List<Interface> interfaces = new ArrayList<>();
+    /** 本机地址 → 它所在的网口；只在事件循环线程上改 */
+    private final Map<Ipv6Address, Interface> owners = new LinkedHashMap<>();
+    /** 不绑网口、不绑源地址时用的网口 */
+    private Interface defaultInterface;
     private final Map<PortKey, UdpSocket> udpSockets = new HashMap<>();
     private final Map<TcpKey, TcpConnection> tcpConnections = new HashMap<>();
     private final Map<PortKey, TcpAcceptor> tcpListeners = new HashMap<>();
@@ -53,9 +66,17 @@ public final class NetStack {
     /** 所有 TCP 连接重传过的段数 */
     long tcpRetransmits;
 
+    /** 只有一个网口的协议栈（机房主机等）：建好 0 号网口，发出的包都交给 {@code output}，它就是默认网口 */
     public NetStack(EventLoop loop, PacketOutput output, Random random) {
+        this(loop, random);
+        Interface i = new Interface(this, 0, "default", output);
+        interfaces.add(i);
+        defaultInterface = i;
+    }
+
+    /** 还没有网口的协议栈（玩家客户端：网口由服务器增减，见 {@link #addInterface}） */
+    public NetStack(EventLoop loop, Random random) {
         this.loop = loop;
-        this.output = output;
         this.random = random;
         this.pingIdentifier = random.nextInt(0x10000);
     }
@@ -69,22 +90,233 @@ public final class NetStack {
         run(() -> maxConnections = max);
     }
 
+    /** 给默认网口加一个地址（只有一个网口的协议栈用）；没有默认网口时什么都不做 */
     public void addAddress(Ipv6Address address) {
-        run(() -> addresses.add(address));
+        run(() -> {
+            if (defaultInterface != null) {
+                defaultInterface.addInLoop(address);
+            }
+        });
     }
 
     public void removeAddress(Ipv6Address address) {
-        run(() -> addresses.remove(address));
+        run(() -> {
+            Interface i = owners.get(address);
+            if (i != null) {
+                i.removeInLoop(address);
+            }
+        });
     }
 
-    /** 第一个地址（主动发包时不指定源地址就用它）；没有地址时为 null。只在事件循环线程上调用 */
+    /** 默认网口的第一个地址（主动发包时不绑网口、不指定源地址就用它）；没有时为 null。只在事件循环线程上调用 */
     public Ipv6Address primaryAddress() {
-        return addresses.isEmpty() ? null : addresses.iterator().next();
+        return defaultInterface == null || defaultInterface.removed ? null : defaultInterface.first();
     }
 
     public boolean hasAddress(Ipv6Address a) {
-        return addresses.contains(a);
+        return owners.containsKey(a);
     }
+
+    // ---- 网口 ----
+
+    /**
+     * 网口：协议栈接到一段链路上的那一头（玩家客户端上是“玩家自己的”“接着的电脑”这样的网口，机房主机只有一个）。
+     * 编号、名字、出口建的时候定；地址、DNS 与 NTP 配置可以改。去掉以后（{@link #isRemoved()}）不再收发。
+     */
+    public static final class Interface {
+        private final NetStack stack;
+        private final int id;
+        private final String name;
+        private final PacketOutput output;
+        /** 只在事件循环线程上改 */
+        private final Set<Ipv6Address> addresses = new LinkedHashSet<>();
+        private volatile Ipv6Address first;
+        private volatile Ipv6Address dnsServer;
+        private volatile Ipv6Address ntpServer;
+        volatile boolean removed;
+
+        Interface(NetStack stack, int id, String name, PacketOutput output) {
+            this.stack = stack;
+            this.id = id;
+            this.name = name;
+            this.output = output;
+        }
+
+        public NetStack stack() {
+            return stack;
+        }
+
+        public int id() {
+            return id;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        /** 第一个地址（这个网口发包用的源地址）；没有为 null。任意线程 */
+        public Ipv6Address address() {
+            return first;
+        }
+
+        /** 这个网口用的 DNS 服务器（递归解析器）；没配为 null。任意线程 */
+        public Ipv6Address dnsServer() {
+            return dnsServer;
+        }
+
+        /** 这个网口用的 NTP 服务器；没配为 null。任意线程 */
+        public Ipv6Address ntpServer() {
+            return ntpServer;
+        }
+
+        /** 任意线程 */
+        public void setDnsServer(Ipv6Address a) {
+            dnsServer = a;
+        }
+
+        /** 任意线程 */
+        public void setNtpServer(Ipv6Address a) {
+            ntpServer = a;
+        }
+
+        /** 任意线程 */
+        public boolean isRemoved() {
+            return removed;
+        }
+
+        /** 加一个地址。任意线程 */
+        public void addAddress(Ipv6Address a) {
+            stack.run(() -> addInLoop(a));
+        }
+
+        /** 去掉一个地址（绑在它上面的连接不动，同 {@link NetStack#removeAddress}）。任意线程 */
+        public void removeAddress(Ipv6Address a) {
+            stack.run(() -> removeInLoop(a));
+        }
+
+        /** 这个网口收到一个原始 IPv6 包（目的地址要是这个网口的地址，否则丢掉）。任意线程 */
+        public void receive(byte[] raw) {
+            stack.run(() -> stack.receiveInLoop(this, raw));
+        }
+
+        boolean has(Ipv6Address a) {
+            return addresses.contains(a);
+        }
+
+        Ipv6Address first() {
+            return first;
+        }
+
+        void addInLoop(Ipv6Address a) {
+            if (removed || a == null || stack.owners.containsKey(a)) {
+                return;
+            }
+            addresses.add(a);
+            stack.owners.put(a, this);
+            if (first == null) {
+                first = a;
+            }
+        }
+
+        void removeInLoop(Ipv6Address a) {
+            if (addresses.remove(a)) {
+                stack.owners.remove(a, this);
+                first = addresses.isEmpty() ? null : addresses.iterator().next();
+            }
+        }
+
+        @Override
+        public String toString() {
+            Ipv6Address a = first;
+            return id + " " + name + (a == null ? "" : " " + a);
+        }
+    }
+
+    /** 加一个网口（编号由调用方定，同一个协议栈里不要重复）。任意线程；返回的网口马上能用（对它的操作排在加网口之后） */
+    public Interface addInterface(int id, String name, PacketOutput output) {
+        Interface i = new Interface(this, id, name, output);
+        run(() -> {
+            if (closed) {
+                i.removed = true;
+                return;
+            }
+            interfaces.add(i);
+        });
+        return i;
+    }
+
+    /**
+     * 去掉网口：它的地址都去掉；源地址是它的地址的 TCP 连接以 {@link NetworkException.Reason#CLOSED} 报错，UDP 套接字关掉
+     * （{@link UdpSocket.Handler#onClosed}），还没回来的 ping 报错，在它的地址上监听的端口去掉。是默认网口时默认网口变成没有。任意线程
+     */
+    public void removeInterface(Interface i) {
+        run(() -> {
+            if (i == null || i.removed || !interfaces.remove(i)) {
+                return;
+            }
+            i.removed = true;
+            Set<Ipv6Address> gone = new LinkedHashSet<>(i.addresses);
+            for (Ipv6Address a : gone) {
+                i.removeInLoop(a);
+            }
+            if (defaultInterface == i) {
+                defaultInterface = null;
+            }
+            NetworkException e = new NetworkException(NetworkException.Reason.CLOSED, "网口 " + i.name + " 已去掉");
+            for (TcpConnection c : new ArrayList<>(tcpConnections.values())) {
+                if (gone.contains(c.key.localAddress)) {
+                    c.destroy(e);
+                }
+            }
+            for (UdpSocket s : new ArrayList<>(udpSockets.values())) {
+                if (s.localAddress() != null && gone.contains(s.localAddress())) {
+                    s.closeWith(e);
+                }
+            }
+            tcpListeners.keySet().removeIf(k -> k.address != null && gone.contains(k.address));
+            for (PendingPing pp : new ArrayList<>(pings.values())) {
+                if (gone.contains(pp.source)) {
+                    pp.fail(e);
+                }
+            }
+        });
+    }
+
+    /** 不绑网口、不绑源地址的套接字用哪个网口（null 为没有，这时它们没有源地址可用）。任意线程 */
+    public void setDefaultInterface(Interface i) {
+        run(() -> defaultInterface = i == null || i.removed ? null : i);
+    }
+
+    /** 现在的默认网口；没有为 null。只在事件循环线程上调用 */
+    public Interface defaultInterface() {
+        return defaultInterface;
+    }
+
+    /** 现在的网口（快照）。只在事件循环线程上调用 */
+    public List<Interface> interfaces() {
+        return new ArrayList<>(interfaces);
+    }
+
+    /**
+     * 选源地址：绑了网口用它的地址（同时给了 {@code source} 时要是这个网口的）；只给了源地址时要是本机地址；都没给时用默认网口的。
+     * 选不出时为 null。只在事件循环线程上调用
+     */
+    Ipv6Address pickSource(Interface via, Ipv6Address source) {
+        if (via != null) {
+            if (via.removed || via.stack != this) {
+                return null;
+            }
+            if (source != null) {
+                return via.has(source) ? source : null;
+            }
+            return via.first();
+        }
+        if (source != null) {
+            return owners.containsKey(source) ? source : null;
+        }
+        return primaryAddress();
+    }
+
 
     /** 关掉：所有连接以 CLOSED 结束，未完成的 ping 以超时结束，以后收到的包都丢掉 */
     public void close() {
@@ -136,12 +368,13 @@ public final class NetStack {
 
     // ---- 收发 ----
 
-    /** 收到一个原始 IPv6 包（任意线程都可以调用） */
+    /** 收到一个原始 IPv6 包，不管从哪个网口来（只有一个网口的协议栈用；任意线程都可以调用） */
     public void receive(byte[] raw) {
-        run(() -> receiveInLoop(raw));
+        run(() -> receiveInLoop(null, raw));
     }
 
-    private void receiveInLoop(byte[] raw) {
+    /** {@code via} 不为 null 时目的地址要是这个网口的地址 */
+    void receiveInLoop(Interface via, byte[] raw) {
         if (closed) {
             return;
         }
@@ -153,7 +386,8 @@ public final class NetStack {
             dropped++;
             return;
         }
-        if (!addresses.contains(p.destination)) {
+        Interface owner = owners.get(p.destination);
+        if (owner == null || (via != null && owner != via)) {
             dropped++;
             return;
         }
@@ -178,12 +412,17 @@ public final class NetStack {
         }
     }
 
-    /** 发一个包；源地址必须是本机地址。只在事件循环线程上调用 */
+    /** 发一个包：从源地址所在的网口出去（源地址不是本机地址、网口已去掉时丢掉）。只在事件循环线程上调用 */
     void send(Ipv6Packet p) {
         if (closed) {
             return;
         }
-        output.send(p.encode());
+        Interface i = owners.get(p.source);
+        if (i == null || i.removed) {
+            dropped++;
+            return;
+        }
+        i.output.send(p.encode());
     }
 
     void sendError(Ipv6Address from, byte[] invoking, int type, int code, long word) {
@@ -228,7 +467,7 @@ public final class NetStack {
         }
         Ipv6Address origSrc = Ipv6Packet.sourceOf(inv);
         Ipv6Address origDst = Ipv6Packet.destinationOf(inv);
-        if (!addresses.contains(origSrc)) {
+        if (!owners.containsKey(origSrc)) {
             return;
         }
         int nh = inv[6] & 0xFF;
@@ -269,10 +508,19 @@ public final class NetStack {
      * @param dataLength  回显数据长度（0–1232）
      */
     public CompletableFuture<PingResult> ping(Ipv6Address source, Ipv6Address target, int dataLength, long timeoutMillis) {
+        return ping(null, source, target, dataLength, timeoutMillis);
+    }
+
+    /** 同上，从网口 {@code via} 发（它去掉时以 {@link NetworkException} 结束） */
+    public CompletableFuture<PingResult> pingVia(Interface via, Ipv6Address target, int dataLength, long timeoutMillis) {
+        return ping(via, null, target, dataLength, timeoutMillis);
+    }
+
+    private CompletableFuture<PingResult> ping(Interface via, Ipv6Address source, Ipv6Address target, int dataLength, long timeoutMillis) {
         CompletableFuture<PingResult> f = new CompletableFuture<>();
         run(() -> {
-            Ipv6Address src = source != null ? source : primaryAddress();
-            if (closed || src == null || !addresses.contains(src)) {
+            Ipv6Address src = pickSource(via, source);
+            if (closed || src == null) {
                 f.completeExceptionally(new NetworkException(NetworkException.Reason.CLOSED, "没有可用的源地址"));
                 return;
             }
@@ -286,7 +534,7 @@ public final class NetStack {
             for (int i = 0; i < data.length; i++) {
                 data[i] = (byte) i;
             }
-            PendingPing pp = new PendingPing(key, target, loop.nowMillis(), f);
+            PendingPing pp = new PendingPing(key, src, target, loop.nowMillis(), f);
             PendingPing old = pings.put(key, pp);
             if (old != null) {
                 old.finish(new PingResult(PingResult.Status.TIMEOUT, null, 0, 0, 0));
@@ -300,13 +548,15 @@ public final class NetStack {
 
     private final class PendingPing {
         final int key;
+        final Ipv6Address source;
         final Ipv6Address target;
         final long sentAt;
         final CompletableFuture<PingResult> future;
         EventLoop.Timer timer;
 
-        PendingPing(int key, Ipv6Address target, long sentAt, CompletableFuture<PingResult> future) {
+        PendingPing(int key, Ipv6Address source, Ipv6Address target, long sentAt, CompletableFuture<PingResult> future) {
             this.key = key;
+            this.source = source;
             this.target = target;
             this.sentAt = sentAt;
             this.future = future;
@@ -320,6 +570,16 @@ public final class NetStack {
                 timer.cancel();
             }
             future.complete(r);
+        }
+
+        void fail(NetworkException e) {
+            if (pings.get(key) == this) {
+                pings.remove(key);
+            }
+            if (timer != null) {
+                timer.cancel();
+            }
+            future.completeExceptionally(e);
         }
     }
 
@@ -362,13 +622,30 @@ public final class NetStack {
      * @param handler 收到数据报时在事件循环线程上调用
      */
     public CompletableFuture<UdpSocket> openUdp(Ipv6Address local, int port, UdpSocket.Handler handler) {
+        return openUdp(null, local, port, handler);
+    }
+
+    /** 同上，绑在网口 {@code via} 上（绑它现在的地址；网口去掉时套接字关掉） */
+    public CompletableFuture<UdpSocket> openUdpVia(Interface via, int port, UdpSocket.Handler handler) {
+        return openUdp(via, null, port, handler);
+    }
+
+    private CompletableFuture<UdpSocket> openUdp(Interface via, Ipv6Address bind, int port, UdpSocket.Handler handler) {
         CompletableFuture<UdpSocket> f = new CompletableFuture<>();
         run(() -> {
             if (closed) {
                 f.completeExceptionally(new NetworkException(NetworkException.Reason.CLOSED, "协议栈已关"));
                 return;
             }
-            if (local != null && !addresses.contains(local)) {
+            Ipv6Address local = bind;
+            if (via != null) {
+                local = pickSource(via, null);
+                if (local == null) {
+                    f.completeExceptionally(new NetworkException(NetworkException.Reason.CLOSED, "网口没有地址或已去掉：" + via.name()));
+                    return;
+                }
+            }
+            if (local != null && !owners.containsKey(local)) {
                 f.completeExceptionally(new NetworkException(NetworkException.Reason.CLOSED, "不是本机地址：" + local));
                 return;
             }
@@ -449,10 +726,19 @@ public final class NetStack {
      * @param listener 连接上以后的回调（可以为 null，之后用 {@link TcpConnection#setListener} 设）
      */
     public CompletableFuture<TcpConnection> connect(Ipv6Address source, Ipv6Address remote, int port, TcpConnection.Listener listener) {
+        return connect(null, source, remote, port, listener);
+    }
+
+    /** 同上，从网口 {@code via} 连（源地址是它的地址；网口去掉时连接以 {@link NetworkException.Reason#CLOSED} 报错） */
+    public CompletableFuture<TcpConnection> connectVia(Interface via, Ipv6Address remote, int port, TcpConnection.Listener listener) {
+        return connect(via, null, remote, port, listener);
+    }
+
+    private CompletableFuture<TcpConnection> connect(Interface via, Ipv6Address source, Ipv6Address remote, int port, TcpConnection.Listener listener) {
         CompletableFuture<TcpConnection> f = new CompletableFuture<>();
         run(() -> {
-            Ipv6Address src = source != null ? source : primaryAddress();
-            if (closed || src == null || !addresses.contains(src)) {
+            Ipv6Address src = pickSource(via, source);
+            if (closed || src == null) {
                 f.completeExceptionally(new NetworkException(NetworkException.Reason.CLOSED, "没有可用的源地址"));
                 return;
             }

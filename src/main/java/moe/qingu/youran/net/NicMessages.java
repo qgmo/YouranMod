@@ -5,88 +5,67 @@ import moe.qingu.youran.api.network.packet.Ipv6Packet;
 
 /**
  * 网卡频道 {@code youranmod_net} 上的消息格式（第一个字节是类型）。与同步配置的频道分开：这个频道的包由网络线程直接发，
- * 不经主线程。
+ * 不经主线程。客户端一个协议栈、多个网口（服主 11-27）：每个网口在服务端对应一张网卡（玩家自己的那张带防火墙，接着的电脑那张是
+ * {@code ClientRelayNic}），网口的增减由服务器发起，规则只在服务端执行。
  * <pre>
- *   0x01 PACKET  双向   [原始 IPv6 包，40–1280 字节]
- *   0x02 ATTACH  服→客  [代号 int][设备地址 16][递归解析器地址 16][NTP 地址 16]   网卡接上了这台设备
- *   0x03 DETACH  服→客  [代号 int]                                         网卡断开
- *   0x11 PLAYER_PACKET  双向   [原始 IPv6 包，40–1280 字节]                   玩家临时地址的包
- *   0x12 PLAYER_ATTACH  服→客  [代号 int][玩家临时地址 16][递归解析器地址 16]   上线时分到了临时地址
- *   0x13 PLAYER_DETACH  服→客  [代号 int]                                   临时地址收回了
+ *   0x01 PACKET     双向   [网口号 1][原始 IPv6 包，40–1280 字节]
+ *   0x02 PORT_UP    服→客  [网口号 1][种类 1][地址 16][递归解析器地址 16][NTP 地址 16]   多了一个网口（同一个号已有时先去掉旧的）
+ *   0x03 PORT_DOWN  服→客  [网口号 1]                                                 去掉这个网口
  * </pre>
- * 代号每次接上时加一，客户端用它丢掉过时的 DETACH。设备网卡（0x01–0x03）与玩家临时地址（0x11–0x13）是两块网卡，互不相干：
- * 同一个玩家可以既操作一台电脑、又有自己的临时地址。
+ * 网口号：玩家自己的网口固定为 0（{@link #PLAYER_PORT}）；接着的电脑等由服务器按顺序分 1–255，去掉以后过一阵才会再用同一个号。
+ * 种类：{@link #KIND_PLAYER}、{@link #KIND_RELAY}。地址为全 0（{@code ::}）表示没有（如玩家网口不许连 NTP）。
+ * 收到已经去掉的（或从来没有的）网口号的包，两边都丢掉。
  */
 public final class NicMessages {
     public static final String CHANNEL = "youranmod_net";
     public static final int PACKET = 1;
-    public static final int ATTACH = 2;
-    public static final int DETACH = 3;
-    public static final int PLAYER_PACKET = 0x11;
-    public static final int PLAYER_ATTACH = 0x12;
-    public static final int PLAYER_DETACH = 0x13;
-    /** 消息最长：PACKET 的 1 + 1280 */
-    public static final int MAX_MESSAGE = 1 + Ipv6Packet.MAX_PACKET;
+    public static final int PORT_UP = 2;
+    public static final int PORT_DOWN = 3;
+    /** 玩家自己的网口 */
+    public static final int PLAYER_PORT = 0;
+    public static final int MAX_PORT = 255;
+    /** 网口种类：玩家自己的（玩家临时地址，受服务器的防火墙管） */
+    public static final int KIND_PLAYER = 0;
+    /** 网口种类：接着的一张网卡（{@code ClientRelayNic}，如家具电脑） */
+    public static final int KIND_RELAY = 1;
+    /** PACKET 的头：类型 + 网口号 */
+    public static final int PACKET_HEADER = 2;
+    /** 消息最长：PACKET 的 2 + 1280 */
+    public static final int MAX_MESSAGE = PACKET_HEADER + Ipv6Packet.MAX_PACKET;
 
     private NicMessages() {
     }
 
-    public static byte[] packet(byte[] raw) {
-        return packet(PACKET, raw);
-    }
-
-    public static byte[] playerPacket(byte[] raw) {
-        return packet(PLAYER_PACKET, raw);
-    }
-
-    private static byte[] packet(int type, byte[] raw) {
-        byte[] b = new byte[1 + raw.length];
-        b[0] = (byte) type;
-        System.arraycopy(raw, 0, b, 1, raw.length);
+    public static byte[] packet(int port, byte[] raw) {
+        byte[] b = new byte[PACKET_HEADER + raw.length];
+        b[0] = PACKET;
+        b[1] = (byte) port;
+        System.arraycopy(raw, 0, b, PACKET_HEADER, raw.length);
         return b;
     }
 
-    public static byte[] playerAttach(int generation, Ipv6Address address, Ipv6Address resolver) {
-        byte[] b = new byte[1 + 4 + 32];
-        b[0] = PLAYER_ATTACH;
-        putInt(b, 1, generation);
-        address.write(b, 5);
-        (resolver != null ? resolver : Ipv6Address.UNSPECIFIED).write(b, 21);
+    public static byte[] portUp(int port, int kind, Ipv6Address address, Ipv6Address resolver, Ipv6Address ntp) {
+        byte[] b = new byte[3 + 48];
+        b[0] = PORT_UP;
+        b[1] = (byte) port;
+        b[2] = (byte) kind;
+        address.write(b, 3);
+        (resolver != null ? resolver : Ipv6Address.UNSPECIFIED).write(b, 19);
+        (ntp != null ? ntp : Ipv6Address.UNSPECIFIED).write(b, 35);
         return b;
     }
 
-    public static byte[] playerDetach(int generation) {
-        byte[] b = new byte[5];
-        b[0] = PLAYER_DETACH;
-        putInt(b, 1, generation);
-        return b;
+    public static byte[] portDown(int port) {
+        return new byte[]{PORT_DOWN, (byte) port};
     }
 
-    public static byte[] attach(int generation, Ipv6Address device, Ipv6Address resolver, Ipv6Address ntp) {
-        byte[] b = new byte[1 + 4 + 48];
-        b[0] = ATTACH;
-        putInt(b, 1, generation);
-        device.write(b, 5);
-        (resolver != null ? resolver : Ipv6Address.UNSPECIFIED).write(b, 21);
-        (ntp != null ? ntp : Ipv6Address.UNSPECIFIED).write(b, 37);
-        return b;
+    /** 消息是 PACKET 时它的网口号，否则 -1 */
+    public static int packetPort(byte[] message) {
+        return message != null && message.length >= PACKET_HEADER + Ipv6Packet.HEADER && message[0] == PACKET ? message[1] & 0xFF : -1;
     }
 
-    public static byte[] detach(int generation) {
-        byte[] b = new byte[5];
-        b[0] = DETACH;
-        putInt(b, 1, generation);
-        return b;
-    }
-
-    public static int getInt(byte[] b, int i) {
-        return ((b[i] & 0xFF) << 24) | ((b[i + 1] & 0xFF) << 16) | ((b[i + 2] & 0xFF) << 8) | (b[i + 3] & 0xFF);
-    }
-
-    private static void putInt(byte[] b, int i, int v) {
-        b[i] = (byte) (v >>> 24);
-        b[i + 1] = (byte) (v >>> 16);
-        b[i + 2] = (byte) (v >>> 8);
-        b[i + 3] = (byte) v;
+    /** PACKET 里的原始包（复制一份） */
+    public static byte[] packetBody(byte[] message) {
+        return java.util.Arrays.copyOfRange(message, PACKET_HEADER, message.length);
     }
 }

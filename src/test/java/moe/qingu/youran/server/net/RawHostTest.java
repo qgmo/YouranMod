@@ -49,32 +49,11 @@ class RawHostTest {
         hosts.put("youranmod:resolver", hostAddr);
         hosts.put("test:raw", rawAddr);
         AddressBook book = new AddressBook(layout, dims, Collections.singletonMap("youranmod:main", 0L), hosts);
-        DeviceTable devices = new DeviceTable(book, new DeviceTable.Hooks() {
-            @Override
-            public boolean isLoaded(int dimension, int x, int y, int z) {
-                return true;
-            }
-
-            @Override
-            public Ipv6Address resolverAddress() {
-                return hostAddr;
-            }
-
-            @Override
-            public Ipv6Address ntpAddress() {
-                return null;
-            }
-
-            @Override
-            public EntityPlayerMP player(UUID id) {
-                return null;
-            }
-
-            @Override
-            public void fromDevice(DeviceTable.Device d, byte[] packet) {
-            }
+        Router[] holder = new Router[1];
+        NicTable devices = new NicTable(book::coordinateAddress, loop, new RejectLog(10_000), p -> holder[0].forward(p), 50, 50 * 1280, p -> {
         });
         router = new Router(loop, book, devices, routerAddr);
+        holder[0] = router;
         NetStack r = new NetStack(loop, p -> loop.execute(() -> router.forward(p)), new Random(1));
         r.addAddress(routerAddr);
         router.attachHost(routerAddr, r);

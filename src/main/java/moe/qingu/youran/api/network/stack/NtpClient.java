@@ -30,9 +30,14 @@ public final class NtpClient {
     }
 
     public static CompletableFuture<Result> query(NetStack stack, Ipv6Address server) {
+        return query(stack, null, server);
+    }
+
+    /** 从网口 {@code via} 问（null 为按源地址选择规则，默认网口） */
+    public static CompletableFuture<Result> query(NetStack stack, NetStack.Interface via, Ipv6Address server) {
         CompletableFuture<Result> f = new CompletableFuture<>();
         long[] sent = new long[1];
-        stack.openUdp(null, 0, (socket, from, fromPort, to, data) -> {
+        UdpSocket.Handler handler = (socket, from, fromPort, to, data) -> {
             if (!from.equals(server) || fromPort != NtpPacket.PORT) {
                 return;
             }
@@ -51,7 +56,8 @@ public final class NtpClient {
             long t2 = NtpPacket.toUnixMillis(p.receiveTime);
             long t3 = NtpPacket.toUnixMillis(p.transmitTime);
             f.complete(new Result(t3, ((t2 - t1) + (t3 - t4)) / 2, (t4 - t1) - (t3 - t2), p.stratum));
-        }).whenComplete((socket, err) -> {
+        };
+        (via != null ? stack.openUdpVia(via, 0, handler) : stack.openUdp(null, 0, handler)).whenComplete((socket, err) -> {
             if (err != null) {
                 f.completeExceptionally(err);
                 return;

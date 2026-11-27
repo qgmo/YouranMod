@@ -1,7 +1,8 @@
 package moe.qingu.youran.server.net;
 
 import moe.qingu.youran.api.network.ConfirmText;
-import moe.qingu.youran.api.network.DeviceHandle;
+import moe.qingu.youran.api.network.ClientRelayNic;
+import moe.qingu.youran.api.network.NetworkInterface;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.NetworkLayout;
 import moe.qingu.youran.api.network.packet.DnsMessage;
@@ -54,7 +55,7 @@ final class NetCommand extends CommandBase {
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/ynet <table|stats|device|identify|confirm|location|ping|dns|whois|name|get|post|ca|ntp|sim|stress|flush>";
+        return "/ynet <table|stats|players|device|confirm|location|operator|ping|dns|whois|name|get|post|ca|ntp|sim|stress|flush>";
     }
 
     @Override
@@ -67,16 +68,14 @@ final class NetCommand extends CommandBase {
             "§6/ynet table §f地址分配表",
             "§6/ynet stats §f路由器与网卡的统计",
             "§6/ynet players §f在线玩家的临时地址、连接数、放行的用途",
-            "§6/ynet device add|remove <x> <y> <z> [维度] §f放、拿服务端测试设备",
-            "§6/ynet device list §f列出测试设备",
-            "§6/ynet device bind <玩家> <x> <y> <z> [维度] §f把玩家当成这一格上的电脑（协议栈在他的客户端上）",
+            "§6/ynet device add|remove <x> <y> <z> [维度] §f在一格上插、拔一张测试网卡（背后是服务端的协议栈）",
+            "§6/ynet device list §f插着的网卡（地址、种类、收发了多少）",
+            "§6/ynet device bind <玩家> <x> <y> <z> [维度] §f在一格上插一张接玩家客户端的测试网卡（他的客户端多一个网口，/ynetc -i 用）",
             "§6/ynet device unbind <玩家>",
-            "§6/ynet device power <x> <y> <z> on|off [维度]",
-            "§6/ynet device operator <x> <y> <z> <玩家>|none §f告诉设备表现在谁在操作（模拟服务端电脑的操作者）",
-            "§6/ynet device cap <x> <y> <z> login|location on|off §f声明、去掉设备的能力（一键登录、定位模块）",
-            "§6/ynet identify <地址> | <x> <y> <z> [维度] §f按来源地址认人：哪台设备、什么能力、谁在操作",
+            "§6/ynet device refuse <x> <y> <z> on|off [维度] §f测试网卡收不收包（off 时路由器回“目标不可达”）",
             "§6/ynet confirm <玩家> §f给他弹一个测试用的系统确认框，回应后显示结果",
-            "§6/ynet location <x> <y> <z> <网站域名> <随机数> §f给这一格的设备签位置（先问操作者），显示证明",
+            "§6/ynet location <x> <y> <z> <网站域名> <随机数> §f用这一格的测试网卡签位置（问你自己），显示证明",
+            "§6/ynet operator <x> <y> <z> <网站域名> <随机数> §f用这一格的测试网卡签操作者证明（玩家是你自己），显示证明",
             "§6/ynet ping <x> <y> <z> <目标> [次数] [字节数] §f目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名",
             "§6/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY] §f经递归解析器查（默认 AAAA）",
             "§6/ynet whois <域名或顶级域> §f注册局、所属模组、DNS 服务器",
@@ -111,8 +110,8 @@ final class NetCommand extends CommandBase {
             case "device":
                 device(server, sender, args);
                 break;
-            case "identify":
-                identify(sender, args);
+            case "operator":
+                operator(sender, args);
                 break;
             case "confirm":
                 confirm(server, sender, args);
@@ -206,7 +205,8 @@ final class NetCommand extends CommandBase {
         tell(sender, "§e游戏内网络统计");
         tell(sender, "转发 " + r.forwarded + "，交给设备 " + r.deliveredToDevices + "，交给机房主机 " + r.deliveredToHosts
                 + "，回目标不可达 " + r.unreachableSent + "，回超时 " + r.timeExceededSent + "，坏包 " + r.malformed);
-        tell(sender, "网卡收下 " + net.nic().accepted + "，丢掉 " + net.rejects().total()
+        tell(sender, "插着的网卡 " + net.nicTable().all().size() + " 张，发出收下 " + net.nicTable().accepted + "、交给网卡 " + net.nicTable().delivered
+                + "；中转到客户端 " + net.relays().toClient + "、客户端发来 " + net.relays().fromClient + "，丢掉 " + net.rejects().total()
                 + "；测试开关：丢包 " + Math.round(r.lossRate() * 100) + "%（已丢 " + r.simulatedDrops + "），乱序 "
                 + Math.round(r.reorderRate() * 100) + "%（已推迟 " + r.simulatedDelays + "）");
         for (RawHostPort h : net.rawHosts().values()) {
@@ -246,39 +246,41 @@ final class NetCommand extends CommandBase {
 
     private void device(MinecraftServer server, ICommandSender sender, String[] args) throws CommandException {
         String op = args.length > 1 ? args[1] : "";
-        TestDevices td = net.testDevices();
+        TestNics tn = net.testNics();
         switch (op) {
             case "add": {
                 Place p = place(sender, args, 2);
-                TestDevices.Emulated e = td.add(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+                TestNics.Emulated e = tn.add(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
                 if (e == null) {
-                    tell(sender, "§c" + p + " 没有地址（维度没有全局 Wi-Fi，或坐标超出范围）");
+                    tell(sender, "§c" + p + " 插不上：没有地址（维度没有全局 Wi-Fi，或坐标超出范围），或这一格已经插着别的网卡");
                 } else {
-                    tell(sender, "§a在 " + p + " 放了测试设备，地址 " + e.handle.address()
-                            + (((DeviceTable.Device) e.handle).isLoaded() ? "" : " §e（区块没加载，加载前收发不了包）"));
+                    tell(sender, "§a在 " + p + " 插了测试网卡，地址 " + e.address());
                 }
                 break;
             }
             case "remove": {
                 Place p = place(sender, args, 2);
-                if (td.remove(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ())) {
-                    tell(sender, "§a拿掉了 " + p + " 的测试设备");
-                } else {
-                    DeviceHandle h = net.deviceTable().at(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
-                    if (h != null) {
-                        h.remove();
-                        tell(sender, "§a拿掉了 " + p + " 的设备");
-                    } else {
-                        tell(sender, "§c" + p + " 没有设备");
-                    }
-                }
+                tell(sender, tn.remove(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ()) ? "§a拔掉了 " + p + " 的测试网卡"
+                        : "§c" + p + " 没有测试网卡（别的模组插的网卡要由它自己拔）");
                 break;
             }
             case "list": {
-                tell(sender, "§e设备表");
-                for (DeviceTable.Device d : new ArrayList<>(net.deviceTable().all())) {
-                    tell(sender, "  " + d.label() + "：" + (d.isPowered() ? "通电" : "断电") + "，" + (d.isLoaded() ? "区块已加载" : "区块没加载")
-                            + "，网卡 " + d.attachmentDescription());
+                tell(sender, "§e插着的网卡");
+                for (NicTable.Port port : new ArrayList<>(net.nicTable().all())) {
+                    NetworkInterface n = port.nic;
+                    String extra = "";
+                    if (n instanceof TestNics.Emulated) {
+                        TestNics.Emulated e = (TestNics.Emulated) n;
+                        extra = "，测试网卡（服务端协议栈）" + (e.refuse ? "§c 收不了§f" : "") + "，网卡收 " + e.received + "、发 " + e.sent + "、发出被拒 " + e.sendRejected;
+                    } else if (n instanceof ClientRelayNic) {
+                        EntityPlayerMP pl = ((ClientRelayNic) n).connectedPlayer();
+                        extra = "，接玩家客户端：" + (pl == null ? "没接" : pl.getName());
+                    }
+                    tell(sender, "  " + port.label() + "：交给它 " + port.received + "、它发出 " + port.sent + extra);
+                }
+                ClientRelays r = net.relays();
+                for (String line : r.describe()) {
+                    tell(sender, "  §7中转：" + line);
                 }
                 break;
             }
@@ -288,11 +290,12 @@ final class NetCommand extends CommandBase {
                 }
                 EntityPlayerMP player = getPlayer(server, sender, args[2]);
                 Place p = place(sender, args, 3);
-                DeviceHandle h = td.bindPlayer(player, p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
-                if (h == null) {
-                    tell(sender, "§c" + p + " 没有地址（维度没有全局 Wi-Fi，或坐标超出范围）");
+                TestNics.Relay r = tn.bindPlayer(player, p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+                if (r == null) {
+                    tell(sender, "§c" + p + " 插不上：没有地址，或这一格已经插着别的网卡");
                 } else {
-                    tell(sender, "§a把 " + player.getName() + " 当成 " + p + " 上的电脑，地址 " + h.address() + "（协议栈在他的客户端上）");
+                    tell(sender, "§a在 " + p + " 插了一张接 " + player.getName() + " 客户端的测试网卡，地址 " + r.address()
+                            + "，网口 " + net.relays().portOf(player.getUniqueID()) + "（/ynetc status 能看到）");
                 }
                 break;
             }
@@ -301,87 +304,29 @@ final class NetCommand extends CommandBase {
                     throw new WrongUsageException("/ynet device unbind <玩家>");
                 }
                 EntityPlayerMP player = getPlayer(server, sender, args[2]);
-                tell(sender, td.unbindPlayer(player.getUniqueID()) ? "§a已断开 " + player.getName() : "§c" + player.getName() + " 没有接着测试设备");
+                tell(sender, tn.unbindPlayer(player.getUniqueID()) ? "§a拔掉了接 " + player.getName() + " 的测试网卡" : "§c" + player.getName() + " 没有接着测试网卡");
                 break;
             }
-            case "power": {
-                Place p = place(sender, args, 2);
+            case "refuse": {
                 if (args.length < 6) {
-                    throw new WrongUsageException("/ynet device power <x> <y> <z> on|off [维度]");
-                }
-                DeviceHandle h = net.deviceTable().at(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
-                if (h == null) {
-                    tell(sender, "§c" + p + " 没有设备");
-                } else {
-                    h.setPowered(args[5].equals("on"));
-                    tell(sender, "§a" + p + " 的设备" + (h.isPowered() ? "通电了" : "断电了"));
-                }
-                break;
-            }
-            case "operator": {
-                if (args.length < 6) {
-                    throw new WrongUsageException("/ynet device operator <x> <y> <z> <玩家>|none");
+                    throw new WrongUsageException("/ynet device refuse <x> <y> <z> on|off [维度]");
                 }
                 Place p = place(sender, args, 2, false);
-                DeviceHandle h = net.deviceTable().at(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
-                if (h == null) {
-                    tell(sender, "§c" + p + " 没有设备");
-                } else if (args[5].equals("none")) {
-                    h.setOperator(null);
-                    tell(sender, "§a" + p + " 的设备现在没人操作");
+                TestNics.Emulated e = tn.get(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+                if (e == null) {
+                    tell(sender, "§c" + p + " 没有服务端测试网卡");
                 } else {
-                    EntityPlayerMP player = getPlayer(server, sender, args[5]);
-                    h.setOperator(player);
-                    tell(sender, "§a" + p + " 的设备现在由 " + player.getName() + " 操作" + (h.attachedPlayer() != null ? "（§e网卡接着玩家客户端，这个不算§a）" : ""));
-                }
-                break;
-            }
-            case "cap": {
-                if (args.length < 7) {
-                    throw new WrongUsageException("/ynet device cap <x> <y> <z> login|location on|off");
-                }
-                Place p = place(sender, args, 2, false);
-                DeviceHandle h = net.deviceTable().at(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
-                moe.qingu.youran.api.network.DeviceCapability c = args[5].equals("login") ? moe.qingu.youran.api.network.DeviceCapability.ONE_CLICK_LOGIN
-                        : args[5].equals("location") ? moe.qingu.youran.api.network.DeviceCapability.LOCATION : null;
-                if (h == null || c == null) {
-                    tell(sender, "§c" + (h == null ? p + " 没有设备" : "能力只有 login、location"));
-                } else {
-                    h.setCapability(c, args[6].equals("on"));
-                    tell(sender, "§a" + p + " 的设备能力：" + ((DeviceTable.Device) h).capabilitySet());
+                    e.refuse = args[5].equals("on");
+                    tell(sender, "§a" + p + " 的测试网卡现在" + (e.refuse ? "收不了包（路由器回目标不可达）" : "照常收包"));
                 }
                 break;
             }
             default:
-                throw new WrongUsageException("/ynet device add|remove|list|bind|unbind|power|operator|cap ...");
+                throw new WrongUsageException("/ynet device add|remove|list|bind|unbind|refuse ...");
         }
     }
 
-    // ---- 认人、确认框、位置 ----
-
-    private void identify(ICommandSender sender, String[] args) throws CommandException {
-        if (args.length < 2) {
-            throw new WrongUsageException("/ynet identify <地址> | <x> <y> <z> [维度]");
-        }
-        Ipv6Address a;
-        if (args.length >= 4) {
-            Place p = place(sender, args, 1);
-            a = net.deviceTable().addressAt(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
-            if (a == null) {
-                tell(sender, "§c" + p + " 没有地址");
-                return;
-            }
-        } else {
-            try {
-                a = Ipv6Address.parse(args[1]);
-            } catch (IllegalArgumentException e) {
-                throw new CommandException("不是 IPv6 地址：" + args[1]);
-            }
-        }
-        moe.qingu.youran.api.network.SourceIdentity id = net.identify(a);
-        tell(sender, id == null ? "§e" + a + "：认不出（不是设备、不是在线玩家的临时地址）"
-                : "§a" + a + "：" + id + "；一键登录" + (id.canOneClickLogin() ? "可以" : "不行"));
-    }
+    // ---- 确认框、位置、操作者证明 ----
 
     private void confirm(MinecraftServer server, ICommandSender sender, String[] args) throws CommandException {
         if (args.length < 2) {
@@ -393,7 +338,7 @@ final class NetCommand extends CommandBase {
                 Arrays.asList(ConfirmText.translate("youranmod.confirm.test.item1", "这是 /ynet confirm 发的测试"),
                         ConfirmText.translate("youranmod.confirm.test.item2", "点同意或拒绝都可以")),
                 30, moe.qingu.youran.api.network.ConfirmRequest.Purpose.ACTION);
-        net.confirm(null, player.getUniqueID(), r).thenAccept(res -> tell(sender, "§e测试确认框的结果：" + res));
+        net.confirm(player.getUniqueID(), r).thenAccept(res -> tell(sender, "§e测试确认框的结果：" + res));
         tell(sender, "§a已给 " + player.getName() + " 弹框（30 秒）");
     }
 
@@ -401,14 +346,35 @@ final class NetCommand extends CommandBase {
         if (args.length < 6) {
             throw new WrongUsageException("/ynet location <x> <y> <z> <网站域名> <随机数>");
         }
+        EntityPlayerMP me = getCommandSenderAsPlayer(sender);
         Place p = place(sender, args, 1, false);
-        DeviceTable.Device d = net.deviceTable().byPosition(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
-        if (d == null) {
-            tell(sender, "§c" + p + " 没有设备");
+        TestNics.Emulated e = emulated(sender, p);
+        if (e == null) {
             return;
         }
-        net.signOnMain(d, args[4], args[5]).thenAccept(res -> {
-            tell(sender, "§e位置签名：" + res.status.code);
+        moe.qingu.youran.api.network.location.LocationProofs.sign(e, me.getGameProfile(), p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ(), args[4], args[5])
+                .thenAccept(res -> {
+                    tell(sender, "§e位置签名：" + res.status.code);
+                    if (res.ok()) {
+                        for (String line : res.proof.split("\n")) {
+                            tell(sender, "  " + line);
+                        }
+                    }
+                });
+    }
+
+    private void operator(ICommandSender sender, String[] args) throws CommandException {
+        if (args.length < 6) {
+            throw new WrongUsageException("/ynet operator <x> <y> <z> <网站域名> <随机数>");
+        }
+        EntityPlayerMP me = getCommandSenderAsPlayer(sender);
+        Place p = place(sender, args, 1, false);
+        TestNics.Emulated e = emulated(sender, p);
+        if (e == null) {
+            return;
+        }
+        moe.qingu.youran.api.network.identity.OperatorProofs.sign(e, me.getGameProfile(), args[4], args[5]).thenAccept(res -> {
+            tell(sender, "§e操作者证明：" + res.status.code);
             if (res.ok()) {
                 for (String line : res.proof.split("\n")) {
                     tell(sender, "  " + line);
@@ -424,7 +390,7 @@ final class NetCommand extends CommandBase {
             throw new WrongUsageException("/ynet ping <x> <y> <z> <目标> [次数] [字节数]");
         }
         Place p = place(sender, args, 1, false);
-        TestDevices.Emulated dev = emulated(sender, p);
+        TestNics.Emulated dev = emulated(sender, p);
         if (dev == null) {
             return;
         }
@@ -435,7 +401,7 @@ final class NetCommand extends CommandBase {
             if (addr == null) {
                 return;
             }
-            later(sender, "§ePING " + target + (target.equals(addr.toString()) ? "" : "（" + addr + "）") + "，从 " + dev.handle.address()
+            later(sender, "§ePING " + target + (target.equals(addr.toString()) ? "" : "（" + addr + "）") + "，从 " + dev.address()
                     + "，" + size + " 字节数据");
             pingLoop(sender, dev.stack, addr, size, count, 0, new int[1]);
         });
@@ -496,7 +462,7 @@ final class NetCommand extends CommandBase {
             throw new WrongUsageException("/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY]");
         }
         Place p = place(sender, args, 1, false);
-        TestDevices.Emulated dev = emulated(sender, p);
+        TestNics.Emulated dev = emulated(sender, p);
         if (dev == null) {
             return;
         }
@@ -664,7 +630,7 @@ final class NetCommand extends CommandBase {
             throw new WrongUsageException("/ynet get <x> <y> <z> <网址>");
         }
         Place p = place(sender, args, 1, false);
-        TestDevices.Emulated dev = emulated(sender, p);
+        TestNics.Emulated dev = emulated(sender, p);
         if (dev == null) {
             return;
         }
@@ -695,7 +661,7 @@ final class NetCommand extends CommandBase {
             throw new WrongUsageException("/ynet post <x> <y> <z> <网址> <JSON>");
         }
         Place p = place(sender, args, 1, false);
-        TestDevices.Emulated dev = emulated(sender, p);
+        TestNics.Emulated dev = emulated(sender, p);
         if (dev == null) {
             return;
         }
@@ -795,7 +761,7 @@ final class NetCommand extends CommandBase {
             throw new WrongUsageException("/ynet ntp <x> <y> <z>");
         }
         Place p = place(sender, args, 1, false);
-        TestDevices.Emulated dev = emulated(sender, p);
+        TestNics.Emulated dev = emulated(sender, p);
         if (dev == null) {
             return;
         }
@@ -898,16 +864,16 @@ final class NetCommand extends CommandBase {
         return new Place(pos, dim);
     }
 
-    private TestDevices.Emulated emulated(ICommandSender sender, Place p) {
-        TestDevices.Emulated e = net.testDevices().get(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
+    private TestNics.Emulated emulated(ICommandSender sender, Place p) {
+        TestNics.Emulated e = net.testNics().get(p.dim, p.pos.getX(), p.pos.getY(), p.pos.getZ());
         if (e == null) {
-            tell(sender, "§c" + p + " 没有服务端测试设备，先用 /ynet device add " + p.pos.getX() + " " + p.pos.getY() + " " + p.pos.getZ() + " " + p.dim);
+            tell(sender, "§c" + p + " 没有服务端测试网卡，先用 /ynet device add " + p.pos.getX() + " " + p.pos.getY() + " " + p.pos.getZ() + " " + p.dim);
         }
         return e;
     }
 
     /** 目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名（经这台设备的递归解析器查） */
-    private CompletableFuture<Ipv6Address> resolveTarget(ICommandSender sender, TestDevices.Emulated dev, String target, int dim) {
+    private CompletableFuture<Ipv6Address> resolveTarget(ICommandSender sender, TestNics.Emulated dev, String target, int dim) {
         Ipv6Address literal = Ipv6Address.tryParse(target);
         if (literal != null) {
             return CompletableFuture.completedFuture(literal);
@@ -915,7 +881,7 @@ final class NetCommand extends CommandBase {
         if (target.matches("-?\\d+,-?\\d+,-?\\d+(,-?\\d+)?")) {
             String[] parts = target.split(",");
             int d = parts.length > 3 ? Integer.parseInt(parts[3]) : dim;
-            Ipv6Address a = net.deviceTable().addressAt(d, Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+            Ipv6Address a = net.addressAt(d, Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
             if (a == null) {
                 tell(sender, "§c坐标 " + target + "（维度 " + d + "）没有地址：维度没有全局 Wi-Fi，或坐标超出范围（x、z 在 −524288 到 524287，y 在 0 到 255）");
             }
@@ -970,13 +936,14 @@ final class NetCommand extends CommandBase {
     @Override
     public List<String> getTabCompletions(MinecraftServer server, ICommandSender sender, String[] args, @Nullable BlockPos targetPos) {
         if (args.length == 1) {
-            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "ping", "dns", "whois", "name", "get", "post", "ca", "ntp", "sim", "stress", "flush");
+            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "confirm", "location", "operator", "ping", "dns", "whois", "name",
+                    "get", "post", "ca", "ntp", "sim", "stress", "flush");
         }
         if (args.length == 2 && args[0].equals("name")) {
             return getListOfStringsMatchingLastWord(args, "add", "txt", "remove");
         }
         if (args.length == 2 && args[0].equals("device")) {
-            return getListOfStringsMatchingLastWord(args, "add", "remove", "list", "bind", "unbind", "power");
+            return getListOfStringsMatchingLastWord(args, "add", "remove", "list", "bind", "unbind", "refuse");
         }
         if (args.length == 3 && args[0].equals("device") && (args[1].equals("bind") || args[1].equals("unbind"))) {
             return getListOfStringsMatchingLastWord(args, server.getOnlinePlayerNames());
