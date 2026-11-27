@@ -71,6 +71,10 @@ youranmod.net.client.get.result=HTTP %s, %s bytes, %s
 youranmod.net.client.line=%s
 youranmod.net.client.ntp.result=UTC %s, offset %s ms, round trip %s ms
 youranmod.net.client.failed=Failed: %s
+youranmod.net.client.link=  Link: link-local address %s, default routers %s, MTU %s
+youranmod.net.client.lease=  DHCPv6 lease: address %s, valid %s s, T1 %s s (∞ = no renewal), DNS %s, NTP %s, server %s
+youranmod.net.client.no_lease=  No DHCPv6 lease yet (%s)
+youranmod.net.client.not_configured=The player interface has not got an address from DHCPv6 yet; try again in a second or two.
 fluid.acetic_acid=Acetic Acid
 item.rough_platter.name=Rough Disk Platter
 item.rough_platter.tooltip=A base film coated with magnetic dust on both sides. Still has to be dried and polished.

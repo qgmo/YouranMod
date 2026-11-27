@@ -20,7 +20,8 @@ import java.util.function.Consumer;
  * 网络不跟区块加载（方块加载时插、卸载时拔由模组自己做）。
  * <p>
  * 网卡发的包经它的端口（{@link Port#send}）校验：不是合格的 IPv6 包、超过 1280 字节、源地址不是这张网卡的地址、超过速率上限、
- * 已经拔掉时不收（返回 false），记限频日志；收下的排进网络线程交给路由器。
+ * 已经拔掉时不收（返回 false），记限频日志；收下的排进网络线程交给它那个维度的路由器（{@link Ingress}）。
+ * 发给网卡的包由维度路由器按目的地址查这张表交过来（{@link #deliver}）：网络不从地址解码坐标（服主 11-27）。
  */
 final class NicTable {
     /** 一格的地址怎么算（{@link AddressBook#coordinateAddress}）；没有地址为 null */
@@ -28,10 +29,15 @@ final class NicTable {
         Ipv6Address addressAt(int dimension, int x, int y, int z);
     }
 
+    /** 网卡发出的包交给谁（网络线程上调用；一般是那张网卡所在维度的路由器） */
+    interface Ingress {
+        void fromNic(Port port, byte[] packet);
+    }
+
     private final Addresser addresses;
     private final EventLoop loop;
     private final RejectLog rejects;
-    private final Consumer<byte[]> router;
+    private final Ingress router;
     private final int packetsPerSecond;
     private final int bytesPerSecond;
     private final Map<PosKey, Port> byPosition = new ConcurrentHashMap<>();
@@ -43,10 +49,10 @@ final class NicTable {
     volatile boolean stopped;
 
     /**
-     * @param router  收下的包交给谁（网络线程上调用，一般是 {@code Router::forward}）
+     * @param router  收下的包交给谁（网络线程上调用，一般是那个维度的路由器）
      * @param onUnplug 拔掉一张网卡以后（任意线程）
      */
-    NicTable(Addresser addresses, EventLoop loop, RejectLog rejects, Consumer<byte[]> router, int packetsPerSecond, int bytesPerSecond,
+    NicTable(Addresser addresses, EventLoop loop, RejectLog rejects, Ingress router, int packetsPerSecond, int bytesPerSecond,
              Consumer<Port> onUnplug) {
         this.addresses = addresses;
         this.loop = loop;
@@ -129,12 +135,12 @@ final class NicTable {
     // ---- 网络线程 ----
 
     /**
-     * 路由器把发给这一格的包交过来（{@code packet} 跳数已减一、是副本）：插着的网卡地址对得上时交给 {@link NetworkInterface#receive}。
-     * 没插着、网卡返回 false 或抛异常时返回 false（路由器回“地址不可达”）
+     * 维度路由器把发给 {@code dst} 的包交过来（{@code packet} 跳数已减一、是副本）：插着地址是 {@code dst} 的网卡时交给它的
+     * {@link NetworkInterface#receive}。没插着、网卡返回 false 或抛异常时返回 false（路由器回“地址不可达”）
      */
-    boolean deliver(int dimension, int x, int y, int z, byte[] packet) {
-        Port p = byPosition.get(new PosKey(dimension, x, y, z));
-        if (p == null || p.removed || !p.address.equals(Ipv6Packet.destinationOf(packet))) {
+    boolean deliver(Ipv6Address dst, byte[] packet) {
+        Port p = byAddress.get(dst);
+        if (p == null || p.removed) {
             return false;
         }
         boolean ok;
@@ -195,7 +201,7 @@ final class NicTable {
             }
             sent++;
             accepted++;
-            loop.execute(() -> router.accept(p));
+            loop.execute(() -> router.fromNic(this, p));
             return true;
         }
 

@@ -17,8 +17,11 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * YouranMod 的默认权威 DNS 服务：跑在一台主机的协议栈上（UDP 53），可以同时管几个区，运行中能改记录。不递归；
+ * YouranMod 的默认权威 DNS 服务：跑在一台主机的协议栈上（UDP 53 与 TCP 53，RFC 7766），可以同时管几个区，运行中能改记录。不递归；
  * 问的名字不在它管的区里时回 REFUSED。
+ * <p>
+ * EDNS(0)（RFC 6891）：查询带 OPT 的，回答也带 OPT（载荷 {@value DnsMessage#EDNS_PAYLOAD}）；版本不是 0 的回 BADVERS；OPT 不合格的回 FORMERR。
+ * UDP 回答超过上限（问的一方没带 EDNS 时 512、带了时按它说的、最多 1232）时截断、置 TC，对方改用 TCP 重问；TCP 上不截断。
  * <p>
  * 支持的记录：AAAA、TXT，以及往下的委派（NS）。区顶的 SOA、NS 自动生成：NS 叫 {@code ns1.<区>}（根区叫 {@code ns1}），
  * 指向这台主机自己的地址；委派给下级的 NS 叫 {@code ns1.<下级>}、{@code ns2.<下级>}……，带粘连地址。
@@ -51,11 +54,27 @@ public final class DnsServer implements UdpSocket.Handler {
         }
     }
 
-    /** 在协议栈 {@code stack} 上开一个默认权威 DNS 服务（UDP 53，地址是这个协议栈的主地址）。在网络线程上调用 */
+    /** 在协议栈 {@code stack} 上开一个默认权威 DNS 服务（UDP 53 与 TCP 53，地址是这个协议栈的主地址）。在网络线程上调用 */
     public static DnsServer start(NetStack stack) {
         DnsServer s = new DnsServer(stack);
         stack.openUdp(null, DnsMessage.PORT, s);
+        moe.qingu.youran.api.network.stack.DnsTcp.serve(stack, data -> java.util.concurrent.CompletableFuture.completedFuture(s.answerBytes(data, false)));
         return s;
+    }
+
+    /** 回答一个报文：{@code udp} 时按问的一方的上限截断；不回的为 null */
+    byte[] answerBytes(byte[] data, boolean udp) {
+        DnsMessage q;
+        try {
+            q = DnsMessage.parse(data);
+        } catch (MalformedPacketException e) {
+            return null;
+        }
+        DnsMessage reply = answer(q);
+        if (reply == null) {
+            return null;
+        }
+        return udp ? reply.encodeForUdp(DnsMessage.udpLimitFor(q)) : reply.encode();
     }
 
     /** 这台 DNS 服务器的地址（注册域名时交给注册局的就是它） */
@@ -239,23 +258,36 @@ public final class DnsServer implements UdpSocket.Handler {
 
     @Override
     public void onDatagram(UdpSocket socket, Ipv6Address from, int fromPort, Ipv6Address to, byte[] data) {
-        DnsMessage q;
-        try {
-            q = DnsMessage.parse(data);
-        } catch (MalformedPacketException e) {
-            return;
-        }
-        DnsMessage reply = answer(q);
+        byte[] reply = answerBytes(data, true);
         if (reply != null) {
-            socket.send(to, from, fromPort, reply.encodeForUdp());
+            socket.send(to, from, fromPort, reply);
         }
     }
 
-    /** 按正在用的区数据回答一个查询（不走报文；任意线程）。{@code q} 是应答报文时不回，返回 null */
+    /**
+     * 按正在用的区数据回答一个查询（不走报文；任意线程）。{@code q} 是应答报文时不回，返回 null。
+     * 查询带 EDNS 时回答也带（见类的说明）
+     */
     public DnsMessage answer(DnsMessage q) {
         if (q.response) {
             return null;
         }
+        DnsMessage r = answerPlain(q);
+        if (q.edns == null && !q.ednsMalformed) {
+            return r;
+        }
+        List<DnsMessage.Record> none = Collections.emptyList();
+        if (q.ednsMalformed) {
+            return DnsMessage.reply(q, false, false, DnsMessage.RCODE_FORMERR, none, none, none);
+        }
+        if (q.edns.version != 0) {
+            return DnsMessage.reply(q, false, false, DnsMessage.RCODE_OK, none, none, none).withEdns(DnsMessage.Edns.standard())
+                    .withRcode(DnsMessage.RCODE_BADVERS);
+        }
+        return r.withEdns(DnsMessage.Edns.standard());
+    }
+
+    private DnsMessage answerPlain(DnsMessage q) {
         List<DnsMessage.Record> none = Collections.emptyList();
         if (q.opcode != 0) {
             return DnsMessage.reply(q, false, false, DnsMessage.RCODE_NOTIMP, none, none, none);

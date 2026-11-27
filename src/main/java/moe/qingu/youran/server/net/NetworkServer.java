@@ -112,6 +112,10 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     static final String CA_NAME = CertificateAuthority.DOMAIN;
     /** 测试网站的国际化域名别名 */
     static final String TEST_IDN_NAME = "测试.yr";
+    /** 运维主机（服主 11-27）：控制台、RCON 执行 /ynet ping 等时从它发出（它们没有玩家地址） */
+    static final String HOST_OPS = "youranmod:ops";
+    /** 机房主机等邻居发现（重复地址检测、机房路由器的 RA）最多等多久，过了照样启动服务 */
+    static final long HOST_READY_TIMEOUT_MS = 10_000;
     static final long PART_ROUTER = 0x1;
     static final long PART_RESOLVER = 0x53;
     static final long PART_NTP = 0x123;
@@ -127,15 +131,17 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private AddressBook book;
     /** 插着的网卡 */
     private NicTable nics;
-    private Router router;
+    /** 路由器与链路（网络线程上建好；没建起来为 null） */
+    private volatile RouterNetwork routers;
     /** 网卡与玩家客户端之间的中转（ClientRelayNic） */
     private ClientRelays relays;
     private TestNics testNics;
     private NetworkEvents events;
     private RejectLog rejects;
-    private RecursiveResolver resolver;
-    /** 玩家临时地址；没开（配置关掉、序号冲突）时为 null */
-    private PlayerNics players;
+    private volatile RecursiveResolver resolver;
+    private volatile NtpServer ntp;
+    /** 玩家地址；没开（配置关掉、序号冲突）时为 null（网络线程上建好） */
+    private volatile PlayerNics players;
     /** captcha.yr 与它的本机端口（没开为 null） */
     private CaptchaService captcha;
     private CaptchaLocalServer captchaLocal;
@@ -154,7 +160,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
     private volatile DefaultRegistrar comRegistrar;
     private volatile DnsServer sitesDns;
     private File worldDirectory;
-    private final Map<String, NetStack> hostStacks = new LinkedHashMap<>();
+    private final Map<String, NetStack> hostStacks = new ConcurrentHashMap<>();
     /** 原始主机（登记名 → 端口）；开服时在网络线程上填，任意线程读 */
     private final Map<String, RawHostPort> rawHosts = new ConcurrentHashMap<>();
     private final Set<CompletableFuture<?>> mainThreadTasks = ConcurrentHashMap.newKeySet();
@@ -203,6 +209,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         dcRequests.add(new AllocationTable.Request(YouranNetworkApi.YOURANMOD_DATACENTER, 0, null));
         // 玩家临时地址：最后一个 /96，固定序号（和别的机房冲突时由分配表报出来，玩家临时地址就不开）
         dcRequests.add(new AllocationTable.Request(YouranNetworkApi.PLAYERS_DATACENTER, NetworkLayout.PLAYERS_DATACENTER, null));
+        // 路由器地址段（服主 11-27）：照登记机房的办法分下一个空闲的机房号，每台路由器在里面分一个地址（相当于 loopback）
+        dcRequests.add(new AllocationTable.Request(RouterNetwork.ROUTERS_DATACENTER, -1, null));
         for (NetworkRegistry.DatacenterDecl d : NetworkRegistry.datacenters()) {
             dcRequests.add(new AllocationTable.Request(d.key, d.fixedIndex, null));
         }
@@ -223,6 +231,22 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         hostRequests.add(new AllocationTable.Request(HOST_LOCATION, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_OPERATOR, -1, dc));
         hostRequests.add(new AllocationTable.Request(HOST_CA, -1, dc));
+        hostRequests.add(new AllocationTable.Request(HOST_OPS, -1, dc));
+        // 路由器（YouranMod 机房的路由器照旧是 youranmod:router，机房的 ::1）
+        Set<String> routerKeys = new java.util.LinkedHashSet<>();
+        routerKeys.add(RouterNetwork.CORE);
+        routerKeys.add(RouterNetwork.GAMEPLAY);
+        routerKeys.add(RouterNetwork.PLAYERS);
+        for (int dim : dims.keySet()) {
+            routerKeys.add(RouterNetwork.dimensionKey(dim));
+        }
+        for (NetworkRegistry.DatacenterDecl d : NetworkRegistry.datacenters()) {
+            routerKeys.add(RouterNetwork.datacenterKey(d.key));
+        }
+        for (String k : routerKeys) {
+            hostRequests.add(new AllocationTable.Request(k, -1, RouterNetwork.ROUTERS_DATACENTER));
+        }
+        routerKeys.add(HOST_ROUTER);
         if (moe.qingu.youran.server.net.pay.PayConfig.enabled) {
             hostRequests.add(new AllocationTable.Request(HOST_PAY, -1, dc));
         }
@@ -230,8 +254,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             hostRequests.add(new AllocationTable.Request(moe.qingu.youran.server.net.nav.NavServer.HOST, -1, dc));
         }
         for (NetworkRegistry.HostDecl h : hostDecls) {
-            if (h.datacenter.equals(YouranNetworkApi.PLAYERS_DATACENTER)) {
-                problems.add("主机 " + h.key + " 不能登记在玩家临时地址的 /96（" + h.datacenter + "）里，拒绝");
+            if (h.datacenter.equals(YouranNetworkApi.PLAYERS_DATACENTER) || h.datacenter.equals(RouterNetwork.ROUTERS_DATACENTER)) {
+                problems.add("主机 " + h.key + " 不能登记在 " + h.datacenter + " 里（玩家地址、路由器地址段），拒绝");
                 continue;
             }
             hostRequests.add(new AllocationTable.Request(h.key, h.fixedHost, h.datacenter));
@@ -261,26 +285,26 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         ca = new CaService(intermediate, caProblem[0], loop, System::currentTimeMillis, new SecureRandom());
         rejects = new RejectLog(NetworkConfig.rejectLogIntervalSeconds * 1000L);
         AddressBook addressBook = book;
-        nics = new NicTable(addressBook::coordinateAddress, loop, rejects, p -> router.forward(p),
-                NetworkConfig.devicePacketsPerSecond, NetworkConfig.deviceBytesPerSecond, this::unplugged);
-        router = new Router(loop, book, nics, routerAddress);
+        nics = new NicTable(addressBook::coordinateAddress, loop, rejects, (port, p) -> {
+            RouterNetwork r = routers;
+            if (r != null) {
+                r.fromNic(port, p);
+            }
+        }, NetworkConfig.devicePacketsPerSecond, NetworkConfig.deviceBytesPerSecond, this::unplugged);
         relays = new ClientRelays(loop, rejects, () -> resolverAddress, () -> ntpAddress);
         testNics = new TestNics(loop, resolverAddress);
+        boolean playersOn = false;
         if (!NetworkConfig.playerAddresses) {
-            LOG.info("游戏内网络：玩家临时地址在配置里关掉了（network.playerAddresses=false）");
+            LOG.info("游戏内网络：玩家地址在配置里关掉了（network.playerAddresses=false）");
         } else if (!Long.valueOf(NetworkLayout.PLAYERS_DATACENTER).equals(activeDc.get(YouranNetworkApi.PLAYERS_DATACENTER))) {
-            LOG.warn("游戏内网络：玩家临时地址的 /96 没分到（序号 {} 被占了），玩家临时地址不开", Long.toHexString(NetworkLayout.PLAYERS_DATACENTER));
+            LOG.warn("游戏内网络：玩家地址的 /96 没分到（序号 {} 被占了），玩家地址不开", Long.toHexString(NetworkLayout.PLAYERS_DATACENTER));
         } else {
-            players = new PlayerNics(loop, layout, router, rejects, resolverAddress, new SecureRandom(),
-                    NetworkConfig.playerPacketsPerSecond, NetworkConfig.playerBytesPerSecond,
-                    NetworkConfig.playerInboundPacketsPerSecond, NetworkConfig.playerInboundBytesPerSecond);
-            router.setPlayers(players);
+            playersOn = true;
         }
         Map<String, NetworkRegistry.HostDecl> declByKey = new LinkedHashMap<>();
         for (NetworkRegistry.HostDecl h : hostDecls) {
             declByKey.putIfAbsent(h.key, h);
         }
-        Map<String, Long> activeDcCopy = new LinkedHashMap<>(activeDc);
         // 验证码图片在服务端用 Java2D 画：专用服务器上没设时按无头模式（不连显示器；要在 AWT 初始化之前设）
         if (server.isDedicatedServer() && System.getProperty("java.awt.headless") == null) {
             System.setProperty("java.awt.headless", "true");
@@ -304,15 +328,36 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         // 先挂上：主机的启动回调里就能用 YouranNetworkApi.hostAddress 等查别的主机
         NetworkHooks.setBackend(this);
-        loop.execute(() -> startHosts(hostAddresses, declByKey, activeDcCopy));
+        boolean withPlayers = playersOn;
+        loop.execute(() -> {
+            try {
+                buildRouters(withPlayers);
+                startHosts(hostAddresses, declByKey, routerKeys);
+            } catch (Throwable t) {
+                LOG.error("游戏内网络：路由器、主机没建起来", t);
+            }
+        });
         loop.execute(this::scheduleOverflowLog);
 
         events = new NetworkEvents(this::playerLoggedIn, this::playerLoggedOut, this::serverTick);
         MinecraftForge.EVENT_BUS.register(events);
         event.registerServerCommand(new NetCommand(this));
-        LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机 {} 个；递归解析器 {}，NTP {}{}",
+        LOG.info("游戏内网络已启动：前缀 {}/48，联网维度 {}，机房 {} 个，主机与路由器 {} 个；递归解析器 {}，NTP {}{}",
                 layout.prefix(), dims, activeDc.size(), hostAddresses.size(), resolverAddress, ntpAddress,
-                players == null ? "" : "；玩家临时地址 " + layout.playersPrefix() + "/96");
+                playersOn ? "；玩家地址 " + layout.playersPrefix() + "/96（DHCPv6）" : "");
+    }
+
+    /** 网络线程上：建路由器与链路；玩家地址开着时建玩家路由器上的链路表 */
+    private void buildRouters(boolean withPlayers) {
+        AddressBook b = book;
+        RouterNetwork r = new RouterNetwork(loop, new SecureRandom(), b, nics, b.hosts::get, resolverAddress, HOST_ROUTER);
+        routers = r;
+        if (withPlayers && r.players != null) {
+            players = new PlayerNics(loop, b.layout, r.players, rejects, resolverAddress, ntpAddress, new SecureRandom(),
+                    NetworkConfig.playerPacketsPerSecond, NetworkConfig.playerBytesPerSecond,
+                    NetworkConfig.playerInboundPacketsPerSecond, NetworkConfig.playerInboundBytesPerSecond);
+        }
+        LOG.info("游戏内网络：路由器 {} 台：{}", r.routers().size(), r.routers());
     }
 
     /** 验证码的本机端口（配置 {@code network.captchaLocal} 开关、{@code network.captchaLocalPort} 端口，默认 8094） */
@@ -332,13 +377,15 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
     }
 
-    /** 主线程：玩家上线，分临时地址 */
+    /** 主线程：玩家上线，接上他和玩家路由器之间的链路（地址由他的客户端用 DHCPv6 要） */
     private void playerLoggedIn(EntityPlayerMP player) {
         PlayerNics p = players;
         if (p == null || player.connection == null) {
             return;
         }
         net.minecraft.network.NetworkManager conn = player.connection.getNetworkManager();
+        // 能用 /ynet 的人（同一个权限判断，上线时判断）不过防火墙、不限速（服主 11-27）
+        boolean unrestricted = player.canUseCommand(NetCommand.PERMISSION_LEVEL, NetCommand.NAME);
         p.attach(player.getUniqueID(), player.getName(), new PlayerNics.Link() {
             @Override
             public void deliver(byte[] packet) {
@@ -349,7 +396,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             public void control(byte[] message) {
                 moe.qingu.youran.net.NicChannel.sendToClient(conn, message);
             }
-        });
+        }, unrestricted);
     }
 
     /** 主线程，每 tick：系统确认框的超时、操作者变了 */
@@ -487,32 +534,104 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                 tls == null ? "HTTP；没开：" + service.unavailableReason() : "HTTP 与 HTTPS；能签的名字：" + service.constraintsText());
     }
 
-    /** 网络线程上：给每台主机建协议栈、挂到路由器上、启动服务 */
-    private void startHosts(Map<String, Ipv6Address> hosts, Map<String, NetworkRegistry.HostDecl> decls, Map<String, Long> datacenters) {
-        for (long idx : datacenters.values()) {
-            router.attachDatacenter(idx);
+    /**
+     * 网络线程上：给每台主机建协议栈、接到它那个机房的局域网上（原始主机接上代答的那一头）。主机先做邻居发现：重复地址检测过了、
+     * 收到机房路由器的 RA 以后（最多等 {@value #HOST_READY_TIMEOUT_MS} 毫秒）才启动服务；地址重复的主机不启用、记日志（服主 11-27）。
+     * 服务的启动顺序同以前：先 DNS、递归解析器、NTP、证书服务与 YouranMod 自己的网站，最后其他模组的主机。
+     */
+    private void startHosts(Map<String, Ipv6Address> hosts, Map<String, NetworkRegistry.HostDecl> decls, Set<String> routerKeys) {
+        RouterNetwork net = routers;
+        RouterNetwork.Datacenter ours = net.datacenter(0);
+        if (ours != null) {
+            hostStacks.put(HOST_ROUTER, ours.router.local);
         }
+        List<CompletableFuture<Void>> waits = new ArrayList<>();
+        Map<String, Ipv6Address> started = new ConcurrentHashMap<>();
         for (Map.Entry<String, Ipv6Address> e : hosts.entrySet()) {
-            NetworkRegistry.HostDecl decl = decls.get(e.getKey());
-            if (decl != null && decl.isRaw()) {
-                RawHostPort port = new RawHostPort(e.getKey(), e.getValue(), loop, router, rejects);
-                router.attachHost(e.getValue(), port);
-                rawHosts.put(e.getKey(), port);
+            String key = e.getKey();
+            if (routerKeys.contains(key)) {
                 continue;
             }
-            NetStack stack = new NetStack(loop, p -> loop.execute(() -> router.forward(p)), new SecureRandom());
-            stack.addAddress(e.getValue());
+            Ipv6Address addr = e.getValue();
+            RouterNetwork.Datacenter dc = net.datacenter(NetworkLayout.datacenterIndexOf(addr));
+            if (dc == null) {
+                LOG.error("游戏内网络：主机 {} 所在的机房没有路由器，不启用", key);
+                continue;
+            }
+            NetworkRegistry.HostDecl decl = decls.get(key);
+            if (decl != null && decl.isRaw()) {
+                RawHostPort port = new RawHostPort(key, addr, loop, dc.lan, new SecureRandom(), rejects);
+                waits.add(port.ready().thenAccept(ok -> {
+                    if (ok) {
+                        rawHosts.put(key, port);
+                        started.put(key, addr);
+                    }
+                }));
+                continue;
+            }
+            NetStack stack = new NetStack(loop, new SecureRandom());
+            NetStack.Interface[] holder = new NetStack.Interface[1];
+            long lla = dc.lan.attach(p -> holder[0].receive(p));
+            NetStack.Interface iface = stack.addNdInterface(0, key, dc.lan.linkFor(lla), lla,
+                    Ipv6Address.linkLocal(moe.qingu.youran.api.network.stack.NeighborDiscovery.eui64(lla)));
+            holder[0] = iface;
+            stack.setDefaultInterface(iface);
+            iface.addAddress(addr);
             stack.setMaxConnections(NetworkConfig.hostMaxTcpConnections);
-            router.attachHost(e.getValue(), stack);
-            hostStacks.put(e.getKey(), stack);
+            CompletableFuture<Void> w = new CompletableFuture<>();
+            iface.whenReady(addr).whenComplete((ok, err) -> {
+                if (ok == null || !ok) {
+                    LOG.error("游戏内网络：主机 {} 的地址 {} 和机房里别人的重复（重复地址检测），不启用", key, addr);
+                    dc.lan.detach(lla);
+                    stack.close();
+                    w.complete(null);
+                    return;
+                }
+                hostStacks.put(key, stack);
+                started.put(key, addr);
+                iface.whenRouterKnown().whenComplete((r, e2) -> w.complete(null));
+            });
+            waits.add(w);
         }
+        CompletableFuture<Void> all = CompletableFuture.allOf(waits.toArray(new CompletableFuture[0]));
+        boolean[] done = new boolean[1];
+        ExecutorEventLoop l = loop;
+        Runnable go = () -> {
+            if (done[0] || loop != l) {
+                return;
+            }
+            done[0] = true;
+            startServices(new LinkedHashMap<>(hosts), decls, started);
+        };
+        all.whenComplete((v, e) -> l.execute(go));
+        l.schedule(() -> {
+            if (!done[0]) {
+                LOG.warn("游戏内网络：有主机 {} 毫秒内没等到机房路由器的通告，照样启动服务", HOST_READY_TIMEOUT_MS);
+                go.run();
+            }
+        }, HOST_READY_TIMEOUT_MS);
+    }
+
+    /** 网络线程上：主机都起来以后启动服务（{@code started} 是过了重复地址检测的） */
+    private void startServices(Map<String, Ipv6Address> hosts, Map<String, NetworkRegistry.HostDecl> decls, Map<String, Ipv6Address> started) {
+        LOG.info("游戏内网络：机房主机起来了 {} 台（过了重复地址检测）", started.size());
         startDns(hosts);
-        resolver = new RecursiveResolver(hostStacks.get(HOST_RESOLVER), DnsState.rootServers());
-        resolver.start();
-        new NtpServer(System::currentTimeMillis).start(hostStacks.get(HOST_NTP));
+        NetStack resolverStack = hostStacks.get(HOST_RESOLVER);
+        if (resolverStack != null) {
+            resolver = new RecursiveResolver(resolverStack, DnsState.rootServers());
+            resolver.start();
+        }
+        NetStack ntpStack = hostStacks.get(HOST_NTP);
+        if (ntpStack != null) {
+            ntp = new NtpServer(System::currentTimeMillis, ntpConfig(0));
+            ntp.start(ntpStack);
+            resolveNtpUpstream(ntp);
+        }
         startCa(hosts);
         NetStack testStack = hostStacks.get(HOST_TEST);
-        TestWebsite.start(testStack, siteTls(HOST_TEST, testStack, TEST_NAMES));
+        if (testStack != null) {
+            TestWebsite.start(testStack, siteTls(HOST_TEST, testStack, TEST_NAMES));
+        }
         CaptchaService cs = captcha;
         NetStack captchaStack = hostStacks.get(HOST_CAPTCHA);
         if (cs != null && captchaStack != null) {
@@ -541,8 +660,14 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                     resolverAddress);
         }
 
-        // 其他模组的服务
+        // 其他模组的服务（只启动过了重复地址检测的主机）
         for (Map.Entry<String, NetworkRegistry.HostDecl> e : decls.entrySet()) {
+            if (!started.containsKey(e.getKey())) {
+                if (hosts.containsKey(e.getKey())) {
+                    LOG.error("游戏内网络：主机 {} 没起来（地址重复或机房没有路由器），它的服务不启动", e.getKey());
+                }
+                continue;
+            }
             RawHostPort raw = rawHosts.get(e.getKey());
             if (raw != null) {
                 try {
@@ -563,6 +688,41 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
                 LOG.error("游戏内网络：主机 {} 的服务启动失败", e.getKey(), t);
             }
         }
+    }
+
+    /** NTP 服务器报的同步信息（配置 {@code network.ntp*}；参考标识由上游算，见 {@link NtpServer#referenceId}） */
+    static NtpServer.Config ntpConfig(long referenceId) {
+        return new NtpServer.Config(NetworkConfig.ntpStratum, referenceId, NetworkConfig.ntpRootDelayMillis, NetworkConfig.ntpRootDispersionMillis);
+    }
+
+    /**
+     * 算 NTP 的参考标识（RFC 5905）：配置的上游是地址时直接算；是名字时在后台线程上用操作系统的解析器查一次（不占网络线程），
+     * 查到了用第一个地址算；没配、查不到时为 0
+     */
+    private static void resolveNtpUpstream(NtpServer server) {
+        String up = NetworkConfig.ntpUpstream == null ? "" : NetworkConfig.ntpUpstream.trim();
+        if (up.isEmpty()) {
+            LOG.info("游戏内网络：NTP 层级 {}，没配上游（network.ntpUpstream），参考标识为 0", server.config().stratum);
+            return;
+        }
+        java.net.InetAddress lit = NtpServer.literal(up);
+        if (lit != null) {
+            server.setConfig(ntpConfig(NtpServer.referenceId(lit)));
+            LOG.info("游戏内网络：NTP 层级 {}，上游 {}，参考标识 {}", server.config().stratum, up, String.format("%08x", server.config().referenceId));
+            return;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                java.net.InetAddress a = java.net.InetAddress.getByName(up);
+                server.setConfig(ntpConfig(NtpServer.referenceId(a)));
+                LOG.info("游戏内网络：NTP 层级 {}，上游 {}（{}），参考标识 {}", server.config().stratum, up, a.getHostAddress(),
+                        String.format("%08x", server.config().referenceId));
+            } catch (Exception e) {
+                LOG.warn("游戏内网络：查不到 NTP 上游 {} 的地址（{}），参考标识为 0", up, e.toString());
+            }
+        }, "YouranMod NTP 上游");
+        t.setDaemon(true);
+        t.start();
     }
 
     /** 测试网站的名字（还有国际化域名的别名；DNS 与证书里是 A-label） */
@@ -727,9 +887,13 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         }
         ExecutorEventLoop l = loop;
         if (l != null) {
+            RouterNetwork rn = routers;
             l.execute(() -> {
                 for (NetStack s : hostStacks.values()) {
                     s.close();
+                }
+                if (rn != null) {
+                    rn.close();
                 }
             });
             boolean clean = l.shutdown(5000);
@@ -747,7 +911,8 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         comRegistrar = null;
         sitesDns = null;
         hostStacks.clear();
-        router = null;
+        routers = null;
+        ntp = null;
         relays = null;
         players = null;
         nics = null;
@@ -757,6 +922,7 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         server = null;
         worldDirectory = null;
         queued.clear();
+        probes.clear();
     }
 
     // ---- NetworkBackend ----
@@ -888,6 +1054,49 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
             return CompletableFuture.completedFuture(new ConfirmResult(ConfirmResult.Outcome.NO_OPERATOR, null, null));
         }
         return p.open(player, e.getName(), () -> player, request);
+    }
+
+    // ---- /ynet 交给客户端跑的子命令（主线程） ----
+
+    /** 一个交给客户端跑的子命令：结果显示给谁 */
+    private static final class Probe {
+        final UUID player;
+        final net.minecraft.command.ICommandSender sender;
+        final long expires;
+        int lines;
+
+        Probe(UUID player, net.minecraft.command.ICommandSender sender, long expires) {
+            this.player = player;
+            this.sender = sender;
+            this.expires = expires;
+        }
+    }
+
+    private final Map<Long, Probe> probes = new java.util.HashMap<>();
+    private long nextProbe = 1;
+
+    /** 主线程：登记一个交给 {@code player} 的客户端跑的子命令，返回编号 */
+    long newProbe(UUID player, net.minecraft.command.ICommandSender sender) {
+        long now = System.currentTimeMillis();
+        probes.values().removeIf(p -> p.expires < now);
+        long id = nextProbe++;
+        probes.put(id, new Probe(player, sender, now + NetCommand.PROBE_TIMEOUT_MS));
+        return id;
+    }
+
+    @Override
+    public void onProbeLine(EntityPlayerMP player, long id, String text, boolean done) {
+        Probe p = probes.get(id);
+        if (p == null || !p.player.equals(player.getUniqueID()) || p.expires < System.currentTimeMillis()) {
+            mainRejects.reject("玩家 " + player.getName(), "/ynet 结果对不上（不是交给他的、过时了或伪造的）", System.currentTimeMillis());
+            return;
+        }
+        if (text != null && !text.isEmpty() && ++p.lines <= NetCommand.PROBE_MAX_LINES) {
+            p.sender.sendMessage(new net.minecraft.util.text.TextComponentString(text));
+        }
+        if (done || p.lines > NetCommand.PROBE_MAX_LINES) {
+            probes.remove(id);
+        }
     }
 
     @Override
@@ -1067,8 +1276,12 @@ public final class NetworkServer implements ServerNetworkModule, NetworkBackend 
         return book;
     }
 
-    Router router() {
-        return router;
+    RouterNetwork routers() {
+        return routers;
+    }
+
+    NtpServer ntpServer() {
+        return ntp;
     }
 
     TestNics testNics() {

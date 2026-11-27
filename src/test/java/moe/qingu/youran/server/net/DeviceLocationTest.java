@@ -32,7 +32,7 @@ class DeviceLocationTest {
         dims.put(7, new AddressBook.Dim(7, 5, DefaultDimensionNetwork.INSTANCE));
         book = new AddressBook(layout, dims, Collections.singletonMap("youranmod:main", 0L),
                 Collections.singletonMap("youranmod:router", layout.hostAddress(0, 1)));
-        nics = new NicTable(book::coordinateAddress, new ManualEventLoop(), new RejectLog(10_000), p -> {
+        nics = new NicTable(book::coordinateAddress, new ManualEventLoop(), new RejectLog(10_000), (port, p) -> {
         }, 20, 20 * 1280, p -> {
         });
     }

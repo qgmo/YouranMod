@@ -9,8 +9,10 @@ import java.util.List;
 /**
  * 玩家客户端这台“主机”（服主 11-27：按接近真实的网络端口做）：<b>一个协议栈、多个网口</b>。只在客户端上用。
  * <ul>
- * <li>玩家自己的网口（{@link Kind#PLAYER}，网口号 0）：上线时服务器分到玩家临时地址（{@link PlayerAddresses}）后加上，下线去掉。
- * 受服务器的防火墙管：只能问递归解析器、连服务器按用途放行的主机的 TCP 80 / 443；没有 NTP（{@link Port#ntpAddress()} 为 null）。</li>
+ * <li>玩家自己的网口（{@link Kind#PLAYER}，网口号 0）：上线时接上，下线去掉。它和服务器的玩家路由器之间是一段点对点链路（服主 11-27）：
+ * 链路上做邻居发现，收到路由器的 RA 以后用 DHCPv6 要地址（{@link PlayerAddresses}）、DNS 与 NTP。地址要等 DHCPv6 走完、过了重复地址检测才有
+ * （进服后一两秒；之前 {@link Port#address()} 为 null），有了时通知 {@link Listener#onPortConfigured}。
+ * 受服务器的防火墙管：只能问递归解析器（DNS）、NTP 服务器，连服务器按用途放行的主机的 TCP 80 / 443；能用 {@code /ynet} 的人不受限。</li>
  * <li>接着的网卡（{@link Kind#RELAY}，网口号 1–255）：服务器把这个玩家接到一张 {@link ClientRelayNic}（如家具电脑）上时加上，地址是那张网卡的地址；
  * 断开时去掉。同一时间最多一个。</li>
  * </ul>
@@ -41,12 +43,13 @@ public final class ClientHost {
 
         Kind kind();
 
+        /** 这个网口现在能用的地址；还没有（玩家网口的 DHCPv6 没走完）为 null */
         Ipv6Address address();
 
-        /** 这个网口用的递归解析器 */
+        /** 这个网口用的递归解析器；还没有为 null */
         Ipv6Address resolverAddress();
 
-        /** 这个网口用的 NTP 服务器；不许连时为 null */
+        /** 这个网口用的 NTP 服务器；没有为 null */
         Ipv6Address ntpAddress();
 
         /** 客户端唯一的协议栈 */
@@ -55,7 +58,7 @@ public final class ClientHost {
         /** 协议栈上对应的网口（绑网口时用） */
         NetStack.Interface iface();
 
-        /** 从这个网口问它的递归解析器的 DNS 客户端 */
+        /** 从这个网口问它的递归解析器的 DNS 客户端（按现在的递归解析器建） */
         DnsResolver dns();
 
         boolean isRemoved();
@@ -67,6 +70,10 @@ public final class ClientHost {
         }
 
         default void onPortRemoved(Port port) {
+        }
+
+        /** 网口的地址能用了、DNS / NTP 变了（玩家网口 DHCPv6 拿到地址并过了重复地址检测时） */
+        default void onPortConfigured(Port port) {
         }
     }
 
@@ -87,7 +94,7 @@ public final class ClientHost {
         return s == null ? null : s.port(id);
     }
 
-    /** 玩家自己的网口；没有（没上线、服务器没开玩家临时地址）为 null */
+    /** 玩家自己的网口；没有（没上线、服务器没开玩家地址）为 null。有了也可能还没有地址（见 {@link Port#address()}） */
     public static Port playerPort() {
         return ClientHostState.first(Kind.PLAYER);
     }

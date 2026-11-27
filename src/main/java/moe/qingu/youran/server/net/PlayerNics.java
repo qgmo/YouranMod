@@ -1,15 +1,15 @@
 package moe.qingu.youran.server.net;
 
 import moe.qingu.youran.api.network.Ipv6Address;
-import moe.qingu.youran.api.network.NetworkInterface;
 import moe.qingu.youran.api.network.NetworkLayout;
+import moe.qingu.youran.api.network.packet.Dhcpv6Message;
 import moe.qingu.youran.api.network.packet.Icmpv6Message;
 import moe.qingu.youran.api.network.packet.Ipv6Packet;
+import moe.qingu.youran.api.network.packet.NdpMessage;
+import moe.qingu.youran.api.network.packet.UdpDatagram;
 import moe.qingu.youran.api.network.stack.EventLoop;
+import moe.qingu.youran.api.network.stack.NeighborDiscovery;
 import moe.qingu.youran.net.NicMessages;
-import moe.qingu.youran.network.NetworkHooks;
-import moe.qingu.youran.network.NicAccess;
-import moe.qingu.youran.network.NicPort;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -24,25 +24,32 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 玩家临时地址（服主 11-14）：玩法 /64 里的最后一个 /96（{@link NetworkLayout#PLAYERS_DATACENTER}）。
- * 玩家上线时分一个随机的 /128（每次上线都重新随机，同一时刻不重复），下线收回，不进存档。
- * 协议栈跑在玩家自己的客户端上（客户端的 0 号网口，服主 11-27：一个协议栈、多个网口）。每个玩家在服务端是一张网卡（{@link PlayerNic}），
- * 它的端口带一道防火墙，规则只在服务端执行：
+ * 玩家自己的地址（服主 11-14 起叫“玩家临时地址”）：玩法 /64 里的最后一个 /96（{@link NetworkLayout#PLAYERS_DATACENTER}），由<b>玩家路由器</b>管。
+ * 每个在线玩家和玩家路由器之间是一段点对点链路（服主 11-27）：一头是玩家客户端协议栈的 0 号网口，一头是玩家路由器的一个网口（{@link PlayerLink}）。
  * <ul>
- * <li>源地址必须是这个玩家自己的临时地址；</li>
- * <li>往外只许：递归解析器的 UDP 53（DNS），以及“放行的目标主机”的 TCP 80 / 443，且 TCP 只能由玩家这边发起（第一个段是 SYN）；</li>
+ * <li>链路上两头各有 {@code fe80::} 链路本地地址，做 NS / NA 与重复地址检测；路由器这头是 {@link #ROUTER_LINK_LOCAL}。</li>
+ * <li>路由器这头发 RA（M 位、默认路由器、MTU 1280，不带前缀：玩家的 /128 不在链路上），回 RS。</li>
+ * <li>客户端用 DHCPv6 要地址（{@link Dhcpv6Server}）：每次上线随机、同一时刻不重复（玩家 /96 里的低 32 位），租约到下线为止；
+ * DNS（递归解析器）、NTP 也用 DHCPv6 的选项下发。绑定以后路由器加一条到这个 /128 的路由。</li>
+ * </ul>
+ * 防火墙在路由器的这个网口上（规则只在服务端执行）：
+ * <ul>
+ * <li>源地址必须是租给他的地址（链路本地地址只能发给链路上的：邻居发现、DHCPv6、回显）；</li>
+ * <li>往外只许：递归解析器的 UDP 53 与 TCP 53（DNS，截断以后改用 TCP 重问）、NTP 服务器的 UDP 123，以及“放行的目标主机”的 TCP 80 / 443；
+ * TCP 只能由玩家这边发起（第一个段是 SYN）；</li>
  * <li>往里只许：属于玩家发起的连接 / 查询的回包，以及关于玩家自己发的包的 ICMPv6 差错。别人主动连入（SYN、ping）一律拒绝；</li>
- * <li>两个方向各有每秒包数、字节数上限（令牌桶）；同时最多 {@value #MAX_FLOWS} 条连接；</li>
- * <li>不合规则的包丢掉、回“目标不可达：管理上禁止”（ICMPv6 1/1），并记限频日志。伪造源地址、超频、坏包只丢不回（不给伪造的地址回包）。</li>
+ * <li>两个方向各有每秒包数、字节数上限（令牌桶，链路上的报文也算）；同时最多 {@value #MAX_FLOWS} 条连接；</li>
+ * <li>不合规则的包丢掉、回“目标不可达：管理上禁止”（ICMPv6 1/1，用玩家路由器的地址），并记限频日志。伪造源地址、超频、坏包只丢不回。</li>
+ * <li>能用 {@code /ynet} 的人（上线时判断，见 {@link #attach} 的 {@code unrestricted}）不过防火墙、不限速：不限目标、端口、方向，别人也能主动连他；
+ * 源地址照旧必须是他自己的（防伪造，不算防火墙）。</li>
  * </ul>
  * “放行的目标主机”按用途登记（{@link #allow}，如家具电脑旁观 {@code cfm:spectate}），每个用途一组地址、有有效期；
  * 允许的主机是所有没过期用途的并集。撤销或过期后，到那些主机的已有连接也立刻断（之后的包都按规则丢）。
  * <p>
  * 线程：{@link #attach}、{@link #detach}、{@link #allow}、{@link #revoke} 可以在任意线程调用（排进网络线程做）；
- * 收发包的检查都在网络线程上，这里的表只在网络线程上改。
+ * 收发包、DHCPv6、路由都在网络线程上，这里的表只在网络线程上改（{@link #addresses} 任意线程读）。
  */
 final class PlayerNics {
     static final int MAX_FLOWS = 64;
@@ -53,6 +60,13 @@ final class PlayerNics {
     static final long TCP_CLOSING_MILLIS = 30_000L;
     static final long UDP_IDLE_MILLIS = 30_000L;
     static final int DNS_PORT = 53;
+    static final int NTP_PORT = 123;
+    /** 玩家链路上路由器这头的链路本地地址 */
+    static final Ipv6Address ROUTER_LINK_LOCAL = Ipv6Address.linkLocal(1);
+    /** 玩家链路上的 RA：M 位、当默认路由器 1800 秒（RFC 4861 的默认值：3 × 最长间隔）、MTU 1280，不带前缀、不带 RDNSS（DNS 用 DHCPv6） */
+    static final NeighborDiscovery.Advertising ADVERTISING = new NeighborDiscovery.Advertising(true, false, 1800,
+            Collections.<NdpMessage.Prefix>emptyList(), Ipv6Packet.MAX_PACKET, Collections.<NdpMessage.Rdnss>emptyList(),
+            NeighborDiscovery.Advertising.DEFAULT_MIN_INTERVAL, NeighborDiscovery.Advertising.DEFAULT_MAX_INTERVAL);
 
     private static final int PROTO_TCP = 6;
     private static final int PROTO_UDP = 17;
@@ -67,30 +81,33 @@ final class PlayerNics {
         /** 网络线程：把包交给客户端 */
         void deliver(byte[] packet);
 
-        /** 任意线程：控制消息（接上、收回） */
+        /** 任意线程：控制消息（网口接上、去掉） */
         void control(byte[] message);
     }
 
     private final EventLoop loop;
     private final NetworkLayout layout;
+    /** 玩家路由器 */
     private final Router router;
     private final RejectLog rejects;
     private final Ipv6Address resolver;
+    private final Ipv6Address ntp;
     private final Random random;
     private final int outPackets;
     private final int outBytes;
     private final int inPackets;
     private final int inBytes;
-    private final AtomicInteger generations = new AtomicInteger();
+    final Dhcpv6Server dhcp;
 
-    /** 任意线程读：玩家 → 临时地址 */
+    /** 任意线程读：玩家 → 租给他的地址（DHCPv6 绑定以后才有） */
     private final Map<UUID, Ipv6Address> addresses = new ConcurrentHashMap<>();
-    /** 已经分出去的主机号（分配时用 putIfAbsent 保证不重复；网络线程上拿掉网卡以后才放回） */
-    private final Map<Long, UUID> parts = new ConcurrentHashMap<>();
+    /** 在线（链路接上了）的玩家；任意线程读 */
+    private final Set<UUID> online = ConcurrentHashMap.newKeySet();
 
     // ---- 只在网络线程上 ----
-    private final Map<UUID, PlayerNic> byPlayer = new HashMap<>();
-    private final Map<Long, PlayerNic> byPart = new HashMap<>();
+    private final Map<UUID, PlayerLink> byPlayer = new HashMap<>();
+    /** 预留或租出去的主机号 → 链路 */
+    private final Map<Long, PlayerLink> byPart = new HashMap<>();
 
     // 统计（网络线程上改，读的时候不加锁，只用来显示）
     volatile long outAccepted;
@@ -98,110 +115,132 @@ final class PlayerNics {
     volatile long inDelivered;
     volatile long inRejected;
 
-    PlayerNics(EventLoop loop, NetworkLayout layout, Router router, RejectLog rejects, Ipv6Address resolver, Random random,
+    PlayerNics(EventLoop loop, NetworkLayout layout, Router router, RejectLog rejects, Ipv6Address resolver, Ipv6Address ntp, Random random,
                int outPacketsPerSecond, int outBytesPerSecond, int inPacketsPerSecond, int inBytesPerSecond) {
         this.loop = loop;
         this.layout = layout;
         this.router = router;
         this.rejects = rejects;
         this.resolver = resolver;
+        this.ntp = ntp;
         this.random = random;
         this.outPackets = outPacketsPerSecond;
         this.outBytes = outBytesPerSecond;
         this.inPackets = inPacketsPerSecond;
         this.inBytes = inBytesPerSecond;
+        this.dhcp = new Dhcpv6Server(Dhcpv6Message.uuidDuid(random.nextLong(), random.nextLong()), new Pool(),
+                resolver == null ? Collections.<Ipv6Address>emptyList() : Collections.singletonList(resolver),
+                ntp == null ? Collections.<Ipv6Address>emptyList() : Collections.singletonList(ntp));
     }
 
-    // ---- 分配与收回（任意线程） ----
+    // ---- 接上与收回（任意线程） ----
 
-    /** 玩家上线：分一个随机的临时地址，告诉客户端。已经有的先收回（重新随机） */
-    Ipv6Address attach(UUID player, String name, Link link) {
+    /**
+     * 玩家上线：建他和玩家路由器之间的链路，告诉客户端多了 0 号网口（地址由客户端用 DHCPv6 要）。已经有的先收回。
+     * {@code unrestricted}：他能用 {@code /ynet}，不过防火墙、不限速（服主 11-27）
+     */
+    void attach(UUID player, String name, Link link, boolean unrestricted) {
         detach(player);
-        long part;
-        do {
-            part = random.nextInt() & 0xFFFFFFFFL;
-        } while (part == 0 || part == 0xFFFFFFFFL || parts.putIfAbsent(part, player) != null);
-        Ipv6Address address = layout.playerAddress(part);
-        int gen = generations.incrementAndGet();
-        PlayerNic n = new PlayerNic(player, name, address, part, link, gen);
-        NicAccess access = NetworkHooks.nicAccess();
-        if (access != null) {
-            access.attach(n, n.port);
-        }
-        addresses.put(player, address);
+        online.add(player);
         loop.execute(() -> {
-            PlayerNic old = byPlayer.put(player, n);
+            PlayerLink old = byPlayer.remove(player);
             if (old != null) {
                 closeInLoop(old);
             }
-            byPart.put(n.part, n);
+            PlayerLink n = new PlayerLink(router, player, name, link, unrestricted);
+            byPlayer.put(player, n);
+            n.advertise(ADVERTISING);
         });
-        link.control(NicMessages.portUp(NicMessages.PLAYER_PORT, NicMessages.KIND_PLAYER, address, resolver, null));
-        return address;
+        link.control(NicMessages.portUp(NicMessages.PLAYER_PORT, NicMessages.KIND_PLAYER, Ipv6Address.UNSPECIFIED, null, null));
     }
 
-    /** 玩家下线（或网络停）：收回地址。客户端还连着时告诉它 */
+    /** 玩家下线（或网络停）：收回链路与地址。客户端还连着时告诉它 */
     void detach(UUID player) {
-        Ipv6Address a = addresses.remove(player);
-        if (a == null) {
+        if (!online.remove(player)) {
             return;
         }
-        long part = NetworkLayout.hostPartOf(a);
+        addresses.remove(player);
         loop.execute(() -> {
-            PlayerNic n = byPart.get(part);
-            if (n != null && n.player.equals(player)) {
-                byPart.remove(part);
-                if (byPlayer.get(player) == n) {
-                    byPlayer.remove(player);
-                }
+            PlayerLink n = byPlayer.get(player);
+            if (n != null) {
+                byPlayer.remove(player);
                 closeInLoop(n);
                 n.link.control(NicMessages.portDown(NicMessages.PLAYER_PORT));
             }
-            parts.remove(part, player);
         });
     }
 
-    private void closeInLoop(PlayerNic n) {
-        n.closed = true;
-        NicAccess access = NetworkHooks.nicAccess();
-        if (access != null) {
-            access.detach(n, n.port);
+    private void closeInLoop(PlayerLink n) {
+        if (n.closed) {
+            return;
         }
+        n.unbindRoute();
+        dhcp.unbind(n.binding);
         n.flows.clear();
         n.grants.clear();
-        byPart.remove(n.part, n);
-        parts.remove(n.part, n.player);
+        n.close();
     }
 
     /** 关服：全部收回（不发消息，连接都要断了） */
     void clear() {
         addresses.clear();
+        online.clear();
         loop.execute(() -> {
-            for (PlayerNic n : new ArrayList<>(byPlayer.values())) {
+            for (PlayerLink n : new ArrayList<>(byPlayer.values())) {
                 closeInLoop(n);
             }
             byPlayer.clear();
             byPart.clear();
-            parts.clear();
         });
     }
 
+    /** 租给他的地址；还没租到（DHCPv6 没走完）、不在线时为 null。任意线程 */
     Ipv6Address address(UUID player) {
         return addresses.get(player);
     }
 
     int online() {
-        return addresses.size();
+        return online.size();
+    }
+
+    /** 这个玩家的链路接上了没有（任意线程） */
+    boolean isOnline(UUID player) {
+        return online.contains(player);
+    }
+
+    /** 地址池：玩家 /96 里随机的低 32 位（不用全 0、全 1），同一时刻不重复 */
+    private final class Pool implements Dhcpv6Server.Pool {
+        @Override
+        public Ipv6Address allocate(Object owner, Set<Ipv6Address> avoid) {
+            for (int i = 0; i < 1000; i++) {
+                long part = random.nextInt() & 0xFFFFFFFFL;
+                if (part == 0 || part == 0xFFFFFFFFL || byPart.containsKey(part)) {
+                    continue;
+                }
+                Ipv6Address a = layout.playerAddress(part);
+                if (avoid.contains(a)) {
+                    continue;
+                }
+                byPart.put(part, (PlayerLink) owner);
+                return a;
+            }
+            return null;
+        }
+
+        @Override
+        public void release(Ipv6Address address, Object owner) {
+            byPart.remove(NetworkLayout.hostPartOf(address), owner);
+        }
     }
 
     // ---- 放行（任意线程） ----
 
     /**
-     * 给玩家的临时地址按用途放行一组目标主机（替换这个用途原来的那组），{@code ttlMillis} 毫秒后过期（最长 1 小时）。
-     * 只收这个 /48 里、不是玩家临时地址的主机；超过 {@value #MAX_HOSTS_PER_PURPOSE} 个、玩家没有临时地址时返回 false。
+     * 给玩家的地址按用途放行一组目标主机（替换这个用途原来的那组），{@code ttlMillis} 毫秒后过期（最长 1 小时）。
+     * 只收这个 /48 里、不是玩家地址的主机；超过 {@value #MAX_HOSTS_PER_PURPOSE} 个、玩家不在线时返回 false。
      */
     boolean allow(UUID player, String purpose, Collection<Ipv6Address> hosts, long ttlMillis) {
-        if (purpose == null || hosts == null || ttlMillis <= 0 || hosts.size() > MAX_HOSTS_PER_PURPOSE || !addresses.containsKey(player)) {
+        if (purpose == null || hosts == null || ttlMillis <= 0 || hosts.size() > MAX_HOSTS_PER_PURPOSE || !online.contains(player)) {
             return false;
         }
         Set<Ipv6Address> set = new HashSet<>();
@@ -213,7 +252,7 @@ final class PlayerNics {
         Set<Ipv6Address> fixed = Collections.unmodifiableSet(set);
         long ttl = Math.min(ttlMillis, MAX_TTL_MILLIS);
         loop.execute(() -> {
-            PlayerNic n = byPlayer.get(player);
+            PlayerLink n = byPlayer.get(player);
             if (n == null || n.closed) {
                 return;
             }
@@ -229,223 +268,355 @@ final class PlayerNics {
 
     void revoke(UUID player, String purpose) {
         loop.execute(() -> {
-            PlayerNic n = byPlayer.get(player);
+            PlayerLink n = byPlayer.get(player);
             if (n != null) {
                 n.grants.remove(purpose);
             }
         });
     }
 
-    // ---- 往外（网络线程）：玩家客户端发来的包 ----
+    // ---- 链路（网络线程） ----
 
-    /** 玩家客户端 0 号网口发来的包：从他的网卡发出去（{@link PlayerNic#fromClient}，经端口的防火墙） */
+    /** 玩家客户端 0 号网口发来的包：进他那条链路（{@link PlayerLink#fromLink}，过往里的检查） */
     void fromPlayer(UUID player, String name, byte[] p) {
-        PlayerNic n = byPlayer.get(player);
+        PlayerLink n = byPlayer.get(player);
         if (n == null || n.closed) {
-            reject("玩家 " + name + " 的临时地址", "没有临时地址", loop.nowMillis());
+            reject("玩家 " + name + " 的链路", "没有接上（不在线或网络没开）", loop.nowMillis());
             return;
         }
-        n.fromClient(p);
+        n.fromLink(p);
     }
 
-    /** 端口的校验与防火墙（网络线程上，{@link PlayerPort#send}）；收下了返回 true */
-    private boolean outboundPacket(PlayerNic n, byte[] p) {
-        long now = loop.nowMillis();
-        String source = "玩家 " + n.name + " 的临时地址";
-        if (n.closed) {
-            reject(source, "没有临时地址", now);
-            return false;
-        }
-        String bad = basicCheck(p);
-        if (bad != null) {
-            reject(source, bad, now);
-            return false;
-        }
-        Ipv6Address src = Ipv6Packet.sourceOf(p);
-        if (!src.equals(n.address)) {
-            reject(source, "源地址 " + src + " 不是他的临时地址 " + n.address, now);
-            return false;
-        }
-        if (!n.out.tryAcquire(p.length, now)) {
-            reject(source, "超过速率上限（每秒 " + outPackets + " 个包、" + outBytes + " 字节）", now);
-            return false;
-        }
-        Verdict v = outbound(n, p, now);
-        if (v != Verdict.OK) {
-            if (v.reason != null) {
-                reject(source, v.reason, now);
-            }
-            if (v.reply) {
-                router.unreachable(p, Icmpv6Message.UNREACH_PROHIBITED);
-            }
-            return false;
-        }
-        outAccepted++;
-        router.forward(p);
-        return true;
+    /** 测试用：这个玩家的链路（网络线程上调用） */
+    PlayerLink link(UUID player) {
+        return byPlayer.get(player);
     }
 
-    private Verdict outbound(PlayerNic n, byte[] p, long now) {
-        int nh = p[6] & 0xFF;
-        int plen = payloadLength(p);
-        Ipv6Address dst = Ipv6Packet.destinationOf(p);
-        if (nh == PROTO_UDP) {
-            if (plen < 8) {
-                return Verdict.reject("UDP 包太短");
+    /** 玩家路由器上的一个网口：一个玩家的链路（服务端这一头），带防火墙与 DHCPv6 绑定 */
+    final class PlayerLink extends Router.LinkPort {
+        final UUID player;
+        final String name;
+        final Link link;
+        final boolean unrestricted;
+        final RateLimiter out = new RateLimiter(outPackets, outBytes);
+        final RateLimiter in = new RateLimiter(inPackets, inBytes);
+        final Map<String, Grant> grants = new LinkedHashMap<>();
+        final Map<FlowKey, Flow> flows = new HashMap<>();
+        final Dhcpv6Server.Binding binding = new Dhcpv6Server.Binding(this);
+        /** 已经装上路由的地址 */
+        Ipv6Address routed;
+
+        PlayerLink(Router players, UUID player, String name, Link link, boolean unrestricted) {
+            super(players, "玩家 " + name, (packet, dst) -> link.deliver(packet), NdpMessage.NO_LINK_ADDRESS, ROUTER_LINK_LOCAL);
+            this.player = player;
+            this.name = name;
+            this.link = link;
+            this.unrestricted = unrestricted;
+            // 这个网口上有 DHCPv6 服务器：收发给所有 DHCPv6 服务器的组播（ff02::1:2）
+            nd.join(Ipv6Address.ALL_DHCP_SERVERS);
+        }
+
+        String label() {
+            return "玩家 " + name + " 的地址" + (routed == null ? "" : " " + routed);
+        }
+
+        /** 租出去的地址：路由器加一条 /128 的路由，记下来 */
+        void bindRoute(Ipv6Address a) {
+            if (a.equals(routed)) {
+                return;
             }
-            int sport = u16(p, 40);
-            int dport = u16(p, 42);
-            if (!dst.equals(resolver) || dport != DNS_PORT) {
-                return Verdict.reject("只能向递归解析器的 UDP 53 发 DNS 查询（目标 [" + dst + "]:" + dport + "）");
+            unbindRoute();
+            routed = a;
+            router.onLink(a, 128, this);
+            if (online.contains(player)) {
+                addresses.put(player, a);
             }
-            FlowKey k = new FlowKey(PROTO_UDP, sport, dst, dport);
-            Flow f = n.flow(k, now);
-            if (f == null) {
-                if (!n.hasRoom(now)) {
-                    return Verdict.reject("同时进行的连接超过 " + MAX_FLOWS + " 条");
+        }
+
+        void unbindRoute() {
+            if (routed != null) {
+                router.removeRoute(routed, 128);
+                addresses.remove(player, routed);
+                routed = null;
+            }
+            flows.clear();
+        }
+
+        @Override
+        void onLinkUdp(Ipv6Packet p, UdpDatagram d) {
+            if (d.destinationPort != Dhcpv6Message.SERVER_PORT || d.sourcePort != Dhcpv6Message.CLIENT_PORT || !p.source.isLinkLocal()) {
+                return;
+            }
+            byte[] reply = dhcp.handle(binding, d.data);
+            if (binding.bound && binding.address != null) {
+                bindRoute(binding.address);
+            } else if (routed != null) {
+                unbindRoute();
+            }
+            if (reply != null) {
+                sendOnLink(new UdpDatagram(Dhcpv6Message.SERVER_PORT, Dhcpv6Message.CLIENT_PORT, reply).toPacket(ROUTER_LINK_LOCAL, p.source).encode(),
+                        p.source);
+            }
+        }
+
+        // ---- 往里（客户端 → 路由器） ----
+
+        @Override
+        boolean ingress(byte[] p) {
+            long now = loop.nowMillis();
+            String source = label();
+            String bad = basicCheck(p);
+            if (bad != null) {
+                reject(source, bad, now);
+                return false;
+            }
+            if (!unrestricted && !out.tryAcquire(p.length, now)) {
+                reject(source, "超过速率上限（每秒 " + outPackets + " 个包、" + outBytes + " 字节）", now);
+                return false;
+            }
+            Ipv6Address src = Ipv6Packet.sourceOf(p);
+            Ipv6Address dst = Ipv6Packet.destinationOf(p);
+            if (dst.isLinkScoped()) {
+                // 链路上的报文（邻居发现、DHCPv6、回显）：路由器这个网口自己处理，不转发；源地址可以是链路本地、未指定（重复地址检测）
+                // 或租给他的地址（他回邻居请求的 NA）
+                if (!src.isLinkLocal() && !src.isUnspecified() && !src.equals(routed)) {
+                    reject(source, "链路上的报文的源地址 " + src + " 不是他的", now);
+                    return false;
                 }
-                f = new Flow(false);
-                n.flows.put(k, f);
+                return true;
             }
-            f.lastSeen = now;
-            return Verdict.OK;
+            if (src.isLinkLocal() || src.isUnspecified()) {
+                reject(source, "链路本地的源地址 " + src + " 不能发到链路以外（目标 " + dst + "）", now);
+                return false;
+            }
+            if (routed == null || !src.equals(routed)) {
+                reject(source, "源地址 " + src + " 不是租给他的地址" + (routed == null ? "（还没租到地址）" : " " + routed), now);
+                return false;
+            }
+            if (unrestricted) {
+                outAccepted++;
+                return true;
+            }
+            Verdict v = outbound(p, now);
+            if (v != Verdict.OK) {
+                if (v.reason != null) {
+                    reject(source, v.reason, now);
+                }
+                if (v.reply) {
+                    router.unreachable(p, Icmpv6Message.UNREACH_PROHIBITED);
+                }
+                return false;
+            }
+            outAccepted++;
+            return true;
         }
-        if (nh == PROTO_TCP) {
-            if (plen < 20) {
-                return Verdict.reject("TCP 段太短");
+
+        private Verdict outbound(byte[] p, long now) {
+            int nh = p[6] & 0xFF;
+            int plen = payloadLength(p);
+            Ipv6Address dst = Ipv6Packet.destinationOf(p);
+            if (nh == PROTO_UDP) {
+                if (plen < 8) {
+                    return Verdict.reject("UDP 包太短");
+                }
+                int sport = u16(p, 40);
+                int dport = u16(p, 42);
+                boolean dns = dst.equals(resolver) && dport == DNS_PORT;
+                boolean time = ntp != null && dst.equals(ntp) && dport == NTP_PORT;
+                if (!dns && !time) {
+                    return Verdict.reject("UDP 只能发给递归解析器的 53（DNS）、NTP 服务器的 123（目标 [" + dst + "]:" + dport + "）");
+                }
+                FlowKey k = new FlowKey(PROTO_UDP, sport, dst, dport);
+                Flow f = flow(k, now);
+                if (f == null) {
+                    if (!hasRoom(now)) {
+                        return Verdict.reject("同时进行的连接超过 " + MAX_FLOWS + " 条");
+                    }
+                    f = new Flow(false, true);
+                    flows.put(k, f);
+                }
+                f.lastSeen = now;
+                return Verdict.OK;
             }
-            int sport = u16(p, 40);
-            int dport = u16(p, 42);
-            int flags = p[40 + 13] & 0xFF;
-            if (dport != 80 && dport != 443) {
-                return Verdict.reject("只能连 TCP 80 / 443（目标 [" + dst + "]:" + dport + "）");
+            if (nh == PROTO_TCP) {
+                if (plen < 20) {
+                    return Verdict.reject("TCP 段太短");
+                }
+                int sport = u16(p, 40);
+                int dport = u16(p, 42);
+                int flags = p[40 + 13] & 0xFF;
+                boolean dnsTcp = dst.equals(resolver) && dport == DNS_PORT;
+                if (dport != 80 && dport != 443 && !dnsTcp) {
+                    return Verdict.reject("TCP 只能连 80 / 443，或递归解析器的 53（目标 [" + dst + "]:" + dport + "）");
+                }
+                FlowKey k = new FlowKey(PROTO_TCP, sport, dst, dport);
+                if (!dnsTcp && !allowed(dst, now)) {
+                    flows.remove(k);
+                    return Verdict.reject("目标 " + dst + " 不在放行的主机里");
+                }
+                Flow f = flow(k, now);
+                if (f == null) {
+                    if ((flags & TCP_RST) != 0) {
+                        // 已经没有的连接上的复位：正常现象（比如客户端超时放弃），只丢不记
+                        return Verdict.SILENT;
+                    }
+                    if ((flags & TCP_SYN) == 0 || (flags & TCP_ACK) != 0) {
+                        return Verdict.reject("TCP 只能由玩家这边发起（没有这条连接，标志 0x" + Integer.toHexString(flags) + "）");
+                    }
+                    if (!hasRoom(now)) {
+                        return Verdict.reject("同时进行的连接超过 " + MAX_FLOWS + " 条");
+                    }
+                    f = new Flow(true, dnsTcp);
+                    flows.put(k, f);
+                }
+                f.update(flags, true, now);
+                if (f.reset) {
+                    flows.remove(k);
+                }
+                return Verdict.OK;
             }
-            FlowKey k = new FlowKey(PROTO_TCP, sport, dst, dport);
-            if (!n.allowed(dst, now)) {
-                n.flows.remove(k);
-                return Verdict.reject("目标 " + dst + " 不在放行的主机里");
-            }
-            Flow f = n.flow(k, now);
-            if (f == null) {
-                if ((flags & TCP_RST) != 0) {
-                    // 已经没有的连接上的复位：正常现象（比如客户端超时放弃），只丢不记
+            if (nh == PROTO_ICMPV6) {
+                if (plen >= 1 && (p[40] & 0xFF) < 128) {
+                    // 客户端协议栈回的差错（如端口不可达）：不往外发，也不回差错
                     return Verdict.SILENT;
                 }
-                if ((flags & TCP_SYN) == 0 || (flags & TCP_ACK) != 0) {
-                    return Verdict.reject("TCP 只能由玩家这边发起（没有这条连接，标志 0x" + Integer.toHexString(flags) + "）");
-                }
-                if (!n.hasRoom(now)) {
-                    return Verdict.reject("同时进行的连接超过 " + MAX_FLOWS + " 条");
-                }
-                f = new Flow(true);
-                n.flows.put(k, f);
+                return Verdict.reject("不许发 ICMPv6 信息报文（类型 " + (plen >= 1 ? p[40] & 0xFF : -1) + "）");
             }
-            f.update(flags, true, now);
-            if (f.reset) {
-                n.flows.remove(k);
-            }
-            return Verdict.OK;
+            return Verdict.reject("不许的协议（下一首部 " + nh + "）");
         }
-        if (nh == PROTO_ICMPV6) {
-            if (plen >= 1 && (p[40] & 0xFF) < 128) {
-                // 客户端协议栈回的差错（如端口不可达）：不往外发，也不回差错
-                return Verdict.SILENT;
-            }
-            return Verdict.reject("不许发 ICMPv6 信息报文（类型 " + (plen >= 1 ? p[40] & 0xFF : -1) + "）");
-        }
-        return Verdict.reject("不许的协议（下一首部 " + nh + "）");
-    }
 
-    // ---- 往里（网络线程）：路由器把目的地址在玩家 /96 里的包交过来 ----
+        // ---- 往外（路由器 → 客户端） ----
 
-    void deliver(byte[] p) {
-        long now = loop.nowMillis();
-        Ipv6Address dst = Ipv6Packet.destinationOf(p);
-        PlayerNic n = byPart.get(NetworkLayout.hostPartOf(dst));
-        if (n == null || n.closed || !n.address.equals(dst)) {
-            router.unreachable(p, Icmpv6Message.UNREACH_ADDRESS);
-            return;
-        }
-        Verdict v = inbound(n, p, now);
-        if (v != Verdict.OK) {
-            inRejected++;
-            if (v.reason != null) {
-                rejects.reject("发给" + n.label() + "的包（来自 " + Ipv6Packet.sourceOf(p) + "）", v.reason, now);
+        @Override
+        boolean egress(byte[] p) {
+            long now = loop.nowMillis();
+            Ipv6Address dst = Ipv6Packet.destinationOf(p);
+            if (routed == null || !routed.equals(dst)) {
+                router.unreachable(p, Icmpv6Message.UNREACH_ADDRESS);
+                return false;
             }
-            if (v.reply) {
-                router.unreachable(p, Icmpv6Message.UNREACH_PROHIBITED);
-            }
-            return;
-        }
-        if (!n.in.tryAcquire(p.length, now)) {
-            inRejected++;
-            rejects.reject("发给" + n.label() + "的包", "超过速率上限（每秒 " + inPackets + " 个包、" + inBytes + " 字节）", now);
-            return;
-        }
-        if (!n.receive(p)) {
-            router.unreachable(p, Icmpv6Message.UNREACH_ADDRESS);
-            return;
-        }
-        inDelivered++;
-    }
-
-    private Verdict inbound(PlayerNic n, byte[] p, long now) {
-        int nh = p[6] & 0xFF;
-        int plen = payloadLength(p);
-        Ipv6Address src = Ipv6Packet.sourceOf(p);
-        if (nh == PROTO_UDP) {
-            if (plen < 8) {
-                return Verdict.logOnly("UDP 包太短");
-            }
-            int sport = u16(p, 40);
-            int dport = u16(p, 42);
-            Flow f = src.equals(resolver) && sport == DNS_PORT ? n.flow(new FlowKey(PROTO_UDP, dport, src, sport), now) : null;
-            if (f == null) {
-                return Verdict.reject("不接受主动发来的 UDP（只收递归解析器对他的查询的回答）");
-            }
-            f.lastSeen = now;
-            return Verdict.OK;
-        }
-        if (nh == PROTO_TCP) {
-            if (plen < 20) {
-                return Verdict.logOnly("TCP 段太短");
-            }
-            int sport = u16(p, 40);
-            int dport = u16(p, 42);
-            int flags = p[40 + 13] & 0xFF;
-            FlowKey k = new FlowKey(PROTO_TCP, dport, src, sport);
-            Flow f = n.flow(k, now);
-            if ((flags & TCP_SYN) != 0 && (flags & TCP_ACK) == 0) {
-                return Verdict.reject("不接受主动连入（TCP SYN 到端口 " + dport + "）");
-            }
-            if (f == null) {
-                return (flags & TCP_RST) != 0 ? Verdict.SILENT : Verdict.reject("不接受主动连入（没有这条连接，端口 " + dport + "）");
-            }
-            if (!n.allowed(src, now)) {
-                n.flows.remove(k);
-                return Verdict.reject("来源 " + src + " 已经不在放行的主机里");
-            }
-            f.update(flags, false, now);
-            if (f.reset) {
-                n.flows.remove(k);
-            }
-            return Verdict.OK;
-        }
-        if (nh == PROTO_ICMPV6) {
-            if (plen < 8) {
-                return Verdict.SILENT;
-            }
-            int type = p[40] & 0xFF;
-            if (type < 128) {
-                // 差错报文：只收关于他自己发的包的（里面附带的原始包的源地址是他）
-                if (plen >= 8 + Ipv6Packet.HEADER && Ipv6Address.read(p, 40 + 8 + 8).equals(n.address)) {
-                    return Verdict.OK;
+            if (!unrestricted) {
+                Verdict v = inbound(p, now);
+                if (v != Verdict.OK) {
+                    inRejected++;
+                    if (v.reason != null) {
+                        rejects.reject("发给" + label() + "的包（来自 " + Ipv6Packet.sourceOf(p) + "）", v.reason, now);
+                    }
+                    if (v.reply) {
+                        router.unreachable(p, Icmpv6Message.UNREACH_PROHIBITED);
+                    }
+                    return false;
                 }
-                return Verdict.SILENT;
+                if (!in.tryAcquire(p.length, now)) {
+                    inRejected++;
+                    rejects.reject("发给" + label() + "的包", "超过速率上限（每秒 " + inPackets + " 个包、" + inBytes + " 字节）", now);
+                    return false;
+                }
             }
-            return Verdict.reject("不接受主动发来的 ICMPv6（类型 " + type + "）");
+            inDelivered++;
+            return true;
         }
-        return Verdict.reject("不许的协议（下一首部 " + nh + "）");
+
+        private Verdict inbound(byte[] p, long now) {
+            int nh = p[6] & 0xFF;
+            int plen = payloadLength(p);
+            Ipv6Address src = Ipv6Packet.sourceOf(p);
+            if (nh == PROTO_UDP) {
+                if (plen < 8) {
+                    return Verdict.logOnly("UDP 包太短");
+                }
+                int sport = u16(p, 40);
+                int dport = u16(p, 42);
+                boolean answer = (src.equals(resolver) && sport == DNS_PORT) || (ntp != null && src.equals(ntp) && sport == NTP_PORT);
+                Flow f = answer ? flow(new FlowKey(PROTO_UDP, dport, src, sport), now) : null;
+                if (f == null) {
+                    return Verdict.reject("不接受主动发来的 UDP（只收递归解析器、NTP 服务器对他的查询的回答）");
+                }
+                f.lastSeen = now;
+                return Verdict.OK;
+            }
+            if (nh == PROTO_TCP) {
+                if (plen < 20) {
+                    return Verdict.logOnly("TCP 段太短");
+                }
+                int sport = u16(p, 40);
+                int dport = u16(p, 42);
+                int flags = p[40 + 13] & 0xFF;
+                FlowKey k = new FlowKey(PROTO_TCP, dport, src, sport);
+                Flow f = flow(k, now);
+                if ((flags & TCP_SYN) != 0 && (flags & TCP_ACK) == 0) {
+                    return Verdict.reject("不接受主动连入（TCP SYN 到端口 " + dport + "）");
+                }
+                if (f == null) {
+                    return (flags & TCP_RST) != 0 ? Verdict.SILENT : Verdict.reject("不接受主动连入（没有这条连接，端口 " + dport + "）");
+                }
+                if (!f.exempt && !allowed(src, now)) {
+                    flows.remove(k);
+                    return Verdict.reject("来源 " + src + " 已经不在放行的主机里");
+                }
+                f.update(flags, false, now);
+                if (f.reset) {
+                    flows.remove(k);
+                }
+                return Verdict.OK;
+            }
+            if (nh == PROTO_ICMPV6) {
+                if (plen < 8) {
+                    return Verdict.SILENT;
+                }
+                int type = p[40] & 0xFF;
+                if (type < 128) {
+                    // 差错报文：只收关于他自己发的包的（里面附带的原始包的源地址是他）
+                    if (plen >= 8 + Ipv6Packet.HEADER && Ipv6Address.read(p, 40 + 8 + 8).equals(routed)) {
+                        return Verdict.OK;
+                    }
+                    return Verdict.SILENT;
+                }
+                return Verdict.reject("不接受主动发来的 ICMPv6（类型 " + type + "）");
+            }
+            return Verdict.reject("不许的协议（下一首部 " + nh + "）");
+        }
+
+        /** 没过期的连接；过期的顺手删掉 */
+        Flow flow(FlowKey k, long now) {
+            Flow f = flows.get(k);
+            if (f != null && f.expired(now)) {
+                flows.remove(k);
+                return null;
+            }
+            return f;
+        }
+
+        boolean hasRoom(long now) {
+            if (flows.size() < MAX_FLOWS) {
+                return true;
+            }
+            flows.values().removeIf(f -> f.expired(now));
+            return flows.size() < MAX_FLOWS;
+        }
+
+        void pruneGrants(long now) {
+            Iterator<Grant> it = grants.values().iterator();
+            while (it.hasNext()) {
+                if (it.next().expiresAt <= now) {
+                    it.remove();
+                }
+            }
+        }
+
+        boolean allowed(Ipv6Address host, long now) {
+            boolean found = false;
+            Iterator<Grant> it = grants.values().iterator();
+            while (it.hasNext()) {
+                Grant g = it.next();
+                if (g.expiresAt <= now) {
+                    it.remove();
+                } else if (g.hosts.contains(host)) {
+                    found = true;
+                }
+            }
+            return found;
+        }
     }
 
     // ---- 工具 ----
@@ -476,14 +647,16 @@ final class PlayerNics {
         rejects.reject(source, reason, now);
     }
 
-    /** 给 /ynet 看：每个在线玩家的地址、连接数、放行的用途（网络线程上调用） */
+    /** 给 /ynet 看：每个在线玩家的地址、租约、连接数、放行的用途（网络线程上调用） */
     List<String> describe() {
         List<String> out = new ArrayList<>();
         long now = loop.nowMillis();
-        for (PlayerNic n : byPlayer.values()) {
+        for (PlayerLink n : byPlayer.values()) {
             n.pruneGrants(now);
             StringBuilder sb = new StringBuilder();
-            sb.append(n.name).append(' ').append(n.address).append("  连接 ").append(n.flows.size());
+            sb.append(n.name).append(' ').append(n.routed == null ? "（还没用 DHCPv6 租到地址）" : n.routed + "（DHCPv6 租约，到下线为止）")
+                    .append(n.unrestricted ? "  不过防火墙" : "").append("  连接 ").append(n.flows.size())
+                    .append("  邻居 ").append(n.nd.describeNeighbors());
             for (Map.Entry<String, Grant> e : n.grants.entrySet()) {
                 sb.append("  ").append(e.getKey()).append('=').append(e.getValue().hosts.size()).append(" 台主机（")
                         .append((e.getValue().expiresAt - now) / 1000).append(" 秒后过期）");
@@ -495,7 +668,7 @@ final class PlayerNics {
 
     /** 测试用：玩家现在放行的主机（网络线程上调用） */
     Set<Ipv6Address> allowedHosts(UUID player) {
-        PlayerNic n = byPlayer.get(player);
+        PlayerLink n = byPlayer.get(player);
         Set<Ipv6Address> out = new HashSet<>();
         if (n != null) {
             n.pruneGrants(loop.nowMillis());
@@ -508,27 +681,8 @@ final class PlayerNics {
 
     /** 测试用：玩家现在的连接数 */
     int flowCount(UUID player) {
-        PlayerNic n = byPlayer.get(player);
+        PlayerLink n = byPlayer.get(player);
         return n == null ? 0 : n.flows.size();
-    }
-
-    /** 玩家网卡的端口：往外的校验与防火墙（只在网络线程上调用 {@link #send}） */
-    final class PlayerPort implements NicPort {
-        private final PlayerNic nic;
-
-        PlayerPort(PlayerNic nic) {
-            this.nic = nic;
-        }
-
-        @Override
-        public Ipv6Address address() {
-            return nic.address;
-        }
-
-        @Override
-        public boolean send(byte[] packet) {
-            return outboundPacket(nic, packet);
-        }
     }
 
     private static final class Verdict {
@@ -594,13 +748,16 @@ final class PlayerNics {
 
     private static final class Flow {
         final boolean tcp;
+        /** 不看放行的主机（到递归解析器、NTP 服务器的） */
+        final boolean exempt;
         long lastSeen;
         boolean finOut;
         boolean finIn;
         boolean reset;
 
-        Flow(boolean tcp) {
+        Flow(boolean tcp, boolean exempt) {
             this.tcp = tcp;
+            this.exempt = exempt;
         }
 
         void update(int flags, boolean outbound, long now) {
@@ -620,94 +777,6 @@ final class PlayerNics {
         boolean expired(long now) {
             long idle = !tcp ? UDP_IDLE_MILLIS : (finOut && finIn) ? TCP_CLOSING_MILLIS : TCP_IDLE_MILLIS;
             return reset || now - lastSeen > idle;
-        }
-    }
-
-    /**
-     * 一个玩家自己的网卡（客户端的 0 号网口在服务端的那一头）：收到的包（过了往里的防火墙）交给他的客户端，
-     * 他客户端发来的包从这张网卡发出去，端口（{@link PlayerPort}）上过往外的防火墙。
-     */
-    final class PlayerNic extends NetworkInterface {
-        final UUID player;
-        final String name;
-        final Ipv6Address address;
-        final long part;
-        final Link link;
-        final int generation;
-        final PlayerPort port = new PlayerPort(this);
-        final RateLimiter out = new RateLimiter(outPackets, outBytes);
-        final RateLimiter in = new RateLimiter(inPackets, inBytes);
-        final Map<String, Grant> grants = new LinkedHashMap<>();
-        final Map<FlowKey, Flow> flows = new HashMap<>();
-        boolean closed;
-
-        PlayerNic(UUID player, String name, Ipv6Address address, long part, Link link, int generation) {
-            this.player = player;
-            this.name = name;
-            this.address = address;
-            this.part = part;
-            this.link = link;
-            this.generation = generation;
-        }
-
-        /** 网络线程：过了往里的防火墙的包，交给客户端的 0 号网口 */
-        @Override
-        public boolean receive(byte[] packet) {
-            if (closed) {
-                return false;
-            }
-            link.deliver(packet);
-            return true;
-        }
-
-        /** 网络线程：客户端 0 号网口发来的包 */
-        void fromClient(byte[] packet) {
-            send(packet);
-        }
-
-        String label() {
-            return "玩家 " + name + " 的临时地址 " + address;
-        }
-
-        /** 没过期的连接；过期的顺手删掉 */
-        Flow flow(FlowKey k, long now) {
-            Flow f = flows.get(k);
-            if (f != null && f.expired(now)) {
-                flows.remove(k);
-                return null;
-            }
-            return f;
-        }
-
-        boolean hasRoom(long now) {
-            if (flows.size() < MAX_FLOWS) {
-                return true;
-            }
-            flows.values().removeIf(f -> f.expired(now));
-            return flows.size() < MAX_FLOWS;
-        }
-
-        void pruneGrants(long now) {
-            Iterator<Grant> it = grants.values().iterator();
-            while (it.hasNext()) {
-                if (it.next().expiresAt <= now) {
-                    it.remove();
-                }
-            }
-        }
-
-        boolean allowed(Ipv6Address host, long now) {
-            boolean found = false;
-            Iterator<Grant> it = grants.values().iterator();
-            while (it.hasNext()) {
-                Grant g = it.next();
-                if (g.expiresAt <= now) {
-                    it.remove();
-                } else if (g.hosts.contains(host)) {
-                    found = true;
-                }
-            }
-            return found;
         }
     }
 }

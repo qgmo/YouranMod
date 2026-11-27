@@ -13,11 +13,19 @@ import java.util.Map;
 /**
  * DNS 报文（RFC 1035，AAAA 见 RFC 3596）。名字用不带结尾点的字符串表示，根是空字符串；比较时不分大小写。
  * 解析时展开名字压缩（防循环）；编码时压缩名字。认识的记录类型：A、NS、CNAME、SOA、AAAA，其他按原始字节保留。
- * 不带 EDNS 时 UDP 报文最多 512 字节，超过的由 {@link #encodeForUdp()} 截断并置 TC。
+ * <p>
+ * EDNS(0)（RFC 6891）：附加区里的 OPT 伪记录解析成 {@link #edns}（不放进 {@link #additional}），编码时放在附加区最后。
+ * UDP 报文的上限：问的一方不带 EDNS 时 512 字节，带了时按它声明的载荷大小，但不超过 {@value #EDNS_PAYLOAD}
+ * （MTU 1280 去掉 IPv6、UDP 首部，{@link #udpLimitFor}）。超过上限的由 {@link #encodeForUdp(int)} 截断：只留问题（和 OPT），置 TC；
+ * 收到 TC 的一方改用 TCP（RFC 7766，见 {@link #tcpFrame}）重问。
  */
 public final class DnsMessage {
     public static final int PORT = 53;
     public static final int MAX_UDP = 512;
+    /** EDNS(0) 的 UDP 载荷上限（服主 11-27：1232 = 1280 − 40 − 8） */
+    public static final int EDNS_PAYLOAD = 1232;
+    /** TCP 上一个报文最长（两字节长度前缀） */
+    public static final int MAX_TCP = 65535;
 
     public static final int TYPE_A = 1;
     public static final int TYPE_NS = 2;
@@ -25,6 +33,7 @@ public final class DnsMessage {
     public static final int TYPE_SOA = 6;
     public static final int TYPE_TXT = 16;
     public static final int TYPE_AAAA = 28;
+    public static final int TYPE_OPT = 41;
     public static final int TYPE_ANY = 255;
     public static final int CLASS_IN = 1;
 
@@ -34,6 +43,8 @@ public final class DnsMessage {
     public static final int RCODE_NXDOMAIN = 3;
     public static final int RCODE_NOTIMP = 4;
     public static final int RCODE_REFUSED = 5;
+    /** 扩展响应码 BADVERS（16，RFC 6891 第 6.1.3 节）：高 8 位放在 OPT 里 */
+    public static final int RCODE_BADVERS = 16;
 
     private static final int MAX_NAME = 255;
     private static final int MAX_LABEL = 63;
@@ -50,10 +61,53 @@ public final class DnsMessage {
     public final List<Record> answers;
     public final List<Record> authority;
     public final List<Record> additional;
+    /** EDNS(0) 的 OPT；没带为 null */
+    public final Edns edns;
+    /** OPT 不合格（不止一个、名字不是根）：服务器应回 FORMERR（RFC 6891 第 6.1.1 节） */
+    public final boolean ednsMalformed;
+
+    /** EDNS(0) 的 OPT 伪记录（RFC 6891 第 6.1.2 节） */
+    public static final class Edns {
+        /** 发送方能收的 UDP 载荷大小（OPT 的 CLASS 字段） */
+        public final int payloadSize;
+        /** 扩展响应码的高 8 位 */
+        public final int extendedRcode;
+        public final int version;
+        public final boolean dnssecOk;
+        /** OPT 的 RDATA（各个选项，原样） */
+        public final byte[] options;
+
+        public Edns(int payloadSize, int extendedRcode, int version, boolean dnssecOk, byte[] options) {
+            this.payloadSize = payloadSize & 0xFFFF;
+            this.extendedRcode = extendedRcode & 0xFF;
+            this.version = version & 0xFF;
+            this.dnssecOk = dnssecOk;
+            this.options = options == null ? new byte[0] : options.clone();
+        }
+
+        /** 版本 0、载荷 {@value DnsMessage#EDNS_PAYLOAD}、没有选项 */
+        public static Edns standard() {
+            return new Edns(EDNS_PAYLOAD, 0, 0, false, null);
+        }
+    }
 
     public DnsMessage(int id, boolean response, int opcode, boolean authoritative, boolean truncated,
                       boolean recursionDesired, boolean recursionAvailable, int rcode,
                       List<Question> questions, List<Record> answers, List<Record> authority, List<Record> additional) {
+        this(id, response, opcode, authoritative, truncated, recursionDesired, recursionAvailable, rcode, questions, answers, authority, additional,
+                null, false);
+    }
+
+    /** {@code rcode} 可以是扩展响应码（大于 15 的高 8 位放进 OPT；这时要有 {@code edns}） */
+    public DnsMessage(int id, boolean response, int opcode, boolean authoritative, boolean truncated,
+                      boolean recursionDesired, boolean recursionAvailable, int rcode,
+                      List<Question> questions, List<Record> answers, List<Record> authority, List<Record> additional,
+                      Edns edns, boolean ednsMalformed) {
+        if (rcode > 15 && edns != null) {
+            edns = new Edns(edns.payloadSize, rcode >>> 4, edns.version, edns.dnssecOk, edns.options);
+        }
+        this.edns = edns;
+        this.ednsMalformed = ednsMalformed;
         this.id = id & 0xFFFF;
         this.response = response;
         this.opcode = opcode & 0xF;
@@ -66,6 +120,46 @@ public final class DnsMessage {
         this.answers = Collections.unmodifiableList(new ArrayList<>(answers));
         this.authority = Collections.unmodifiableList(new ArrayList<>(authority));
         this.additional = Collections.unmodifiableList(new ArrayList<>(additional));
+    }
+
+    /** 完整的响应码：头里的 4 位加上 OPT 里的高 8 位 */
+    public int fullRcode() {
+        return edns == null ? rcode : (edns.extendedRcode << 4) | rcode;
+    }
+
+    /** 换一个响应码的副本（大于 15 的扩展响应码要有 OPT） */
+    public DnsMessage withRcode(int fullRcode) {
+        return new DnsMessage(id, response, opcode, authoritative, truncated, recursionDesired, recursionAvailable, fullRcode,
+                questions, answers, authority, additional, edns, false);
+    }
+
+    /** 换上（或去掉，null）OPT 的副本 */
+    public DnsMessage withEdns(Edns e) {
+        return new DnsMessage(id, response, opcode, authoritative, truncated, recursionDesired, recursionAvailable,
+                e == null ? rcode : fullRcode(), questions, answers, authority, additional, e, false);
+    }
+
+    /**
+     * 回给 {@code query} 的 UDP 应答最多多长：问的一方没带 EDNS 时 512，带了时取它声明的载荷大小（小于 512 的按 512），
+     * 但不超过 {@value #EDNS_PAYLOAD}（RFC 6891 第 6.2.5 节）
+     */
+    public static int udpLimitFor(DnsMessage query) {
+        if (query == null || query.edns == null) {
+            return MAX_UDP;
+        }
+        return Math.max(MAX_UDP, Math.min(query.edns.payloadSize, EDNS_PAYLOAD));
+    }
+
+    /** TCP 上的报文：两字节长度前缀（RFC 1035 第 4.2.2 节、RFC 7766 第 8 节） */
+    public static byte[] tcpFrame(byte[] message) {
+        if (message.length > MAX_TCP) {
+            throw new IllegalArgumentException("DNS 报文超过 65535 字节");
+        }
+        byte[] out = new byte[2 + message.length];
+        out[0] = (byte) (message.length >>> 8);
+        out[1] = (byte) message.length;
+        System.arraycopy(message, 0, out, 2, message.length);
+        return out;
     }
 
     /** 一个问题的查询 */
@@ -150,10 +244,28 @@ public final class DnsMessage {
         }
         List<Record> answers = readRecords(b, pos, an);
         List<Record> authority = readRecords(b, pos, ns);
-        List<Record> additional = readRecords(b, pos, ar);
-        return new DnsMessage(id, (flags & 0x8000) != 0, (flags >>> 11) & 0xF, (flags & 0x0400) != 0,
+        List<Record> withOpt = readRecords(b, pos, ar);
+        List<Record> additional = new ArrayList<>();
+        Edns edns = null;
+        boolean bad = false;
+        for (Record r : withOpt) {
+            if (r.type != TYPE_OPT) {
+                additional.add(r);
+                continue;
+            }
+            if (edns != null || !r.name.isEmpty()) {
+                bad = true;
+            }
+            if (edns == null) {
+                // TTL 字段：扩展响应码 8 位、版本 8 位、DO 1 位、Z 15 位
+                edns = new Edns(r.rclass, (int) (r.ttl >>> 24), (int) (r.ttl >>> 16) & 0xFF, (r.ttl & 0x8000) != 0, r.rdata);
+            }
+        }
+        // 扩展响应码由构造函数从 OPT 里拿（头里只有低 4 位）
+        DnsMessage m = new DnsMessage(id, (flags & 0x8000) != 0, (flags >>> 11) & 0xF, (flags & 0x0400) != 0,
                 (flags & 0x0200) != 0, (flags & 0x0100) != 0, (flags & 0x0080) != 0, flags & 0xF,
-                questions, answers, authority, additional);
+                questions, answers, authority, additional, edns, bad);
+        return m;
     }
 
     private static void need(byte[] b, int pos, int n) throws MalformedPacketException {
@@ -278,10 +390,18 @@ public final class DnsMessage {
         return new Writer().message(this, questions, answers, authority, additional, truncated);
     }
 
-    /** UDP 用：超过 512 字节时只留问题、置 TC（RFC 1035 第 4.2.1 节） */
+    /** UDP 用，问的一方没带 EDNS 时：同 {@link #encodeForUdp(int)}，上限 512 字节 */
     public byte[] encodeForUdp() {
+        return encodeForUdp(MAX_UDP);
+    }
+
+    /**
+     * UDP 用：超过 {@code limit} 字节时只留问题（和 OPT）、置 TC（RFC 1035 第 4.2.1 节、RFC 2181 第 9 节）。
+     * {@code limit} 一般是 {@link #udpLimitFor}(查询)
+     */
+    public byte[] encodeForUdp(int limit) {
         byte[] full = encode();
-        if (full.length <= MAX_UDP) {
+        if (full.length <= limit) {
             return full;
         }
         return new Writer().message(this, questions, Collections.<Record>emptyList(), Collections.<Record>emptyList(),
@@ -295,12 +415,12 @@ public final class DnsMessage {
         byte[] message(DnsMessage m, List<Question> qs, List<Record> an, List<Record> ns, List<Record> ar, boolean tc) {
             u16(m.id);
             int flags = (m.response ? 0x8000 : 0) | (m.opcode << 11) | (m.authoritative ? 0x0400 : 0) | (tc ? 0x0200 : 0)
-                    | (m.recursionDesired ? 0x0100 : 0) | (m.recursionAvailable ? 0x0080 : 0) | m.rcode;
+                    | (m.recursionDesired ? 0x0100 : 0) | (m.recursionAvailable ? 0x0080 : 0) | (m.rcode & 0xF);
             u16(flags);
             u16(qs.size());
             u16(an.size());
             u16(ns.size());
-            u16(ar.size());
+            u16(ar.size() + (m.edns != null ? 1 : 0));
             for (Question q : qs) {
                 name(q.name);
                 u16(q.type);
@@ -310,6 +430,11 @@ public final class DnsMessage {
                 for (Record r : list) {
                     record(r);
                 }
+            }
+            if (m.edns != null) {
+                Edns e = m.edns;
+                long ttl = ((long) e.extendedRcode << 24) | ((long) e.version << 16) | (e.dnssecOk ? 0x8000 : 0);
+                record(Record.raw("", TYPE_OPT, ttl, e.options).withClass(e.payloadSize));
             }
             return out.toByteArray();
         }
@@ -509,6 +634,11 @@ public final class DnsMessage {
 
         public static Record raw(String name, int type, long ttl, byte[] rdata) {
             return new Record(name, type, CLASS_IN, ttl, null, null, rdata, null);
+        }
+
+        /** 改 CLASS 的副本（OPT 用 CLASS 放载荷大小） */
+        Record withClass(int cls) {
+            return new Record(name, type, cls, ttl, address, target, rdata, soa);
         }
 
         /** 改 TTL 的副本（缓存回答时用剩下的时间） */

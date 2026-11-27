@@ -8,10 +8,11 @@ import moe.qingu.youran.api.network.NetworkLayout;
 import moe.qingu.youran.api.network.packet.DnsMessage;
 import moe.qingu.youran.api.network.stack.DnsResolver;
 import moe.qingu.youran.api.network.stack.EventLoop;
-import moe.qingu.youran.api.network.stack.HttpClient;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.NetworkException;
-import moe.qingu.youran.api.network.stack.NtpClient;
+import moe.qingu.youran.net.ProbeMessages;
+import moe.qingu.youran.net.YouranNetwork;
+import moe.qingu.youran.network.NetProbe;
 import moe.qingu.youran.api.network.stack.PingResult;
 import net.minecraft.command.CommandBase;
 import net.minecraft.command.CommandException;
@@ -35,13 +36,18 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 测试命令 /ynet（权限 2，管理员）。从某一格上的测试设备 ping、查 DNS、用 TCP 取网页、对时；列地址分配表；
- * 放、拿测试设备，把玩家当成某一格上的电脑；丢包与乱序的测试开关；压包。
- * 结果在网络线程上算出来，转回主线程再发给执行者。坐标可以写 ~（相对执行者）；维度不写时用执行者所在的维度（控制台为 0）。
+ * 测试命令 /ynet（权限 2，管理员）。ping、trace、dns、get、post、ntp 从执行者自己的玩家地址发出（服主 11-27）：服务端查过权限后交给他的
+ * 客户端跑（{@link ProbeMessages}），结果一行一行回来、显示给他；控制台、RCON 没有玩家地址，从机房里的运维主机（{@code youranmod:ops}）发出。
+ * 另有：列地址分配表、路由器；在一格上插、拔测试网卡；丢包与乱序的测试开关；压包。
+ * 网络线程上算出的结果转回主线程再发给执行者。坐标可以写 ~（相对执行者）；维度不写时用执行者所在的维度（控制台为 0）。
  */
 final class NetCommand extends CommandBase {
-    private static final long PING_TIMEOUT_MS = 2000;
-    private static final long HTTP_TIMEOUT_MS = 15_000;
+    static final String NAME = "ynet";
+    static final int PERMISSION_LEVEL = 2;
+    /** 交给客户端跑的子命令最多等多久（过了不再收它的结果） */
+    static final long PROBE_TIMEOUT_MS = 180_000;
+    /** 交给客户端跑的子命令最多收多少行 */
+    static final int PROBE_MAX_LINES = 200;
     private final NetworkServer net;
 
     NetCommand(NetworkServer net) {
@@ -50,24 +56,25 @@ final class NetCommand extends CommandBase {
 
     @Override
     public String getName() {
-        return "ynet";
+        return NAME;
     }
 
     @Override
     public String getUsage(ICommandSender sender) {
-        return "/ynet <table|stats|players|device|confirm|location|operator|ping|dns|whois|name|get|post|ca|ntp|sim|stress|flush>";
+        return "/ynet <table|routers|stats|players|device|confirm|location|operator|ping|trace|dns|whois|name|get|post|ca|ntp|sim|stress|flush>";
     }
 
     @Override
     public int getRequiredPermissionLevel() {
-        return 2;
+        return PERMISSION_LEVEL;
     }
 
     private static final List<String> HELP = Arrays.asList(
             "§e/ynet —— 游戏内网络的测试命令",
             "§6/ynet table §f地址分配表",
+            "§6/ynet routers §f路由器：地址、路由表、邻居",
             "§6/ynet stats §f路由器与网卡的统计",
-            "§6/ynet players §f在线玩家的临时地址、连接数、放行的用途",
+            "§6/ynet players §f在线玩家的地址（DHCPv6 租约）、连接数、放行的用途",
             "§6/ynet device add|remove <x> <y> <z> [维度] §f在一格上插、拔一张测试网卡（背后是服务端的协议栈）",
             "§6/ynet device list §f插着的网卡（地址、种类、收发了多少）",
             "§6/ynet device bind <玩家> <x> <y> <z> [维度] §f在一格上插一张接玩家客户端的测试网卡（他的客户端多一个网口，/ynetc -i 用）",
@@ -76,16 +83,18 @@ final class NetCommand extends CommandBase {
             "§6/ynet confirm <玩家> §f给他弹一个测试用的系统确认框，回应后显示结果",
             "§6/ynet location <x> <y> <z> <网站域名> <随机数> §f用这一格的测试网卡签位置（问你自己），显示证明",
             "§6/ynet operator <x> <y> <z> <网站域名> <随机数> §f用这一格的测试网卡签操作者证明（玩家是你自己），显示证明",
-            "§6/ynet ping <x> <y> <z> <目标> [次数] [字节数] §f目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名",
-            "§6/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY] §f经递归解析器查（默认 AAAA）",
+            "§7下面六个从你自己的玩家地址发出（你的客户端跑；控制台从运维主机发出）",
+            "§6/ynet ping <目标> [次数] [字节数] §f目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名",
+            "§6/ynet trace <目标> §f逐跳探测（每一跳的路由器回“超时”）",
+            "§6/ynet dns <域名> [AAAA|TXT|NS|SOA|ANY] §f经递归解析器查（默认 AAAA；截断时改用 TCP）",
             "§6/ynet whois <域名或顶级域> §f注册局、所属模组、DNS 服务器",
             "§6/ynet name add <域名.yr> <地址|主机登记名> §f以 youranmod 的身份注册（还没注册时）并在 YouranMod 网站的 DNS 上设 AAAA",
             "§6/ynet name txt <域名.yr> <文字> §f同上，设 TXT",
             "§6/ynet name remove <域名.yr> §f删掉 YouranMod 网站 DNS 上这个名字的记录（注册还在）",
-            "§6/ynet get <x> <y> <z> <网址> §f用 TCP 取网页（如 http://test.yr/）",
-            "§6/ynet post <x> <y> <z> <网址> <JSON> §f发 POST（正文是 JSON，如向 ca.yr 申请证书）",
+            "§6/ynet get <网址> §f用 TCP 取网页（如 http://test.yr/）",
+            "§6/ynet post <网址> <JSON> §f发 POST（正文是 JSON，如向 ca.yr 申请证书）",
             "§6/ynet ca [订单号] §f证书签发服务：订单、最近签出去的证书；带订单号（前几位也行）时看这张订单的认证要求",
-            "§6/ynet ntp <x> <y> <z> §f向 NTP 服务器对时",
+            "§6/ynet ntp §f向 NTP 服务器对时",
             "§6/ynet sim <丢包%> <乱序%> | off §f测试开关：路由器按概率丢包、推迟包",
             "§6/ynet stress <秒> <每秒包数> §f在网络线程上压包（机房里两台主机互相 ping）",
             "§6/ynet flush §f清掉递归解析器的缓存");
@@ -100,6 +109,9 @@ final class NetCommand extends CommandBase {
         switch (sub) {
             case "table":
                 table(sender);
+                break;
+            case "routers":
+                routers(sender);
                 break;
             case "stats":
                 stats(sender);
@@ -120,10 +132,12 @@ final class NetCommand extends CommandBase {
                 location(sender, args);
                 break;
             case "ping":
-                ping(sender, args);
-                break;
+            case "trace":
             case "dns":
-                dns(sender, args);
+            case "get":
+            case "post":
+            case "ntp":
+                probe(sender, sub, args);
                 break;
             case "whois":
                 whois(sender, args);
@@ -131,17 +145,8 @@ final class NetCommand extends CommandBase {
             case "name":
                 name(sender, args);
                 break;
-            case "get":
-                get(sender, args);
-                break;
-            case "post":
-                post(sender, args);
-                break;
             case "ca":
                 ca(sender, args);
-                break;
-            case "ntp":
-                ntp(sender, args);
                 break;
             case "sim":
                 sim(sender, args);
@@ -201,14 +206,18 @@ final class NetCommand extends CommandBase {
     }
 
     private void stats(ICommandSender sender) {
-        Router r = net.router();
+        RouterNetwork r = net.routers();
+        if (r == null) {
+            tell(sender, "§c路由器还没建好");
+            return;
+        }
         tell(sender, "§e游戏内网络统计");
-        tell(sender, "转发 " + r.forwarded + "，交给设备 " + r.deliveredToDevices + "，交给机房主机 " + r.deliveredToHosts
-                + "，回目标不可达 " + r.unreachableSent + "，回超时 " + r.timeExceededSent + "，坏包 " + r.malformed);
+        tell(sender, "路由器 " + r.routers().size() + " 台：收 " + r.sum(x -> x.received) + "，转发 " + r.sum(x -> x.forwarded)
+                + "，回目标不可达 " + r.sum(x -> x.unreachableSent) + "，回超时 " + r.sum(x -> x.timeExceededSent) + "，坏包 " + r.sum(x -> x.malformed));
         tell(sender, "插着的网卡 " + net.nicTable().all().size() + " 张，发出收下 " + net.nicTable().accepted + "、交给网卡 " + net.nicTable().delivered
                 + "；中转到客户端 " + net.relays().toClient + "、客户端发来 " + net.relays().fromClient + "，丢掉 " + net.rejects().total()
-                + "；测试开关：丢包 " + Math.round(r.lossRate() * 100) + "%（已丢 " + r.simulatedDrops + "），乱序 "
-                + Math.round(r.reorderRate() * 100) + "%（已推迟 " + r.simulatedDelays + "）");
+                + "；测试开关：丢包 " + Math.round(r.simulation.loss() * 100) + "%（已丢 " + r.simulation.drops + "），乱序 "
+                + Math.round(r.simulation.reorder() * 100) + "%（已推迟 " + r.simulation.delays + "）");
         for (RawHostPort h : net.rawHosts().values()) {
             tell(sender, "原始主机 " + h.key() + "：" + (h.isOpen() ? "" : "已关，") + "收下 " + h.received + "、没人收（回不可达）" + h.refused
                     + "；发出 " + h.sent + "、不合格或排不进 " + h.rejected);
@@ -216,13 +225,37 @@ final class NetCommand extends CommandBase {
         RecursiveResolverStats.tell(this, sender, net);
     }
 
+    /** 路由器：地址、路由表、各网口的邻居（网络线程上读） */
+    private void routers(ICommandSender sender) {
+        RouterNetwork rn = net.routers();
+        if (rn == null) {
+            tell(sender, "§c路由器还没建好");
+            return;
+        }
+        onLoop(() -> {
+            for (Router r : rn.routers()) {
+                later(sender, "§e" + r.name + " §f" + r.address + "：收 " + r.received + "，转发 " + r.forwarded + "，回不可达 " + r.unreachableSent
+                        + "，回超时 " + r.timeExceededSent);
+                for (Router.Route route : r.routes()) {
+                    later(sender, "  §7路由 " + route);
+                }
+                for (Router.Port port : r.ports) {
+                    if (port instanceof Router.LinkPort && !(port instanceof PlayerNics.PlayerLink)) {
+                        Router.LinkPort lp = (Router.LinkPort) port;
+                        later(sender, "  §7网口 " + lp.name + " " + lp.linkLocal + "，邻居 " + lp.nd.describeNeighbors());
+                    }
+                }
+            }
+        });
+    }
+
     private void players(ICommandSender sender) {
         PlayerNics p = net.players();
         if (p == null) {
-            tell(sender, "§c玩家临时地址没开");
+            tell(sender, "§c玩家地址没开");
             return;
         }
-        tell(sender, "§e玩家临时地址 §f" + net.book().layout.playersPrefix() + "/96，在线 " + p.online()
+        tell(sender, "§e玩家地址 §f" + net.book().layout.playersPrefix() + "/96（DHCPv6），在线 " + p.online()
                 + "；往外收下 " + p.outAccepted + "、丢掉 " + p.outRejected + "，往里交给玩家 " + p.inDelivered + "、丢掉 " + p.inRejected);
         onLoop(() -> {
             for (String line : p.describe()) {
@@ -383,128 +416,74 @@ final class NetCommand extends CommandBase {
         });
     }
 
-    // ---- ping、DNS、HTTP、NTP ----
+    // ---- ping、trace、DNS、HTTP、NTP：从执行者的玩家地址发出 ----
 
-    private void ping(ICommandSender sender, String[] args) throws CommandException {
-        if (args.length < 5) {
-            throw new WrongUsageException("/ynet ping <x> <y> <z> <目标> [次数] [字节数]");
+    /**
+     * 交给执行者的客户端跑（从他的玩家网口发出），或者在运维主机上跑（控制台、RCON）。目标是坐标、主机登记名的先在这里换成地址
+     * （服务端知道分配表；客户端只拿到地址或域名）
+     */
+    private void probe(ICommandSender sender, String op, String[] args) throws CommandException {
+        String[] rest = Arrays.copyOfRange(args, 1, args.length);
+        if ((op.equals("ping") || op.equals("trace")) && rest.length >= 1) {
+            Ipv6Address a = staticTarget(sender, rest[0]);
+            if (a == null && rest[0].matches("-?\\d+,-?\\d+,-?\\d+(,-?\\d+)?")) {
+                return;
+            }
+            if (a != null) {
+                rest[0] = a.toString();
+            }
         }
-        Place p = place(sender, args, 1, false);
-        TestNics.Emulated dev = emulated(sender, p);
-        if (dev == null) {
+        if ((op.equals("dns") && rest.length > 1 && NetProbe.typeOf(rest[1]) < 0) || (rest.length == 0 && !op.equals("ntp"))) {
+            throw new WrongUsageException("/ynet " + op + " ……（见 /ynet）");
+        }
+        Entity e = sender.getCommandSenderEntity();
+        if (e instanceof EntityPlayerMP) {
+            EntityPlayerMP player = (EntityPlayerMP) e;
+            PlayerNics p = net.players();
+            if (p == null || !p.isOnline(player.getUniqueID())) {
+                tell(sender, "§c" + player.getName() + " 没有玩家地址（玩家地址没开，或还没接上）");
+                return;
+            }
+            long id = net.newProbe(player.getUniqueID(), sender);
+            YouranNetwork.CHANNEL.sendTo(new ProbeMessages.Run(id, op, rest), player);
             return;
         }
-        String target = args[4];
-        int count = args.length > 5 ? parseInt(args[5], 1, 100) : 4;
-        int size = args.length > 6 ? parseInt(args[6], 0, 1232) : 56;
-        resolveTarget(sender, dev, target, p.dim).thenAccept(addr -> {
-            if (addr == null) {
-                return;
-            }
-            later(sender, "§ePING " + target + (target.equals(addr.toString()) ? "" : "（" + addr + "）") + "，从 " + dev.address()
-                    + "，" + size + " 字节数据");
-            pingLoop(sender, dev.stack, addr, size, count, 0, new int[1]);
-        });
-    }
-
-    private void pingLoop(ICommandSender sender, NetStack stack, Ipv6Address addr, int size, int count, int i, int[] ok) {
-        stack.ping(null, addr, size, PING_TIMEOUT_MS).whenComplete((r, err) -> {
-            if (err != null) {
-                later(sender, "§c" + message(err));
-                return;
-            }
-            String line;
-            switch (r.status) {
-                case REPLY:
-                    ok[0]++;
-                    line = "§a" + r.bytes + " 字节来自 " + r.from + "：序号 " + (i + 1) + "，时间 " + r.rttMillis + " 毫秒";
-                    break;
-                case UNREACHABLE:
-                    line = "§c来自 " + r.from + "：目标不可达（" + unreachText(r.code) + "）";
-                    break;
-                case TIME_EXCEEDED:
-                    line = "§c来自 " + r.from + "：超时（跳数用完）";
-                    break;
-                default:
-                    line = "§c序号 " + (i + 1) + "：" + PING_TIMEOUT_MS + " 毫秒内没有回应";
-                    break;
-            }
-            later(sender, line);
-            if (i + 1 < count) {
-                stack.loop().schedule(() -> pingLoop(sender, stack, addr, size, count, i + 1, ok), 1000);
-            } else {
-                later(sender, "§e发了 " + count + " 个，收到 " + ok[0] + " 个回应");
-            }
-        });
-    }
-
-    static String unreachText(int code) {
-        switch (code) {
-            case 0:
-                return "没有路由";
-            case 1:
-                return "被禁止";
-            case 3:
-                return "地址不可达";
-            case 4:
-                return "端口不可达";
-            default:
-                return "代码 " + code;
-        }
-    }
-
-    private void dns(ICommandSender sender, String[] args) throws CommandException {
-        if (args.length < 5) {
-            throw new WrongUsageException("/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY]");
-        }
-        int type = args.length > 5 ? typeOf(args[5]) : DnsMessage.TYPE_AAAA;
-        if (type < 0) {
-            throw new WrongUsageException("/ynet dns <x> <y> <z> <域名> [AAAA|TXT|NS|SOA|ANY]");
-        }
-        Place p = place(sender, args, 1, false);
-        TestNics.Emulated dev = emulated(sender, p);
-        if (dev == null) {
+        NetStack ops = net.hostStack(NetworkServer.HOST_OPS);
+        if (ops == null) {
+            tell(sender, "§c运维主机（" + NetworkServer.HOST_OPS + "）没起来");
             return;
         }
-        String name = args[4];
-        if (!moe.qingu.youran.api.network.DomainNames.isAscii(name)) {
-            try {
-                tell(sender, "§7" + name + " 的 A-label 是 " + moe.qingu.youran.api.network.DomainNames.toAscii(name));
-            } catch (IllegalArgumentException e) {
-                tell(sender, "§c" + e.getMessage());
-                return;
+        tell(sender, "§7从运维主机 " + net.hostAddress(NetworkServer.HOST_OPS) + " 发出");
+        String[] fixed = rest;
+        onLoop(() -> new NetProbe(ops, null, new DnsResolver(ops, net.resolverAddress()), net.ntpAddress()).run(op, fixed, new NetProbe.Out() {
+            @Override
+            public void line(String text) {
+                later(sender, text);
             }
-        }
-        long start = System.nanoTime();
-        dev.dns.query(name, type).whenComplete((m, err) -> {
-            if (err != null) {
-                later(sender, "§c查 " + name + " 失败：" + message(err));
-                return;
+
+            @Override
+            public void done() {
             }
-            long ms = (System.nanoTime() - start) / 1_000_000;
-            later(sender, "§e" + name + " " + typeText(type) + "：响应码 " + rcodeText(m.rcode) + "（问的是 " + dev.dns.server() + "，" + ms + " 毫秒）");
-            for (DnsMessage.Record r : m.answers) {
-                later(sender, "  " + r.name + " " + r.ttl + " " + typeText(r.type) + " " + (r.address != null ? r.address
-                        : r.target != null ? r.target : r.type == DnsMessage.TYPE_TXT ? "\"" + r.text() + "\"" : r.soa != null ? r.soa.mname + " " + r.soa.serial : ""));
-            }
-        });
+        }));
     }
 
-    static int typeOf(String s) {
-        switch (s.toUpperCase(java.util.Locale.ROOT)) {
-            case "AAAA":
-                return DnsMessage.TYPE_AAAA;
-            case "TXT":
-                return DnsMessage.TYPE_TXT;
-            case "NS":
-                return DnsMessage.TYPE_NS;
-            case "SOA":
-                return DnsMessage.TYPE_SOA;
-            case "ANY":
-                return DnsMessage.TYPE_ANY;
-            default:
-                return -1;
+    /** 坐标 x,y,z[,维度]、主机登记名换成地址；都不是为 null（地址、域名照原样交下去） */
+    private Ipv6Address staticTarget(ICommandSender sender, String target) {
+        if (Ipv6Address.tryParse(target) != null) {
+            return null;
         }
+        if (target.matches("-?\\d+,-?\\d+,-?\\d+(,-?\\d+)?")) {
+            String[] parts = target.split(",");
+            Entity e = sender.getCommandSenderEntity();
+            int dim = e != null ? e.dimension : sender.getEntityWorld().provider.getDimension();
+            int d = parts.length > 3 ? Integer.parseInt(parts[3]) : dim;
+            Ipv6Address a = net.addressAt(d, Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+            if (a == null) {
+                tell(sender, "§c坐标 " + target + "（维度 " + d + "）没有地址：维度没有全局 Wi-Fi，或坐标超出范围（x、z 在 −524288 到 524287，y 在 0 到 255）");
+            }
+            return a;
+        }
+        return net.hostAddress(target);
     }
 
     private void whois(ICommandSender sender, String[] args) throws CommandException {
@@ -601,93 +580,6 @@ final class NetCommand extends CommandBase {
         }
     }
 
-    static String rcodeText(int rcode) {
-        switch (rcode) {
-            case 0:
-                return "NOERROR";
-            case 1:
-                return "FORMERR";
-            case 2:
-                return "SERVFAIL";
-            case 3:
-                return "NXDOMAIN（不存在）";
-            case 4:
-                return "NOTIMP";
-            case 5:
-                return "REFUSED";
-            default:
-                return String.valueOf(rcode);
-        }
-    }
-
-    static String typeText(int type) {
-        return type == DnsMessage.TYPE_AAAA ? "AAAA" : type == DnsMessage.TYPE_CNAME ? "CNAME" : type == DnsMessage.TYPE_NS ? "NS"
-                : type == DnsMessage.TYPE_TXT ? "TXT" : type == DnsMessage.TYPE_SOA ? "SOA" : type == DnsMessage.TYPE_ANY ? "ANY" : String.valueOf(type);
-    }
-
-    private void get(ICommandSender sender, String[] args) throws CommandException {
-        if (args.length < 5) {
-            throw new WrongUsageException("/ynet get <x> <y> <z> <网址>");
-        }
-        Place p = place(sender, args, 1, false);
-        TestNics.Emulated dev = emulated(sender, p);
-        if (dev == null) {
-            return;
-        }
-        String url = args[4];
-        long start = System.nanoTime();
-        long[] before = new long[1];
-        onLoop(() -> before[0] = dev.stack.tcpRetransmissions());
-        HttpClient.fetch(dev.stack, dev.dns, url, HTTP_TIMEOUT_MS).whenComplete((r, err) -> {
-            long ms = (System.nanoTime() - start) / 1_000_000;
-            long re = dev.stack.tcpRetransmissions() - before[0];
-            if (err != null) {
-                later(sender, "§c取 " + url + " 失败：" + message(err) + "（" + ms + " 毫秒，TCP 重传 " + re + " 次）");
-                return;
-            }
-            later(sender, "§eHTTP " + r.status + " " + r.reason + "，" + r.body.length + " 字节，" + r.header("Content-Type")
-                    + "（" + ms + " 毫秒，TCP 重传 " + re + " 次）");
-            String text = r.bodyText();
-            for (String line : text.split("\n")) {
-                if (!line.trim().isEmpty()) {
-                    later(sender, "§7" + line);
-                }
-            }
-        });
-    }
-
-    private void post(ICommandSender sender, String[] args) throws CommandException {
-        if (args.length < 6) {
-            throw new WrongUsageException("/ynet post <x> <y> <z> <网址> <JSON>");
-        }
-        Place p = place(sender, args, 1, false);
-        TestNics.Emulated dev = emulated(sender, p);
-        if (dev == null) {
-            return;
-        }
-        String url = args[4];
-        HttpClient.Url u = HttpClient.Url.parse(url);
-        if (u == null) {
-            tell(sender, "§c不认识的网址：" + url);
-            return;
-        }
-        String body = String.join(" ", Arrays.asList(args).subList(5, args.length));
-        Map<String, String> headers = Collections.singletonMap("Content-Type", "application/json");
-        HttpClient.send(dev.stack, dev.dns, u, "POST", headers, body.getBytes(java.nio.charset.StandardCharsets.UTF_8), HTTP_TIMEOUT_MS, null)
-                .whenComplete((r, err) -> {
-                    if (err != null) {
-                        later(sender, "§c POST " + url + " 失败：" + message(err));
-                        return;
-                    }
-                    later(sender, "§eHTTP " + r.status + " " + r.reason + "，" + r.body.length + " 字节，" + r.header("Content-Type"));
-                    for (String line : r.bodyText().split("\n")) {
-                        if (!line.trim().isEmpty()) {
-                            later(sender, "§7" + line);
-                        }
-                    }
-                });
-    }
-
     private void ca(ICommandSender sender, String[] args) {
         moe.qingu.youran.server.net.ca.CaService ca = net.caService();
         if (ca == null) {
@@ -756,31 +648,16 @@ final class NetCommand extends CommandBase {
         });
     }
 
-    private void ntp(ICommandSender sender, String[] args) throws CommandException {
-        if (args.length < 4) {
-            throw new WrongUsageException("/ynet ntp <x> <y> <z>");
-        }
-        Place p = place(sender, args, 1, false);
-        TestNics.Emulated dev = emulated(sender, p);
-        if (dev == null) {
-            return;
-        }
-        Ipv6Address server = net.ntpAddress();
-        NtpClient.query(dev.stack, server).whenComplete((r, err) -> {
-            if (err != null) {
-                later(sender, "§c对时失败：" + message(err));
-                return;
-            }
-            later(sender, "§eNTP " + server + "：UTC " + Instant.ofEpochMilli(r.serverTimeMillis) + "，层级 " + r.stratum
-                    + "，偏差 " + r.offsetMillis + " 毫秒，往返 " + r.roundTripMillis + " 毫秒");
-        });
-    }
-
     // ---- 测试开关与压包 ----
 
     private void sim(ICommandSender sender, String[] args) throws CommandException {
+        RouterNetwork rn = net.routers();
+        if (rn == null) {
+            tell(sender, "§c路由器还没建好");
+            return;
+        }
         if (args.length >= 2 && args[1].equals("off")) {
-            onLoop(() -> net.router().setSimulation(0, 0));
+            rn.simulation.set(0, 0);
             tell(sender, "§a测试开关已关：不丢包、不乱序");
             return;
         }
@@ -789,7 +666,7 @@ final class NetCommand extends CommandBase {
         }
         double loss = parseDouble(args[1], 0, 100) / 100;
         double reorder = parseDouble(args[2], 0, 100) / 100;
-        onLoop(() -> net.router().setSimulation(loss, reorder));
+        rn.simulation.set(loss, reorder);
         tell(sender, "§e测试开关：路由器丢掉 " + args[1] + "% 的包，推迟 " + args[2] + "% 的包 20–80 毫秒（造成乱序）");
     }
 
@@ -801,6 +678,10 @@ final class NetCommand extends CommandBase {
         int pps = parseInt(args[2], 1, 200_000);
         NetStack from = net.hostStack(NetworkServer.HOST_ROUTER);
         Ipv6Address to = net.resolverAddress();
+        if (from == null) {
+            tell(sender, "§c机房路由器还没起来");
+            return;
+        }
         EventLoop loop = net.loop();
         AtomicLong sent = new AtomicLong();
         AtomicLong replies = new AtomicLong();
@@ -872,40 +753,6 @@ final class NetCommand extends CommandBase {
         return e;
     }
 
-    /** 目标：IPv6 地址、坐标 x,y,z[,维度]、主机登记名、域名（经这台设备的递归解析器查） */
-    private CompletableFuture<Ipv6Address> resolveTarget(ICommandSender sender, TestNics.Emulated dev, String target, int dim) {
-        Ipv6Address literal = Ipv6Address.tryParse(target);
-        if (literal != null) {
-            return CompletableFuture.completedFuture(literal);
-        }
-        if (target.matches("-?\\d+,-?\\d+,-?\\d+(,-?\\d+)?")) {
-            String[] parts = target.split(",");
-            int d = parts.length > 3 ? Integer.parseInt(parts[3]) : dim;
-            Ipv6Address a = net.addressAt(d, Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
-            if (a == null) {
-                tell(sender, "§c坐标 " + target + "（维度 " + d + "）没有地址：维度没有全局 Wi-Fi，或坐标超出范围（x、z 在 −524288 到 524287，y 在 0 到 255）");
-            }
-            return CompletableFuture.completedFuture(a);
-        }
-        Ipv6Address host = net.hostAddress(target);
-        if (host != null) {
-            return CompletableFuture.completedFuture(host);
-        }
-        CompletableFuture<Ipv6Address> f = new CompletableFuture<>();
-        dev.dns.resolveAaaa(target).whenComplete((r, err) -> {
-            if (err != null) {
-                later(sender, "§c查 " + target + " 失败：" + message(err));
-                f.complete(null);
-            } else if (r.addresses.isEmpty()) {
-                later(sender, "§c" + target + " 没有地址（DNS 响应码 " + rcodeText(r.rcode) + "）");
-                f.complete(null);
-            } else {
-                f.complete(r.addresses.get(0));
-            }
-        });
-        return f;
-    }
-
     static String message(Throwable t) {
         Throwable c = t instanceof CompletionException && t.getCause() != null ? t.getCause() : t;
         if (c instanceof NetworkException) {
@@ -936,8 +783,8 @@ final class NetCommand extends CommandBase {
     @Override
     public List<String> getTabCompletions(MinecraftServer server, ICommandSender sender, String[] args, @Nullable BlockPos targetPos) {
         if (args.length == 1) {
-            return getListOfStringsMatchingLastWord(args, "table", "stats", "players", "device", "confirm", "location", "operator", "ping", "dns", "whois", "name",
-                    "get", "post", "ca", "ntp", "sim", "stress", "flush");
+            return getListOfStringsMatchingLastWord(args, "table", "routers", "stats", "players", "device", "confirm", "location", "operator", "ping", "trace",
+                    "dns", "whois", "name", "get", "post", "ca", "ntp", "sim", "stress", "flush");
         }
         if (args.length == 2 && args[0].equals("name")) {
             return getListOfStringsMatchingLastWord(args, "add", "txt", "remove");

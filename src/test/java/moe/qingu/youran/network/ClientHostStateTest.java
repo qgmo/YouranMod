@@ -29,6 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 客户端一个协议栈、多个网口（服主 11-27）：两个网口各自收发；绑网口的套接字只走那个网口，不绑的走玩家网口；
  * 网口去掉时绑着它的连接报错；包消息带网口号，已经去掉的网口号的包丢掉。服务器这一头换成一台假的主机（同一个手动事件循环）。
+ * <p>
+ * 0B 起玩家网口的地址不在 PORT_UP 里，要经玩家链路上的 RA 与 DHCPv6 拿：服务器这头多了一台假的玩家路由器（{@link FakePlayerRouter}，
+ * 发 RA、回 DHCPv6、回 NS，链路上的包不转发）。原来 {@code portsCarryTheirOwnAddressesAndConfig} 断言“玩家网口不许连 NTP”，
+ * 现在 NTP 也由 DHCPv6 下发，改成断言拿到的是 DHCPv6 给的那台。
  */
 class ClientHostStateTest {
     final ManualEventLoop loop = new ManualEventLoop();
@@ -43,11 +47,19 @@ class ClientHostStateTest {
     final NetStack server;
     final List<Integer> serverSawPorts = new ArrayList<>();
 
+    final Ipv6Address ntpAddr = Ipv6Address.parse("fd00:0:0:1::123");
+    /** 玩家链路的服务器那头 */
+    final FakePlayerRouter router;
+
     ClientHostStateTest() {
+        router = new FakePlayerRouter(loop, new Random(11), playerAddr, resolver, ntpAddr, m -> state.onMessage(m));
         server = new NetStack(loop, p -> loop.execute(() -> {
             Ipv6Address dst = Ipv6Packet.destinationOf(p);
-            int port = dst.equals(playerAddr) ? 0 : 1;
-            state.onMessage(NicMessages.packet(port, p));
+            if (dst.equals(playerAddr)) {
+                router.toClient(p);
+            } else {
+                state.onMessage(NicMessages.packet(1, p));
+            }
         }), new Random(9));
         server.addAddress(serverAddr);
         server.listen(null, 80, c -> c.setListener(new TcpConnection.Listener() {
@@ -74,8 +86,12 @@ class ClientHostStateTest {
             toServer.clear();
             for (byte[] m : batch) {
                 assertEquals(NicMessages.PACKET, m[0]);
-                serverSawPorts.add(m[1] & 0xFF);
                 byte[] raw = NicMessages.packetBody(m);
+                if (m[1] == 0 && router.fromClient(raw)) {
+                    // 链路上的报文（邻居发现、DHCPv6）：玩家路由器自己收下
+                    continue;
+                }
+                serverSawPorts.add(m[1] & 0xFF);
                 // 服务端的规则：0 号网口只收玩家地址发的，1 号只收电脑地址发的（同服务端网卡的源地址校验）
                 Ipv6Address src = Ipv6Packet.sourceOf(raw);
                 if ((m[1] == 0 && src.equals(playerAddr)) || (m[1] == 1 && src.equals(pcAddr))) {
@@ -86,9 +102,15 @@ class ClientHostStateTest {
     }
 
     void up() {
-        state.onMessage(NicMessages.portUp(0, NicMessages.KIND_PLAYER, playerAddr, resolver, null));
+        state.onMessage(NicMessages.portUp(0, NicMessages.KIND_PLAYER, Ipv6Address.UNSPECIFIED, null, null));
         state.onMessage(NicMessages.portUp(1, NicMessages.KIND_RELAY, pcAddr, resolver, Ipv6Address.parse("fd00:0:0:1::123")));
-        loop.drain();
+        // 玩家网口：链路本地地址的重复地址检测、RS → RA → DHCPv6 四步 → 拿到的地址的重复地址检测
+        for (int i = 0; i < 100 && (state.port(0).address() == null); i++) {
+            pump();
+            loop.advance(100);
+        }
+        assertEquals(playerAddr, state.port(0).address(), "玩家网口用 DHCPv6 拿到了地址");
+        serverSawPorts.clear();
     }
 
     static <T> T get(CompletableFuture<T> f) throws Exception {
@@ -105,7 +127,8 @@ class ClientHostStateTest {
         assertEquals(ClientHost.Kind.RELAY, pc.kind());
         assertEquals(playerAddr, player.address());
         assertEquals(pcAddr, pc.address());
-        assertNull(player.ntpAddress(), "玩家网口不许连 NTP");
+        assertEquals(ntpAddr, player.ntpAddress(), "玩家网口的 NTP 由 DHCPv6 下发");
+        assertEquals(resolver, player.resolverAddress(), "DNS 也是");
         assertNotNull(pc.ntpAddress());
         assertTrue(player.stack() == pc.stack(), "一个协议栈");
         assertEquals(2, state.stack().interfaces().size());

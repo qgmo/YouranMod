@@ -3,6 +3,7 @@ package moe.qingu.youran.server.net.service;
 import moe.qingu.youran.api.network.Ipv6Address;
 import moe.qingu.youran.api.network.packet.DnsMessage;
 import moe.qingu.youran.api.network.packet.MalformedPacketException;
+import moe.qingu.youran.api.network.stack.DnsTcp;
 import moe.qingu.youran.api.network.stack.EventLoop;
 import moe.qingu.youran.api.network.stack.NetStack;
 import moe.qingu.youran.api.network.stack.UdpSocket;
@@ -16,12 +17,22 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 递归解析器（相当于现实里的 8.8.8.8）：设备只问它（UDP 53，设 RD），它从根开始问：根 → 顶级域 → 权威服务器，
+ * 递归解析器（相当于现实里的 8.8.8.8）：设备只问它（UDP 53 与 TCP 53，设 RD），它从根开始问：根 → 顶级域 → 权威服务器，
  * 跟着委派（用粘连地址；没有粘连地址时先去解析 NS 的名字）、展开 CNAME，带缓存（按 TTL，否定回答按 SOA 的 minimum）。
  * 以后接公网时，转发也在这里做。全部在网络线程上，异步。
+ * <p>
+ * 照标准做（服主 11-27）：
+ * <ul>
+ * <li>TCP 53（RFC 7766，{@link DnsTcp}）：两字节长度前缀，一条连接可以连续问；TCP 上的回答不截断。</li>
+ * <li>EDNS(0)（RFC 6891）：设备的查询带 OPT 时回答也带；UDP 回答超过上限（没带 EDNS 时 512，带了时按它说的、最多 1232）时截断、置 TC。
+ * 往外问时也带 OPT（载荷 1232）。</li>
+ * <li>往外问的应答置了 TC 时不用、不缓存，改用 TCP 重问同一台服务器。</li>
+ * <li>往外问时每个查询开一个新的 UDP 套接字，源端口随机（RFC 5452），标识符也随机；只认从那台服务器 53 口、发到这个端口、标识符与问题都对得上的应答。</li>
+ * </ul>
  */
 public final class RecursiveResolver implements UdpSocket.Handler {
     static final long QUERY_TIMEOUT_MS = 1500;
+    static final long TCP_TIMEOUT_MS = 5000;
     static final int TRIES_PER_SERVER = 2;
     static final int MAX_REFERRALS = 16;
     static final int MAX_DEPTH = 8;
@@ -35,30 +46,34 @@ public final class RecursiveResolver implements UdpSocket.Handler {
     /** 区 → 它的权威服务器地址 */
     private final Map<String, ServerSet> zoneServers = new HashMap<>();
     private final Map<String, CompletableFuture<Answer>> inFlight = new HashMap<>();
-    private final Map<Integer, Pending> pendingQueries = new HashMap<>();
-    private final java.util.Random random = new java.security.SecureRandom();
+    /** 往外问、还没回来的（统计与上限用） */
+    private int pendingQueries;
+    private final java.util.Random random;
     private UdpSocket socket;
-    private UdpSocket upstream;
 
     // 统计
     public long queries;
     public long cacheHits;
+    /** 往外问时收到截断、改用 TCP 的次数 */
+    public long tcpRetries;
+    /** 测试用：往外问用过的源端口（最近的 64 个） */
+    final java.util.ArrayDeque<Integer> recentPorts = new java.util.ArrayDeque<>();
 
     public RecursiveResolver(NetStack stack, List<Ipv6Address> rootServers) {
+        this(stack, rootServers, new java.security.SecureRandom());
+    }
+
+    /** {@code random} 给标识符用（源端口由协议栈的随机数分）；单元测试用固定种子 */
+    public RecursiveResolver(NetStack stack, List<Ipv6Address> rootServers, java.util.Random random) {
         this.stack = stack;
         this.loop = stack.loop();
         this.rootServers = Collections.unmodifiableList(new ArrayList<>(rootServers));
+        this.random = random;
     }
 
     public void start() {
         stack.openUdp(null, DnsMessage.PORT, this).thenAccept(s -> socket = s);
-        // 往外问用一个临时端口（标识符随机，校验来源地址、端口、标识符与问题）
-        stack.openUdp(null, 0, new UdpSocket.Handler() {
-            @Override
-            public void onDatagram(UdpSocket s, Ipv6Address from, int fromPort, Ipv6Address to, byte[] data) {
-                onUpstreamReply(from, fromPort, data);
-            }
-        }).thenAccept(s -> upstream = s);
+        DnsTcp.serve(stack, this::onTcpQuery);
     }
 
     /** 解析结果 */
@@ -105,17 +120,44 @@ public final class RecursiveResolver implements UdpSocket.Handler {
         if (q.response) {
             return;
         }
+        int limit = DnsMessage.udpLimitFor(q);
+        answer(q).thenAccept(r -> s.send(to, from, fromPort, r.encodeForUdp(limit)));
+    }
+
+    /** TCP 53 上的一个查询：回答不截断 */
+    private CompletableFuture<byte[]> onTcpQuery(byte[] data) {
+        DnsMessage q;
+        try {
+            q = DnsMessage.parse(data);
+        } catch (MalformedPacketException e) {
+            return CompletableFuture.completedFuture(null);
+        }
+        if (q.response) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return answer(q).thenApply(DnsMessage::encode);
+    }
+
+    /** 回答设备的一个查询（带不带 OPT 照查询） */
+    private CompletableFuture<DnsMessage> answer(DnsMessage q) {
         queries++;
         List<DnsMessage.Record> none = Collections.emptyList();
+        if (q.ednsMalformed) {
+            return CompletableFuture.completedFuture(DnsMessage.reply(q, false, true, DnsMessage.RCODE_FORMERR, none, none, none));
+        }
+        if (q.edns != null && q.edns.version != 0) {
+            return CompletableFuture.completedFuture(DnsMessage.reply(q, false, true, DnsMessage.RCODE_OK, none, none, none)
+                    .withEdns(DnsMessage.Edns.standard()).withRcode(DnsMessage.RCODE_BADVERS));
+        }
+        DnsMessage.Edns edns = q.edns == null ? null : DnsMessage.Edns.standard();
         if (q.opcode != 0) {
-            reply(s, to, from, fromPort, DnsMessage.reply(q, false, true, DnsMessage.RCODE_NOTIMP, none, none, none));
-            return;
+            return CompletableFuture.completedFuture(DnsMessage.reply(q, false, true, DnsMessage.RCODE_NOTIMP, none, none, none).withEdns(edns));
         }
         if (q.questions.size() != 1 || q.question().qclass != DnsMessage.CLASS_IN) {
-            reply(s, to, from, fromPort, DnsMessage.reply(q, false, true, DnsMessage.RCODE_FORMERR, none, none, none));
-            return;
+            return CompletableFuture.completedFuture(DnsMessage.reply(q, false, true, DnsMessage.RCODE_FORMERR, none, none, none).withEdns(edns));
         }
         DnsMessage.Question question = q.question();
+        CompletableFuture<DnsMessage> out = new CompletableFuture<>();
         resolve(DnsMessage.canonical(question.name), question.type, 0).whenComplete((a, err) -> {
             DnsMessage r;
             if (err != null || a == null) {
@@ -123,12 +165,9 @@ public final class RecursiveResolver implements UdpSocket.Handler {
             } else {
                 r = DnsMessage.reply(q, false, true, a.rcode, a.records, none, none);
             }
-            reply(s, to, from, fromPort, r);
+            out.complete(r.withEdns(edns));
         });
-    }
-
-    private static void reply(UdpSocket s, Ipv6Address src, Ipv6Address dst, int port, DnsMessage m) {
-        s.send(src, dst, port, m.encodeForUdp());
+        return out;
     }
 
     // ---- 解析 ----
@@ -382,48 +421,24 @@ public final class RecursiveResolver implements UdpSocket.Handler {
         return cache.size();
     }
 
-    // ---- 往外问 ----
-
-    private final class Pending {
-        final int id;
-        final Ipv6Address server;
-        final String name;
-        final int type;
-        final CompletableFuture<DnsMessage> future;
-        EventLoop.Timer timer;
-
-        Pending(int id, Ipv6Address server, String name, int type, CompletableFuture<DnsMessage> future) {
-            this.id = id;
-            this.server = server;
-            this.name = name;
-            this.type = type;
-            this.future = future;
-        }
+    /** 测试用：这个问题的回答在不在缓存里（没过期的） */
+    boolean isCached(String name, int type) {
+        CacheEntry c = cache.get(type + " " + DnsMessage.canonical(name));
+        return c != null && c.expires > loop.nowMillis();
     }
+
+    // ---- 往外问 ----
 
     /** 依次问 {@code servers}，每台问 {@value #TRIES_PER_SERVER} 次；都没回应时 future 以 null 结束 */
     private CompletableFuture<DnsMessage> ask(List<Ipv6Address> servers, int index, int attempt, String name, int type) {
         if (index >= servers.size()) {
             return CompletableFuture.completedFuture(null);
         }
-        if (upstream == null || pendingQueries.size() >= MAX_IN_FLIGHT) {
+        if (pendingQueries >= MAX_IN_FLIGHT) {
             return CompletableFuture.completedFuture(null);
         }
-        CompletableFuture<DnsMessage> f = new CompletableFuture<>();
-        int id;
-        do {
-            id = random.nextInt(0x10000);
-        } while (pendingQueries.containsKey(id));
         Ipv6Address server = servers.get(index);
-        Pending p = new Pending(id, server, name, type, f);
-        pendingQueries.put(id, p);
-        p.timer = loop.schedule(() -> {
-            if (pendingQueries.remove(p.id) == p) {
-                f.complete(null);
-            }
-        }, QUERY_TIMEOUT_MS);
-        upstream.send(server, DnsMessage.PORT, DnsMessage.query(id, name, type, false).encode());
-        return f.thenCompose(m -> {
+        return askOne(server, name, type).thenCompose(m -> {
             if (m != null) {
                 return CompletableFuture.completedFuture(m);
             }
@@ -431,21 +446,80 @@ public final class RecursiveResolver implements UdpSocket.Handler {
         });
     }
 
-    private void onUpstreamReply(Ipv6Address from, int fromPort, byte[] data) {
-        DnsMessage m;
-        try {
-            m = DnsMessage.parse(data);
-        } catch (MalformedPacketException e) {
-            return;
-        }
-        Pending p = pendingQueries.get(m.id);
-        if (p == null || !m.response || !from.equals(p.server) || fromPort != DnsMessage.PORT || m.questions.size() != 1
-                || !DnsMessage.canonical(m.question().name).equals(p.name) || m.question().type != p.type) {
-            return;
-        }
-        pendingQueries.remove(m.id);
-        p.timer.cancel();
-        p.future.complete(m);
+    /**
+     * 问一台服务器一次：新开一个随机端口的 UDP 套接字，随机标识符，带 OPT；{@value #QUERY_TIMEOUT_MS} 毫秒没回应以 null 结束。
+     * 应答截断时改用 TCP 问同一台（截断的那份不用）
+     */
+    private CompletableFuture<DnsMessage> askOne(Ipv6Address server, String name, int type) {
+        CompletableFuture<DnsMessage> f = new CompletableFuture<>();
+        int id = random.nextInt(0x10000);
+        byte[] query = DnsMessage.query(id, name, type, false).withEdns(DnsMessage.Edns.standard()).encode();
+        pendingQueries++;
+        f.whenComplete((m, e) -> pendingQueries--);
+        stack.openUdp(null, 0, new UdpSocket.Handler() {
+            @Override
+            public void onDatagram(UdpSocket s, Ipv6Address from, int fromPort, Ipv6Address to, byte[] data) {
+                if (f.isDone() || !from.equals(server) || fromPort != DnsMessage.PORT) {
+                    return;
+                }
+                DnsMessage m;
+                try {
+                    m = DnsMessage.parse(data);
+                } catch (MalformedPacketException e) {
+                    return;
+                }
+                if (m.id != id || !m.response || m.questions.size() != 1 || !DnsMessage.canonical(m.question().name).equals(name)
+                        || m.question().type != type) {
+                    return;
+                }
+                s.close();
+                if (m.truncated) {
+                    tcpRetries++;
+                    askTcp(server, query, id, name, type, f);
+                    return;
+                }
+                f.complete(m);
+            }
+        }).whenComplete((s, err) -> {
+            if (err != null) {
+                f.complete(null);
+                return;
+            }
+            synchronized (recentPorts) {
+                recentPorts.add(s.port());
+                if (recentPorts.size() > 64) {
+                    recentPorts.poll();
+                }
+            }
+            s.send(server, DnsMessage.PORT, query);
+            loop.schedule(() -> {
+                if (!s.isClosed()) {
+                    s.close();
+                    f.complete(null);
+                }
+            }, QUERY_TIMEOUT_MS);
+        });
+        return f;
+    }
+
+    private void askTcp(Ipv6Address server, byte[] query, int id, String name, int type, CompletableFuture<DnsMessage> f) {
+        DnsTcp.query(stack, null, server, query, TCP_TIMEOUT_MS).whenComplete((data, err) -> {
+            if (err != null) {
+                f.complete(null);
+                return;
+            }
+            try {
+                DnsMessage m = DnsMessage.parse(data);
+                if (m.id == id && m.response && m.questions.size() == 1 && DnsMessage.canonical(m.question().name).equals(name)
+                        && m.question().type == type && !m.truncated) {
+                    f.complete(m);
+                    return;
+                }
+            } catch (MalformedPacketException e) {
+                // 下面按没回应算
+            }
+            f.complete(null);
+        });
     }
 
     /** 测试用 */
@@ -454,7 +528,7 @@ public final class RecursiveResolver implements UdpSocket.Handler {
         m.put("cache", cache.size());
         m.put("zones", zoneServers.size());
         m.put("inFlight", inFlight.size());
-        m.put("pending", pendingQueries.size());
+        m.put("pending", pendingQueries);
         return m;
     }
 

@@ -24,5 +24,8 @@ public final class YouranNetwork {
         // 光刻机界面（2.1.0 光刻）
         CHANNEL.registerMessage(LithoMessages.SyncHandler.class, LithoMessages.Sync.class, 6, Side.CLIENT);
         CHANNEL.registerMessage(LithoMessages.ActionHandler.class, LithoMessages.Action.class, 7, Side.SERVER);
+        // /ynet 在玩家客户端上跑的子命令（2.3.1.0 第 0B 期）
+        CHANNEL.registerMessage(ProbeMessages.RunHandler.class, ProbeMessages.Run.class, 8, Side.CLIENT);
+        CHANNEL.registerMessage(ProbeMessages.LineHandler.class, ProbeMessages.Line.class, 9, Side.SERVER);
     }
 }

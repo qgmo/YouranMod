@@ -187,7 +187,7 @@ class ServicesTest {
         link.loop.advance(100);
         NtpClient.Result r = done(f);
         assertEquals(1_794_355_200_000L, r.serverTimeMillis);
-        assertEquals(1, r.stratum);
+        assertEquals(3, r.stratum, "默认层级 3（0B 起由配置定；原来写死 1）");
         NtpServer s = new NtpServer(() -> 1000L);
         byte[] reply = s.handle(NtpPacket.clientRequest(42L).encode());
         NtpPacket p = NtpPacket.parse(reply);

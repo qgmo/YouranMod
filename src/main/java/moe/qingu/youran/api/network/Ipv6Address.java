@@ -6,6 +6,12 @@ package moe.qingu.youran.api.network;
  */
 public final class Ipv6Address implements Comparable<Ipv6Address> {
     public static final Ipv6Address UNSPECIFIED = new Ipv6Address(0, 0);
+    /** 链路上的所有节点（ff02::1，RFC 4291 第 2.7.1 节） */
+    public static final Ipv6Address ALL_NODES = new Ipv6Address(0xFF02_0000_0000_0000L, 1);
+    /** 链路上的所有路由器（ff02::2） */
+    public static final Ipv6Address ALL_ROUTERS = new Ipv6Address(0xFF02_0000_0000_0000L, 2);
+    /** 链路上的所有 DHCPv6 中继与服务器（ff02::1:2，RFC 8415 第 7.1 节） */
+    public static final Ipv6Address ALL_DHCP_SERVERS = new Ipv6Address(0xFF02_0000_0000_0000L, 0x1_0002L);
 
     private final long high;
     private final long low;
@@ -74,6 +80,36 @@ public final class Ipv6Address implements Comparable<Ipv6Address> {
     /** 是否组播地址（ff00::/8） */
     public boolean isMulticast() {
         return (high >>> 56) == 0xFF;
+    }
+
+    /** 组播地址的范围（RFC 4291 第 2.7 节的 scop：2 链路本地、5 站点……）；不是组播地址为 -1 */
+    public int multicastScope() {
+        return isMulticast() ? (int) (high >>> 48) & 0xF : -1;
+    }
+
+    /** 是否单播的链路本地地址（fe80::/10） */
+    public boolean isLinkLocal() {
+        return (high >>> 54) == (0xFE80L >>> 6);
+    }
+
+    /** 是否未指定地址 {@code ::} */
+    public boolean isUnspecified() {
+        return high == 0 && low == 0;
+    }
+
+    /** 只在一段链路上有意义的地址：链路本地单播，或范围不超过链路的组播（ff01::/16、ff02::/16） */
+    public boolean isLinkScoped() {
+        return isLinkLocal() || (isMulticast() && multicastScope() <= 2);
+    }
+
+    /** 这个地址的请求节点组播地址（ff02::1:ffXX:XXXX，取低 24 位；RFC 4291 第 2.7.1 节） */
+    public Ipv6Address solicitedNode() {
+        return new Ipv6Address(0xFF02_0000_0000_0000L, 0x0000_0001_FF00_0000L | (low & 0xFF_FFFFL));
+    }
+
+    /** 链路本地地址 fe80::/64 + 64 位接口标识 */
+    public static Ipv6Address linkLocal(long interfaceId) {
+        return new Ipv6Address(0xFE80_0000_0000_0000L, interfaceId);
     }
 
     /**

@@ -79,6 +79,20 @@ public final class ClientNetCommand extends CommandBase {
             }
             for (ClientHost.Port p : ports) {
                 say("youranmod.net.client.port", p.id(), p.name(), p.address(), p.resolverAddress(), p.ntpAddress());
+                NetStack.Interface i = p.iface();
+                if (i.doesNeighborDiscovery()) {
+                    // 玩家网口：链路本地地址、默认路由器、DHCPv6 租约（在客户端网络线程上读）
+                    i.stack().loop().execute(() -> {
+                        moe.qingu.youran.api.network.stack.Dhcpv6Client d = i.dhcp();
+                        moe.qingu.youran.api.network.stack.Dhcpv6Client.Lease l = d == null ? null : d.lease();
+                        say("youranmod.net.client.link", i.linkLocalAddress(), i.neighborDiscovery().defaultRouters(), i.neighborDiscovery().mtu());
+                        if (l == null) {
+                            say("youranmod.net.client.no_lease", d == null ? "-" : d.state().name());
+                        } else {
+                            say("youranmod.net.client.lease", l.address, seconds(l.validLifetime), seconds(l.t1), l.dnsServers, l.ntpServers, l.server);
+                        }
+                    });
+                }
             }
             return;
         }
@@ -94,6 +108,10 @@ public final class ClientNetCommand extends CommandBase {
             ClientHost.Port p = ClientHost.playerPort();
             if (stack == null || p == null) {
                 say("youranmod.net.client.no_default");
+                return;
+            }
+            if (p.address() == null || p.resolverAddress() == null) {
+                say("youranmod.net.client.not_configured");
                 return;
             }
             v = new Via(stack, null, new DnsResolver(stack, p.resolverAddress()), p.ntpAddress());
@@ -183,6 +201,10 @@ public final class ClientNetCommand extends CommandBase {
                 v.stack.loop().schedule(() -> ping(v, addr, i + 1, count), 1000);
             }
         });
+    }
+
+    private static String seconds(long s) {
+        return s == moe.qingu.youran.api.network.packet.Dhcpv6Message.INFINITY ? "∞" : String.valueOf(s);
     }
 
     private static String message(Throwable t) {

@@ -25,28 +25,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 玩家临时地址不是插着的网卡。
  */
 class IdentifyTest {
-    final ManualEventLoop loop = new ManualEventLoop();
-    final NetworkLayout layout = NetworkLayout.fromGlobalId(0x0102030405L);
-    final AddressBook book;
-    final NicTable nics;
-    final PlayerNics players;
-    final ClientRelays relays;
-
-    IdentifyTest() {
-        Map<Integer, AddressBook.Dim> dims = new LinkedHashMap<>();
-        dims.put(0, new AddressBook.Dim(0, 0, DefaultDimensionNetwork.INSTANCE));
-        Map<String, Long> dcs = new LinkedHashMap<>();
-        dcs.put("youranmod:main", 0L);
-        dcs.put("youranmod:players", NetworkLayout.PLAYERS_DATACENTER);
-        book = new AddressBook(layout, dims, dcs, Collections.<String, Ipv6Address>emptyMap());
-        RejectLog rejects = new RejectLog(10_000);
-        Router[] router = new Router[1];
-        nics = new NicTable(book::coordinateAddress, loop, rejects, p -> router[0].forward(p), 20, 20 * 1280, p -> {
-        });
-        router[0] = new Router(loop, book, nics, layout.hostAddress(0, 1));
-        players = new PlayerNics(loop, layout, router[0], rejects, layout.hostAddress(0, 0x53), new Random(1), 20, 20 * 1280, 20, 20 * 1280);
-        relays = new ClientRelays(loop, rejects, () -> null, () -> null);
-    }
+    final TestNetwork net = new TestNetwork(20);
+    final NetworkLayout layout = net.layout;
+    final NicTable nics = net.nics;
+    final PlayerNics players = net.enablePlayers(new Random(1), 20, 20);
+    final ClientRelays relays = new ClientRelays(net.loop, net.rejects, () -> null, () -> null);
 
     Ipv6Address plug(TestNic nic, int dim, int x, int y, int z) {
         NicTable.Port p = nics.plug(nic, dim, x, y, z);
@@ -102,22 +85,14 @@ class IdentifyTest {
 
     @Test
     void playerTemporaryAddressIsNotAPluggedNic() {
-        UUID eve = UUID.randomUUID();
-        Ipv6Address a = players.attach(eve, "Eve", new PlayerNics.Link() {
-            @Override
-            public void deliver(byte[] packet) {
-            }
-
-            @Override
-            public void control(byte[] message) {
-            }
-        });
-        loop.drain();
-        assertEquals(a, players.address(eve));
+        net.settle();
+        TestNetwork.Player eve = net.online("Eve");
+        Ipv6Address a = eve.address();
+        assertEquals(a, players.address(eve.id));
         assertTrue(layout.isPlayerAddress(a));
-        assertNull(nics.byAddress(a), "玩家临时地址在玩法段里，不是坐标层插着的网卡");
-        players.detach(eve);
-        loop.drain();
-        assertNull(players.address(eve), "下线以后收回");
+        assertNull(nics.byAddress(a), "玩家地址在玩法段里，不是坐标层插着的网卡");
+        players.detach(eve.id);
+        net.loop.drain();
+        assertNull(players.address(eve.id), "下线以后收回");
     }
 }

@@ -13,7 +13,8 @@ import moe.qingu.youran.api.network.packet.Ipv6Packet;
  *   0x03 PORT_DOWN  服→客  [网口号 1]                                                 去掉这个网口
  * </pre>
  * 网口号：玩家自己的网口固定为 0（{@link #PLAYER_PORT}）；接着的电脑等由服务器按顺序分 1–255，去掉以后过一阵才会再用同一个号。
- * 种类：{@link #KIND_PLAYER}、{@link #KIND_RELAY}。地址为全 0（{@code ::}）表示没有（如玩家网口不许连 NTP）。
+ * 种类：{@link #KIND_PLAYER}、{@link #KIND_RELAY}。地址为全 0（{@code ::}）表示没有。玩家自己的网口（服主 11-27）三个地址都是 {@code ::}：
+ * 那是一段点对点链路，客户端在上面做邻居发现、收 RA、用 DHCPv6 要地址、DNS 与 NTP；接着的网卡（坐标层）照旧由服务器给地址。
  * 收到已经去掉的（或从来没有的）网口号的包，两边都丢掉。
  */
 public final class NicMessages {

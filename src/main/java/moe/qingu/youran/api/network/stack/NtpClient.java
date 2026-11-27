@@ -20,12 +20,15 @@ public final class NtpClient {
         public final long offsetMillis;
         public final long roundTripMillis;
         public final int stratum;
+        /** 服务器报的参考标识（层级 2 以上时是它上游的地址或地址的散列，RFC 5905 第 7.3 节） */
+        public final long referenceId;
 
-        Result(long serverTimeMillis, long offsetMillis, long roundTripMillis, int stratum) {
+        Result(long serverTimeMillis, long offsetMillis, long roundTripMillis, int stratum, long referenceId) {
             this.serverTimeMillis = serverTimeMillis;
             this.offsetMillis = offsetMillis;
             this.roundTripMillis = roundTripMillis;
             this.stratum = stratum;
+            this.referenceId = referenceId;
         }
     }
 
@@ -55,7 +58,7 @@ public final class NtpClient {
             long t1 = NtpPacket.toUnixMillis(sent[0]);
             long t2 = NtpPacket.toUnixMillis(p.receiveTime);
             long t3 = NtpPacket.toUnixMillis(p.transmitTime);
-            f.complete(new Result(t3, ((t2 - t1) + (t3 - t4)) / 2, (t4 - t1) - (t3 - t2), p.stratum));
+            f.complete(new Result(t3, ((t2 - t1) + (t3 - t4)) / 2, (t4 - t1) - (t3 - t2), p.stratum, p.referenceId));
         };
         (via != null ? stack.openUdpVia(via, 0, handler) : stack.openUdp(null, 0, handler)).whenComplete((socket, err) -> {
             if (err != null) {

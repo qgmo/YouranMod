@@ -37,6 +37,15 @@ import java.util.function.Consumer;
  * <p>
  * 收包：外面把原始 IPv6 包交给 {@link #receive(byte[])}（不分网口）或 {@link Interface#receive(byte[])}。
  * 目的地址不是本机地址的包丢掉；坏包（长度、版本、校验和不对）丢掉。
+ * <p>
+ * <b>两种网口</b>：
+ * <ul>
+ * <li>静态的（{@link #addInterface}）：地址由外面给、马上能用，包直接交给出口，没有邻居发现（坐标层的网卡：家具电脑、测试网卡；单元测试里的直连）。</li>
+ * <li>做邻居发现的（{@link #addNdInterface}，服主 11-27：机房与玩家链路照真实网络做）：有链路本地地址；每个地址先做重复地址检测，过了才能用
+ * （{@link Interface#whenReady}）；发 RS、收 RA（默认路由器、在链路上的前缀、MTU、RDNSS）；发包前按 RA 选下一跳、用邻居发现解析
+ * （见 {@link NeighborDiscovery}）；RA 置了 M 位时自己开 DHCPv6 客户端（{@link Dhcpv6Client}）要地址、DNS 与 NTP。
+ * 没有路由、解析失败的包按收到 ICMPv6“目标不可达”处理（交给发它的套接字）。</li>
+ * </ul>
  */
 public final class NetStack {
     static final Logger LOG = LogManager.getLogger("YouranMod");
@@ -108,13 +117,20 @@ public final class NetStack {
         });
     }
 
-    /** 默认网口的第一个地址（主动发包时不绑网口、不指定源地址就用它）；没有时为 null。只在事件循环线程上调用 */
+    /** 默认网口的第一个能用的地址（主动发包时不绑网口、不指定源地址就用它）；没有时为 null。只在事件循环线程上调用 */
     public Ipv6Address primaryAddress() {
         return defaultInterface == null || defaultInterface.removed ? null : defaultInterface.first();
     }
 
+    /** 是不是本机地址（做邻居发现的网口上暂定的也算） */
     public boolean hasAddress(Ipv6Address a) {
         return owners.containsKey(a);
+    }
+
+    /** 本机地址而且能用（过了重复地址检测） */
+    boolean usable(Ipv6Address a) {
+        Interface i = owners.get(a);
+        return i != null && i.usable(a);
     }
 
     // ---- 网口 ----
@@ -128,18 +144,67 @@ public final class NetStack {
         private final int id;
         private final String name;
         private final PacketOutput output;
+        /** 做邻居发现的网口上不为 null */
+        final NeighborDiscovery nd;
+        private final Ipv6Address linkLocal;
         /** 只在事件循环线程上改 */
         private final Set<Ipv6Address> addresses = new LinkedHashSet<>();
         private volatile Ipv6Address first;
         private volatile Ipv6Address dnsServer;
         private volatile Ipv6Address ntpServer;
         volatile boolean removed;
+        private final Map<Ipv6Address, CompletableFuture<Boolean>> ready = new HashMap<>();
+        private final CompletableFuture<Ipv6Address> routerReady = new CompletableFuture<>();
+        private final List<Listener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private Dhcpv6Client dhcp;
+
+        /** 网口上的事（事件循环线程上） */
+        public interface Listener {
+            /** 地址、DNS、NTP 变了（地址过了重复地址检测、DHCPv6 拿到了配置、地址去掉了） */
+            default void onConfigured(Interface iface) {
+            }
+
+            /** 地址重复，没有启用 */
+            default void onDuplicate(Interface iface, Ipv6Address address) {
+            }
+        }
 
         Interface(NetStack stack, int id, String name, PacketOutput output) {
             this.stack = stack;
             this.id = id;
             this.name = name;
             this.output = output;
+            this.nd = null;
+            this.linkLocal = null;
+        }
+
+        Interface(NetStack stack, int id, String name, NeighborDiscovery.Link link, long ownLinkAddress, Ipv6Address linkLocal) {
+            this.stack = stack;
+            this.id = id;
+            this.name = name;
+            this.output = null;
+            this.linkLocal = linkLocal;
+            this.nd = new NeighborDiscovery(stack.loop, stack.random, link, ownLinkAddress, false, new NeighborDiscovery.Events() {
+                @Override
+                public void addressReady(Ipv6Address address) {
+                    Interface.this.addressReady(address);
+                }
+
+                @Override
+                public void addressDuplicated(Ipv6Address address) {
+                    Interface.this.addressDuplicated(address);
+                }
+
+                @Override
+                public void routerAdvertisement(Ipv6Address from, moe.qingu.youran.api.network.packet.NdpMessage ra) {
+                    Interface.this.routerAdvertisement(from, ra);
+                }
+
+                @Override
+                public void resolutionFailed(byte[] packet) {
+                    stack.localError(packet, Icmpv6Message.UNREACH_ADDRESS);
+                }
+            });
         }
 
         public NetStack stack() {
@@ -154,7 +219,7 @@ public final class NetStack {
             return name;
         }
 
-        /** 第一个地址（这个网口发包用的源地址）；没有为 null。任意线程 */
+        /** 第一个能用的全局地址（这个网口发包用的源地址）；没有为 null。任意线程 */
         public Ipv6Address address() {
             return first;
         }
@@ -184,6 +249,35 @@ public final class NetStack {
             return removed;
         }
 
+        /** 做不做邻居发现（见 {@link NetStack#addNdInterface}） */
+        public boolean doesNeighborDiscovery() {
+            return nd != null;
+        }
+
+        /** 邻居发现（只在事件循环线程上用）；静态网口为 null */
+        public NeighborDiscovery neighborDiscovery() {
+            return nd;
+        }
+
+        /** 链路本地地址；静态网口为 null */
+        public Ipv6Address linkLocalAddress() {
+            return linkLocal;
+        }
+
+        /** DHCPv6 客户端（RA 置了 M 位才有）；没有为 null。只在事件循环线程上调用 */
+        public Dhcpv6Client dhcp() {
+            return dhcp;
+        }
+
+        /** 加监听（任意线程） */
+        public void addListener(Listener l) {
+            listeners.add(l);
+        }
+
+        public void removeListener(Listener l) {
+            listeners.remove(l);
+        }
+
         /** 加一个地址。任意线程 */
         public void addAddress(Ipv6Address a) {
             stack.run(() -> addInLoop(a));
@@ -199,12 +293,53 @@ public final class NetStack {
             stack.run(() -> stack.receiveInLoop(this, raw));
         }
 
+        /**
+         * 地址 {@code a} 能用时以 true 结束、重复（没启用）时以 false 结束；静态网口上加了就是 true。
+         * 要在 {@link #addAddress} 之后调用（排在它后面）。任意线程
+         */
+        public CompletableFuture<Boolean> whenReady(Ipv6Address a) {
+            CompletableFuture<Boolean> f = new CompletableFuture<>();
+            stack.run(() -> {
+                if (usable(a)) {
+                    f.complete(true);
+                } else if (removed || !addresses.contains(a)) {
+                    f.complete(false);
+                } else {
+                    ready.computeIfAbsent(a, k -> new CompletableFuture<>()).whenComplete((v, e) -> f.complete(v != null && v));
+                }
+            });
+            return f;
+        }
+
+        /** 收到第一个带默认路由器的 RA 时以那台路由器的链路本地地址结束（静态网口上永远不结束） */
+        public CompletableFuture<Ipv6Address> whenRouterKnown() {
+            return routerReady;
+        }
+
         boolean has(Ipv6Address a) {
             return addresses.contains(a);
         }
 
+        boolean usable(Ipv6Address a) {
+            return addresses.contains(a) && (nd == null || nd.isUsable(a));
+        }
+
         Ipv6Address first() {
             return first;
+        }
+
+        /** 链路本地的源地址（能用时） */
+        Ipv6Address linkLocalSource() {
+            return nd != null && linkLocal != null && nd.isUsable(linkLocal) ? linkLocal : null;
+        }
+
+        void start() {
+            if (nd != null && linkLocal != null) {
+                addresses.add(linkLocal);
+                stack.owners.put(linkLocal, this);
+                nd.addAddress(linkLocal);
+                nd.solicitRouters();
+            }
         }
 
         void addInLoop(Ipv6Address a) {
@@ -213,7 +348,9 @@ public final class NetStack {
             }
             addresses.add(a);
             stack.owners.put(a, this);
-            if (first == null) {
+            if (nd != null) {
+                nd.addAddress(a);
+            } else if (first == null) {
                 first = a;
             }
         }
@@ -221,8 +358,118 @@ public final class NetStack {
         void removeInLoop(Ipv6Address a) {
             if (addresses.remove(a)) {
                 stack.owners.remove(a, this);
-                first = addresses.isEmpty() ? null : addresses.iterator().next();
+                if (nd != null) {
+                    nd.removeAddress(a);
+                }
+                recomputeFirst();
+                CompletableFuture<Boolean> f = ready.remove(a);
+                if (f != null) {
+                    f.complete(false);
+                }
+                fireConfigured();
             }
+        }
+
+        private void recomputeFirst() {
+            Ipv6Address f = null;
+            for (Ipv6Address x : addresses) {
+                if (!x.isLinkLocal() && (nd == null || nd.isUsable(x))) {
+                    f = x;
+                    break;
+                }
+            }
+            first = f;
+        }
+
+        private void addressReady(Ipv6Address a) {
+            recomputeFirst();
+            CompletableFuture<Boolean> f = ready.remove(a);
+            if (f != null) {
+                f.complete(true);
+            }
+            if (dhcp != null) {
+                if (a.equals(linkLocal)) {
+                    // RA 比链路本地地址先到：地址能用了再开 DHCPv6
+                    dhcp.start();
+                }
+                dhcp.addressReady(a);
+            }
+            fireConfigured();
+        }
+
+        private void addressDuplicated(Ipv6Address a) {
+            addresses.remove(a);
+            stack.owners.remove(a, this);
+            recomputeFirst();
+            NetStack.LOG.warn("游戏内网络：网口 {} 的地址 {} 和链路上别人的重复（重复地址检测），没有启用", name, a);
+            CompletableFuture<Boolean> f = ready.remove(a);
+            if (f != null) {
+                f.complete(false);
+            }
+            if (dhcp != null) {
+                dhcp.addressDuplicated(a);
+            }
+            for (Listener l : listeners) {
+                try {
+                    l.onDuplicate(this, a);
+                } catch (Throwable t) {
+                    NetStack.LOG.error("网口回调出错", t);
+                }
+            }
+        }
+
+        private void routerAdvertisement(Ipv6Address from, moe.qingu.youran.api.network.packet.NdpMessage ra) {
+            if (ra.routerLifetime > 0) {
+                routerReady.complete(from);
+            }
+            // RDNSS（RFC 8106）：DHCPv6 没给 DNS 时用它
+            if ((dhcp == null || dhcp.lease() == null) && !nd.dnsServers().isEmpty() && dnsServer == null) {
+                dnsServer = nd.dnsServers().get(0);
+                fireConfigured();
+            }
+            if (ra.managed && dhcp == null && linkLocal != null) {
+                dhcp = new Dhcpv6Client(stack, this);
+                dhcp.start();
+            }
+        }
+
+        void fireConfigured() {
+            for (Listener l : listeners) {
+                try {
+                    l.onConfigured(this);
+                } catch (Throwable t) {
+                    NetStack.LOG.error("网口回调出错", t);
+                }
+            }
+        }
+
+        /** 网口去掉时：邻居发现与 DHCPv6 停 */
+        void shutdown() {
+            if (dhcp != null) {
+                dhcp.stop();
+            }
+            if (nd != null) {
+                nd.close();
+            }
+            for (CompletableFuture<Boolean> f : ready.values()) {
+                f.complete(false);
+            }
+            ready.clear();
+        }
+
+        /** 发一个包（源地址是这个网口的） */
+        void transmit(Ipv6Packet p) {
+            if (nd == null) {
+                output.send(p.encode());
+                return;
+            }
+            byte[] raw = p.encode();
+            Ipv6Address next = nd.nextHop(p.destination);
+            if (next == null) {
+                stack.localError(raw, Icmpv6Message.UNREACH_NO_ROUTE);
+                return;
+            }
+            nd.send(raw, next);
         }
 
         @Override
@@ -232,15 +479,28 @@ public final class NetStack {
         }
     }
 
-    /** 加一个网口（编号由调用方定，同一个协议栈里不要重复）。任意线程；返回的网口马上能用（对它的操作排在加网口之后） */
+    /** 加一个静态网口（编号由调用方定，同一个协议栈里不要重复）。任意线程；返回的网口马上能用（对它的操作排在加网口之后） */
     public Interface addInterface(int id, String name, PacketOutput output) {
-        Interface i = new Interface(this, id, name, output);
+        return add(new Interface(this, id, name, output));
+    }
+
+    /**
+     * 加一个做邻居发现的网口（主机）：链路本地地址 {@code linkLocal} 先做重复地址检测，过了以后请求路由器；之后加的地址也都先检测。
+     * {@code ownLinkAddress} 是这个网口的链路层地址（点对点链路为 {@link moe.qingu.youran.api.network.packet.NdpMessage#NO_LINK_ADDRESS}）。
+     * 收到的帧交给 {@link Interface#receive}。任意线程
+     */
+    public Interface addNdInterface(int id, String name, NeighborDiscovery.Link link, long ownLinkAddress, Ipv6Address linkLocal) {
+        return add(new Interface(this, id, name, link, ownLinkAddress, linkLocal));
+    }
+
+    private Interface add(Interface i) {
         run(() -> {
             if (closed) {
                 i.removed = true;
                 return;
             }
             interfaces.add(i);
+            i.start();
         });
         return i;
     }
@@ -259,6 +519,7 @@ public final class NetStack {
             for (Ipv6Address a : gone) {
                 i.removeInLoop(a);
             }
+            i.shutdown();
             if (defaultInterface == i) {
                 defaultInterface = null;
             }
@@ -307,12 +568,12 @@ public final class NetStack {
                 return null;
             }
             if (source != null) {
-                return via.has(source) ? source : null;
+                return via.usable(source) ? source : null;
             }
             return via.first();
         }
         if (source != null) {
-            return owners.containsKey(source) ? source : null;
+            return usable(source) ? source : null;
         }
         return primaryAddress();
     }
@@ -325,6 +586,9 @@ public final class NetStack {
                 return;
             }
             closed = true;
+            for (Interface i : interfaces) {
+                i.shutdown();
+            }
             for (TcpConnection c : new ArrayList<>(tcpConnections.values())) {
                 c.destroy(new NetworkException(NetworkException.Reason.CLOSED, "协议栈已关"));
             }
@@ -386,25 +650,55 @@ public final class NetStack {
             dropped++;
             return;
         }
-        Interface owner = owners.get(p.destination);
-        if (owner == null || (via != null && owner != via)) {
-            dropped++;
-            return;
+        if (via != null && via.nd != null) {
+            // 做邻居发现的网口：能用的单播地址、加入了的组播组；邻居发现报文交给它
+            if (!via.nd.accepts(p.destination) || (!p.destination.isMulticast() && owners.get(p.destination) != via)) {
+                dropped++;
+                return;
+            }
+            if (p.nextHeader == Ipv6Packet.PROTO_ICMPV6) {
+                try {
+                    Icmpv6Message m = Icmpv6Message.parse(p);
+                    if (via.nd.handle(p, m)) {
+                        return;
+                    }
+                    onIcmp(via, p, m);
+                } catch (MalformedPacketException e) {
+                    dropped++;
+                }
+                return;
+            }
+        } else {
+            Interface owner = owners.get(p.destination);
+            if (owner == null || (via != null && owner != via)) {
+                dropped++;
+                return;
+            }
+            if (owner.nd != null && !owner.nd.isUsable(p.destination)) {
+                dropped++;
+                return;
+            }
         }
         try {
             switch (p.nextHeader) {
                 case Ipv6Packet.PROTO_ICMPV6:
-                    onIcmp(p, Icmpv6Message.parse(p));
+                    onIcmp(via, p, Icmpv6Message.parse(p));
                     break;
                 case Ipv6Packet.PROTO_UDP:
                     onUdp(p, UdpDatagram.parse(p), raw);
                     break;
                 case Ipv6Packet.PROTO_TCP:
+                    if (p.destination.isMulticast()) {
+                        dropped++;
+                        break;
+                    }
                     onTcp(p, TcpSegment.parse(p));
                     break;
                 default:
-                    // 不认识的下一首部（含扩展首部）：参数问题，指针指向下一首部字段（RFC 4443 第 3.4 节）
-                    sendError(p.destination, raw, Icmpv6Message.PARAMETER_PROBLEM, Icmpv6Message.PARAM_UNKNOWN_NEXT_HEADER, 6);
+                    // 不认识的下一首部（含扩展首部）：参数问题，指针指向下一首部字段（RFC 4443 第 3.4 节）；发给组播的不回
+                    if (!p.destination.isMulticast()) {
+                        sendError(p.destination, raw, Icmpv6Message.PARAMETER_PROBLEM, Icmpv6Message.PARAM_UNKNOWN_NEXT_HEADER, 6);
+                    }
                     break;
             }
         } catch (MalformedPacketException e) {
@@ -412,17 +706,37 @@ public final class NetStack {
         }
     }
 
-    /** 发一个包：从源地址所在的网口出去（源地址不是本机地址、网口已去掉时丢掉）。只在事件循环线程上调用 */
+    /**
+     * 发一个包：从源地址所在的网口出去（源地址不是本机能用的地址、网口已去掉时丢掉）。做邻居发现的网口上先选下一跳、解析，
+     * 没有路由、解析失败时按收到“目标不可达”处理。只在事件循环线程上调用
+     */
     void send(Ipv6Packet p) {
         if (closed) {
             return;
         }
         Interface i = owners.get(p.source);
-        if (i == null || i.removed) {
+        if (i == null || i.removed || !i.usable(p.source)) {
             dropped++;
             return;
         }
-        i.output.send(p.encode());
+        i.transmit(p);
+    }
+
+    /**
+     * 本机发不出去的包（没有路由、邻居解析失败）：当成本机自己回了一个 ICMPv6“目标不可达”，交给发它的套接字（同真系统里
+     * 发送失败时的报错）。只在事件循环线程上调用
+     */
+    void localError(byte[] packet, int code) {
+        if (closed || packet.length < Ipv6Packet.HEADER) {
+            return;
+        }
+        dropped++;
+        if (!Icmpv6Message.mayReplyWithError(packet)) {
+            return;
+        }
+        Ipv6Address src = Ipv6Packet.sourceOf(packet);
+        Icmpv6Message m = Icmpv6Message.error(Icmpv6Message.DEST_UNREACHABLE, code, 0, packet);
+        onIcmpError(new Ipv6Packet(Ipv6Packet.PROTO_ICMPV6, src, src, new byte[0]), m);
     }
 
     void sendError(Ipv6Address from, byte[] invoking, int type, int code, long word) {
@@ -435,11 +749,20 @@ public final class NetStack {
 
     // ---- ICMPv6 ----
 
-    private void onIcmp(Ipv6Packet p, Icmpv6Message m) {
+    private void onIcmp(Interface via, Ipv6Packet p, Icmpv6Message m) {
         switch (m.type) {
-            case Icmpv6Message.ECHO_REQUEST:
-                send(new Icmpv6Message(Icmpv6Message.ECHO_REPLY, 0, m.body).toPacket(p.destination, p.source));
+            case Icmpv6Message.ECHO_REQUEST: {
+                // 发给组播地址的回显：用收到它的网口的单播地址回（RFC 4443 第 4.2 节）
+                Ipv6Address src = p.destination;
+                if (src.isMulticast()) {
+                    src = via == null ? null : p.source.isLinkLocal() ? via.linkLocalSource() : via.first();
+                    if (src == null) {
+                        break;
+                    }
+                }
+                send(new Icmpv6Message(Icmpv6Message.ECHO_REPLY, 0, m.body).toPacket(src, p.source));
                 break;
+            }
             case Icmpv6Message.ECHO_REPLY: {
                 int key = (m.echoIdentifier() << 16) | m.echoSequence();
                 PendingPing pp = pings.get(key);
@@ -516,7 +839,20 @@ public final class NetStack {
         return ping(via, null, target, dataLength, timeoutMillis);
     }
 
+    /**
+     * 同上，指定跳数（traceroute 那样逐跳探测：跳数用完的那台路由器回“超时”，{@link PingResult#from} 是它的地址）。
+     * {@code via} 为 null 时按源地址选择规则
+     */
+    public CompletableFuture<PingResult> ping(Interface via, Ipv6Address target, int dataLength, long timeoutMillis, int hopLimit) {
+        return ping(via, null, target, dataLength, timeoutMillis, hopLimit);
+    }
+
     private CompletableFuture<PingResult> ping(Interface via, Ipv6Address source, Ipv6Address target, int dataLength, long timeoutMillis) {
+        return ping(via, source, target, dataLength, timeoutMillis, Ipv6Packet.DEFAULT_HOP_LIMIT);
+    }
+
+    private CompletableFuture<PingResult> ping(Interface via, Ipv6Address source, Ipv6Address target, int dataLength, long timeoutMillis,
+                                               int hopLimit) {
         CompletableFuture<PingResult> f = new CompletableFuture<>();
         run(() -> {
             Ipv6Address src = pickSource(via, source);
@@ -541,7 +877,8 @@ public final class NetStack {
                 pings.put(key, pp);
             }
             pp.timer = loop.schedule(() -> pp.finish(new PingResult(PingResult.Status.TIMEOUT, null, 0, timeoutMillis, 0)), timeoutMillis);
-            send(Icmpv6Message.echo(Icmpv6Message.ECHO_REQUEST, pingIdentifier, seq, data).toPacket(src, target));
+            Ipv6Packet echo = Icmpv6Message.echo(Icmpv6Message.ECHO_REQUEST, pingIdentifier, seq, data).toPacket(src, target);
+            send(hopLimit == Ipv6Packet.DEFAULT_HOP_LIMIT ? echo : echo.withHopLimit(Math.max(1, Math.min(255, hopLimit))));
         });
         return f;
     }

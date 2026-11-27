@@ -74,6 +74,9 @@ public interface NetworkBackend {
     /** 主线程：客户端对确认框的回应 */
     void onConfirmAnswer(EntityPlayerMP player, long id, boolean approve);
 
+    /** 主线程：玩家客户端回来的 {@code /ynet} 结果的一行（{@code net.ProbeMessages.Line}） */
+    void onProbeLine(EntityPlayerMP player, long id, String text, boolean done);
+
     /** 给网卡的地址签位置（先问 {@code player}）。任意线程；future 在主线程上完成 */
     CompletableFuture<LocationResult> signLocation(NetworkInterface nic, GameProfile player, int dimension, int x, int y, int z, String site, String nonce);
 

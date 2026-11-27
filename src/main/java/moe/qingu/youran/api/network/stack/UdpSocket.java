@@ -57,6 +57,11 @@ public final class UdpSocket {
         stack.run(this::closeQuietly);
     }
 
+    /** 关掉了没有（事件循环线程上调用） */
+    public boolean isClosed() {
+        return closed;
+    }
+
     void closeQuietly() {
         if (!closed) {
             closed = true;

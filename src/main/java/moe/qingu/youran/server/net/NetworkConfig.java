@@ -36,8 +36,8 @@ public final class NetworkConfig {
     @Config.RequiresMcRestart
     public static int hostMaxTcpConnections = 256;
 
-    @Config.Comment({"玩家临时地址：玩家上线时在玩法 /64 的最后一个 /96 里分一个随机地址，只能连递归解析器的 DNS 和按用途放行的主机（TCP 80 / 443），",
-            "下线收回。用途如家具电脑的旁观者自己下载页面里的图片。默认 true。"})
+    @Config.Comment({"玩家地址：玩家上线时客户端用 DHCPv6 在玩法 /64 的最后一个 /96 里租一个随机地址，只能连递归解析器（DNS）、NTP 服务器",
+            "和按用途放行的主机（TCP 80 / 443），下线收回。用途如家具电脑的旁观者自己下载页面里的图片。能用 /ynet 的人不受这些限制。默认 true。"})
     @Config.RequiresMcRestart
     public static boolean playerAddresses = true;
 
@@ -60,6 +60,28 @@ public final class NetworkConfig {
     @Config.RangeInt(min = 1280)
     @Config.RequiresMcRestart
     public static int playerInboundBytesPerSecond = 393216;
+
+    @Config.Comment({"NTP 时间服务器报的层级（RFC 5905，2–15）。这台只是转手服务器操作系统的时钟：系统时钟一般跟公共 NTP 池的 2 层服务器同步，",
+            "转手一次是 3 层。默认 3。"})
+    @Config.RangeInt(min = 2, max = 15)
+    @Config.RequiresMcRestart
+    public static int ntpStratum = 3;
+
+    @Config.Comment({"NTP 时间服务器的上游（服务器操作系统同步时钟用的那台 NTP 服务器）：名字或地址。参考标识按 RFC 5905 由它算：",
+            "IPv4 地址是地址本身，IPv6 地址是地址 MD5 的前 4 字节；写名字时开服时在后台用操作系统的解析器查一次地址再算。",
+            "空着时参考标识为 0。默认空。"})
+    @Config.RequiresMcRestart
+    public static String ntpUpstream = "";
+
+    @Config.Comment({"NTP 时间服务器报的根延迟（到最上层时钟源的往返延迟，毫秒）。默认 30。"})
+    @Config.RangeInt(min = 0, max = 10000)
+    @Config.RequiresMcRestart
+    public static int ntpRootDelayMillis = 30;
+
+    @Config.Comment({"NTP 时间服务器报的根离差（相对最上层时钟源的最大误差，毫秒）。默认 50。"})
+    @Config.RangeInt(min = 0, max = 10000)
+    @Config.RequiresMcRestart
+    public static int ntpRootDispersionMillis = 50;
 
     @Config.Comment({"HTTPS：中间 CA 的证书文件（PEM，由 QinguMoe CA 签发；后面可以接上更上层的中间证书，不用放根证书）。",
             "路径相对服务器根目录，如 config/youranmod-tls/intermediate.crt。和 tlsCaKey 都填了才开 HTTPS（网站的 443 口），空着就只有 HTTP。"})

@@ -79,7 +79,8 @@ public final class YouranNetworkApi {
     }
 
     /**
-     * 在机房 {@code datacenter} 里登记一个 /128 主机，按顺序分地址。网络启动时在网络线程上调用 {@code service}。
+     * 在机房 {@code datacenter} 里登记一个 /128 主机，按顺序分地址。网络启动时在网络线程上调用 {@code service}：主机接在机房的局域网上，
+     * 先做邻居发现（重复地址检测过了、收到机房路由器的 RA 以后，开服后一两秒）再调用，所以回调里马上发包没问题；地址重复的主机不启用、不调用。
      */
     public static void registerHost(String key, String datacenter, HostService service) {
         NetworkRegistry.addHost(checkKey(key), checkHostDatacenter(datacenter), -1, service);
@@ -96,7 +97,7 @@ public final class YouranNetworkApi {
     /**
      * 在机房 {@code datacenter} 里登记一个<b>原始主机</b>（{@link RawHost}）：一个 /128，进出的都是完整的 IPv6 包，
      * 不跑协议栈。地址和普通主机一样按“模组 ID:名字”分，第一次分到以后不变。
-     * 网络启动时在网络线程上调用 {@code service}（每次开服一次）；运行时也可以用 {@link #rawHost} 拿到它。
+     * 网络启动时在网络线程上调用 {@code service}（每次开服一次；邻居发现、重复地址检测由 YouranMod 代答，过了以后才调用）；运行时也可以用 {@link #rawHost} 拿到它。
      * 原始主机上没有 YouranMod 的协议栈，跑不了默认 DNS 服务（{@code api.network.dns.DnsServer}），要给它起名字时另登记一台普通主机跑 DNS；
      * 要 HTTPS 时也要在普通主机上自己申请证书（{@code api.network.ca.CertificateClient}）。
      */
@@ -123,7 +124,7 @@ public final class YouranNetworkApi {
         NetworkRegistry.addNav(n, nav, false);
     }
 
-    /** 给维度换一种 /72 划分与路由器（不登记就用 {@link DefaultDimensionNetwork}）。维度要在配置的全局 Wi-Fi 清单里才有地址 */
+    /** 给维度换一种 /72 划分（不登记就用 {@link DefaultDimensionNetwork}；路由器都是 YouranMod 的）。维度要在配置的全局 Wi-Fi 清单里才有地址 */
     public static void registerDimensionNetwork(int dimension, DimensionNetwork network) {
         if (network == null) {
             throw new IllegalArgumentException("network 不能为 null");
