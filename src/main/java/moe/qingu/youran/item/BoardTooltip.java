@@ -13,7 +13,7 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 
 import java.util.List;
 
-/** 主板、汉卡的悬停说明：装了哪些芯片（按住 Shift 看每片的品质） */
+/** 主板、汉卡、网卡的悬停说明：装了哪些芯片（按住 Shift 看每片的品质） */
 @SideOnly(Side.CLIENT)
 final class BoardTooltip {
     private BoardTooltip() {
@@ -56,6 +56,14 @@ final class BoardTooltip {
                 for (int i = 0; i < l.tagCount(); i++) {
                     chip(l.getCompoundTagAt(i), lines);
                 }
+            }
+        }
+        if (BoardNbt.controllers(t).length > 0) {
+            ChipModel cm = BoardNbt.controllerModel(b);
+            lines.add(I18n.format(cm != null ? "youranmod.board.part.yes" : "youranmod.board.part.no",
+                    I18n.format("youranmod.chip.model." + (cm != null ? cm : BoardNbt.controllers(t)[0]).id)));
+            if (detail && cm != null) {
+                chip(b.getCompoundTag(BoardNbt.CTRL), lines);
             }
         }
         for (ChipModel m : BoardNbt.fonts(t)) {

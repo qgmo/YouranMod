@@ -51,6 +51,21 @@ class ChipModelTest {
         assertEquals(450, ChipModel.accessNs(ChipModel.ROM_MONITOR.ratedKHz));
     }
 
+    /** 网卡控制芯片（2.3.1.0 第 1 期，服主 11-27 选 A）：元数据 12，3 μm、7 层（负胶做得了，同 8088），额定时钟 20 MHz，是控制芯片不是 CPU */
+    @Test
+    void nicController() {
+        assertEquals(12, ChipModel.NIC_CTRL.meta);
+        assertSame(ChipModel.NIC_CTRL, ChipModel.byMeta(12));
+        assertSame(ChipModel.NIC_CTRL, ChipModel.byId("nic_ctrl"));
+        assertEquals(3.0, ChipModel.NIC_CTRL.nodeUm);
+        assertEquals(7, ChipModel.NIC_CTRL.layers);
+        assertEquals(20000, ChipModel.NIC_CTRL.ratedKHz);
+        assertTrue(ChipModel.NIC_CTRL.isController());
+        assertFalse(ChipModel.NIC_CTRL.isCpu());
+        assertFalse(ChipModel.NIC_CTRL.isRom());
+        assertEquals("nic_ctrl", ChipModel.NIC_CTRL.layoutId());
+    }
+
     /** 额定 150 ns ≈ 6.67 MHz */
     @Test
     void ramRatedAccessTime() {

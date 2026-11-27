@@ -66,7 +66,7 @@ public class ItemChip extends ItemModelled {
         if (tag.getBoolean(ChipNbt.SCRAPPED)) {
             lines.add(I18n.format("youranmod.chip.scrap." + tag.getString(ChipNbt.SCRAP_REASON)));
         } else {
-            if (model != null && !model.isCpu()) {
+            if (model != null && !model.isCpu() && !model.isController()) {
                 lines.add(I18n.format("youranmod.chip.max_freq_ram", mhz(tag.getInteger(ChipNbt.MAX_FREQ)),
                         ChipModel.accessNs(tag.getInteger(ChipNbt.MAX_FREQ))));
             } else {
@@ -82,7 +82,10 @@ public class ItemChip extends ItemModelled {
                     String.format(java.util.Locale.ROOT, "%.1f", Math.max(0, tag.getLong(ChipNbt.LIFETIME) - used) / 3600.0)));
         }
         ChipModel kindOf = model;
-        if (kindOf != null && !kindOf.isCpu()) {
+        if (kindOf != null && kindOf.isController()) {
+            // 控制芯片（网卡控制芯片等）：只有额定时钟，没有可调范围、存取时间
+            lines.add(I18n.format("youranmod.chip.rated_clock", mhz(kindOf.ratedKHz)));
+        } else if (kindOf != null && !kindOf.isCpu()) {
             lines.add(I18n.format("youranmod.chip.rated_access", ChipModel.accessNs(kindOf.ratedKHz), mhz(kindOf.ratedKHz)));
         } else {
             lines.add(I18n.format("youranmod.chip.freq", mhz(tag.getInteger(ChipNbt.STD_FREQ)), mhz(tag.getInteger(ChipNbt.MIN_FREQ)),

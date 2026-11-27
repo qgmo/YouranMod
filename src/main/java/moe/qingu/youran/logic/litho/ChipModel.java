@@ -48,11 +48,20 @@ public enum ChipModel {
      * 激光对准控制程序 ROM（服主 11-16）：插在个人电脑主板 ROM 槽上，对准台认它才开“激光对准”。同 BIOS ROM 那一类
      * （8 KB 掩模 ROM，HMOS 3 μm，6 层，额定存取时间 250 ns）；程序做在掩模里，出厂就是正版
      */
-    ROM_LASER_ALIGN("laser_align_rom", 11, Kind.ROM, 3.0, 6, 4000, 0, 0);
+    ROM_LASER_ALIGN("laser_align_rom", 11, Kind.ROM, 3.0, 6, 4000, 0, 0),
+    /**
+     * 网卡控制芯片（2.3.1.0 第 1 期；服主 11-27 选 A：HMOS 3 μm、7 层，负胶做得了，同 8088 一档）：个人电脑 ISA 网卡（{@code nic_pc}）上那颗，
+     * 卡上“模块”的固件（IPv6、TCP 等）就在它里面。版图参照 NE2000 上的 DP8390（寄存器不兼容：这张网没有以太网层）。
+     * 额定时钟 20 MHz（DP8390 在 NE2000 上的时钟，计划 3.1）。品质只用“最大频率 ÷ 额定频率”这一个比值，决定卡的同时连接数与缓冲区
+     * （{@code api.pcb.NicSpec}）；耐热性、寿命照样记着，这一版不用
+     */
+    NIC_CTRL("nic_ctrl", 12, Kind.CONTROLLER, 3.0, 7, 20000, 0, 0);
 
-    /** 芯片种类：CPU 有标准频率与可调范围；内存只有存取速度 */
+    /**
+     * 芯片种类：CPU 有标准频率与可调范围；内存只有存取速度；控制芯片（扩展卡上的主芯片，如网卡控制芯片）有额定时钟、没有可调范围
+     */
     public enum Kind {
-        CPU, RAM, ROM
+        CPU, RAM, ROM, CONTROLLER
     }
 
     /** 掩模、设计图、芯片 NBT 里记型号的键（字符串） */
@@ -116,6 +125,11 @@ public enum ChipModel {
 
     public boolean isCpu() {
         return kind == Kind.CPU;
+    }
+
+    /** 扩展卡上的控制芯片（悬停里显示时钟频率，不是存取时间） */
+    public boolean isController() {
+        return kind == Kind.CONTROLLER;
     }
 
     /** 频率（kHz）给人看：1 GHz 以上写 GHz，否则写 MHz，两位小数 */

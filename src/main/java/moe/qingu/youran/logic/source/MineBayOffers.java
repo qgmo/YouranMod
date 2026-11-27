@@ -15,7 +15,7 @@ import java.util.List;
  * <ul>
  *     <li>掩模：每种型号每月 {@code maskPerMonth} 套（服主：1），按月整批重置；价格按芯片档次三档（{@link Tier}）；</li>
  *     <li>芯片设计图：便宜、不限量；</li>
- *     <li>线路底片：普通电脑、个人电脑、汉卡三种，不限量；</li>
+ *     <li>线路底片：普通电脑、个人电脑、汉卡、ISA 扩展卡四种，不限量；</li>
  *     <li>正版 ROM 镜像软盘：监控程序、BIOS、激光对准控制程序，价格中等、不限量；</li>
  *     <li>工具盘：四张（服主 11-15：价格 16、24、48、12，每月 14、7、7、7，每天补）。</li>
  * </ul>
@@ -34,7 +34,10 @@ public final class MineBayOffers {
     /** 每月上限的上限（MineBay 的上限） */
     public static final int MAX_PER_MONTH = 100_000;
 
-    /** 掩模的价格档次（服主 11-16）：Z80、4164、各种 ROM、2764 最便宜；8088 中等；YR-2000 最贵 */
+    /**
+     * 掩模的价格档次（服主 11-16）：Z80、4164、各种 ROM、2764 最便宜；8088 中等；YR-2000 最贵。
+     * 网卡控制芯片按中档（服主 11-27：同 8088，3 μm、7 层）
+     */
     public enum Tier {
         LOW, MID, HIGH;
 
@@ -43,6 +46,7 @@ public final class MineBayOffers {
                 case YR2000:
                     return HIGH;
                 case I8088:
+                case NIC_CTRL:
                     return MID;
                 default:
                     return LOW;
@@ -90,7 +94,7 @@ public final class MineBayOffers {
         }
     }
 
-    /** 有线路底片的板子（{@link BoardType#circuits()}：普通电脑、个人电脑、汉卡）；家具电脑主板没有底片、光板，不卖它的底片 */
+    /** 有线路底片的板子（{@link BoardType#circuits()}：普通电脑、个人电脑、汉卡、ISA 扩展卡）；家具电脑主板没有底片、光板，不卖它的底片 */
     public static final List<BoardType> FILM_BOARDS = Collections.unmodifiableList(java.util.Arrays.asList(BoardType.circuits()));
 
     /** 工具盘的价格、每月几张（服主 11-15）：BASIC、汇编、C、Forth */
